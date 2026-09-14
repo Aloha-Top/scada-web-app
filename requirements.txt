@@ -2,3 +2,4 @@ Flask==3.0.0
 pandas==2.1.1
 folium==0.14.0
 gunicorn==21.2.0
+numpy<2.0.0
