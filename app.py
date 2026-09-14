@@ -4,11 +4,16 @@ import folium
 import json
 import hashlib
 import html
+import time
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ฟังก์ชันแยกสถานะ ---
+# --- ระบบ Cache Memory ---
+cached_map_html = None
+last_update_time = 0
+CACHE_DURATION = 300 # แคชข้อมูลไว้ 5 นาที (300 วินาที)
+
 def get_status_config(status_text):
     status_upper = str(status_text).upper()
     if 'TELEMETRY' in status_upper: return "Telemetry Failure", "gold", "wrench"
@@ -31,23 +36,29 @@ def get_status_config(status_text):
         else: return raw_parent, "lightgreen", "wrench"
     else: return "สถานะอื่นๆ", "gray", "info-circle"
 
-# --- เมื่อมีคนเข้าเว็บไซต์ (Root Route) ---
 @app.route('/')
 def index():
-    print("กำลังดึงข้อมูลจาก Google Sheets...")
-    # 1. ดึงข้อมูลตรงจาก Google Sheets แบบ Real-time (ไม่ต้องเซฟลงเครื่อง)
+    global cached_map_html, last_update_time
+    
+    # เช็คว่ามีแคชที่อายุไม่เกิน 5 นาทีหรือไม่ ถ้ามีให้ส่งแคชกลับไปเลย (โหลดเร็วมาก)
+    current_time = time.time()
+    if cached_map_html and (current_time - last_update_time < CACHE_DURATION):
+        print("ส่งข้อมูลจาก Cache (โหลดเร็ว)")
+        return cached_map_html
+
+    print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
     try:
         df = pd.read_csv(csv_export_url)
     except Exception as e:
-        return f"<h1>เกิดข้อผิดพลาดในการดึงข้อมูล: {e}</h1>"
+        if cached_map_html: return cached_map_html # ถ้าเน็ตหลุด ให้ส่งแผนที่เก่าแทน
+        return f"<h1>เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}</h1>"
 
     status_hash_map = {}
     def get_hash(text):
-        if text not in status_hash_map:
-            status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
+        if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
         return status_hash_map[text]
 
     def get_actual_col_name(df_columns, keywords, exclude=None):
@@ -57,7 +68,6 @@ def index():
                 return col
         return None
 
-    # 2. สร้างแผนที่ตั้งต้น
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
     folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
@@ -68,11 +78,10 @@ def index():
 
     raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
     hex_color_map = {'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 'green': '#72b026', 'lightgreen': '#82c91e', 'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 'beige': '#f5c07f', 'gold': '#ffc107'}
-    
     display_fields = [("รหัสสั่งการ", ["รหัสสั่งการ"], []), ("สถานที่", ["สถานที่"], []), ("State SCADA", ["state scada"], ["หลัง"]), ("State SCADA (หลังตรวจสอบ)", ["state scada", "หลัง"], []), ("ชนิดอุปกรณ์", ["ชนิดอุปกรณ์"], []), ("รายละเอียดการแก้ไขข้อขัดข้อง", ["รายละเอียด", "การแก้ไข"], ["เข้า"]), ("รายละเอียดการเข้าแก้ไข", ["รายละเอียด", "การเข้าแก้ไข"], []), ("LAT/LONG", ["lat", "long"], []), ("รอ ผอส. เข้าแก้ไข", ["รอ ผอส"], []), ("รอ ผบอ. เข้าแก้ไข", ["รอ ผบอ"], []), ("การไฟฟ้า", ["การไฟฟ้า"], []), ("วันที่เข้าตรวจสอบ", ["วันที่เข้าตรวจสอบ"], [])]
 
     processed_nodes, status_counts, parent_counts = [], {}, {k: 0 for k in raw_parent_keys.keys()}
-    skipped_count, seen_coords = 0, {}
+    seen_coords = {}
 
     google_svg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="white" style="margin-right:6px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>'
     apple_svg = '<svg viewBox="0 0 384 512" style="width: 13px; height: auto; margin-right: 6px; margin-bottom: 2px;" fill="white"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.3 48.6-.7 90.4-84.3 103-119.3-34.6-18.6-53.6-45.9-52.7-81.5zM266.4 87.8C282.5 67 292.7 39.2 292.7 11.5c0-3.3-.2-5.5-.6-7.8-33.1 1.4-62.7 20-80.8 42.1-15 18.5-26.4 46.1-24.9 71.6 3.3.4 5.5.6 7.8.6 30.5-.3 57.7-18.7 71.6-40.2z"/></svg>'
@@ -81,8 +90,7 @@ def index():
         lat_col = get_actual_col_name(df.columns, ["lat", "long"])
         lat_lng_str = str(row[lat_col]) if lat_col and pd.notna(row[lat_col]) else ''
         if not lat_lng_str or ',' not in lat_lng_str: continue
-        try:
-            lat, lon = float(lat_lng_str.split(',')[0].strip()), float(lat_lng_str.split(',')[1].strip())
+        try: lat, lon = float(lat_lng_str.split(',')[0].strip()), float(lat_lng_str.split(',')[1].strip())
         except ValueError: continue
 
         coord_key = (round(lat, 5), round(lon, 5)) 
@@ -103,7 +111,6 @@ def index():
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
         parent_counts[raw_parent] += 1
-
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
     grouped_layers = {f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[k][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{k}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[k][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[k]})</span></span>": [] for k in raw_parent_keys.keys() if parent_counts[k] > 0}
@@ -176,7 +183,6 @@ def index():
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
     GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
 
-    # --- 3. ใส่ UI JavaScript / CSS ทั้งหมด ---
     search_json = json.dumps(search_data, ensure_ascii=False)
     export_json = json.dumps(export_data_list, ensure_ascii=False)
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
@@ -593,7 +599,6 @@ def index():
                         }} 
                     }}
                     res.style.display = 'none'; 
-                    // ลบคำสั่ง inp.value = m.id ออก เพื่อไม่ให้คำค้นหาหาย
                 }};
                 res.appendChild(div);
             }});
@@ -609,9 +614,11 @@ def index():
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
     
-    # แทนที่จะ save เป็นไฟล์ เราจะส่งคืน (return) HTML ให้คนเปิดเว็บเลย
-    return m.get_root().render()
+    # 3. อัปเดตข้อมูลแคชก่อนส่งผลลัพธ์
+    cached_map_html = m.get_root().render()
+    last_update_time = current_time
+    
+    return cached_map_html
 
-# --- คำสั่งเริ่ม Server (รันในเครื่องตัวเองทดสอบได้เลย) ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
