@@ -6,16 +6,24 @@ import hashlib
 import html
 import time
 import threading
+import os
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache & World-Class Auto Update ---
-CACHE_TIME = 300 # แคชข้อมูลไว้ 5 นาที
-cached_map_html = None
-last_update_time = 0
-is_updating = False
-map_version = 1 # ตัวเลขบอกเวอร์ชันแผนที่
+# --- ระบบ Cache แบบ File-Based (ป้องกันปัญหา Server พนักงานหลายคน) ---
+CACHE_HTML_FILE = 'scada_cache.html'
+CACHE_META_FILE = 'scada_meta.json'
+LOCK_FILE = 'updating.lock'
+CACHE_DURATION = 300 # อัปเดตทุก 5 นาที
+
+def get_meta():
+    """อ่านเวอร์ชันล่าสุดจากไฟล์ เพื่อให้พนักงานทุกคนเข้าใจตรงกัน"""
+    try:
+        with open(CACHE_META_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {'version': 0, 'last_update': 0}
 
 def get_status_config(status_text):
     status_upper = str(status_text).upper()
@@ -174,7 +182,16 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    active_grouped_layers = {k: v for k, v in grouped_layers.items() if len(v) > 0}
+    # =========================================================================
+    # [ส่วนที่แก้ไข 1] ระบบจัดเรียงลำดับชั้นของ Layer (สลับ Connecting ขึ้นบน)
+    # =========================================================================
+    active_grouped_layers = {}
+    for p_html, mc_list in grouped_layers.items():
+        if len(mc_list) > 0:
+            # เรียงลำดับจากความยาวชื่อ ทำให้ข้อความสั้นๆ อย่าง "Connecting" โดนดึงขึ้นมาอยู่บนสุดเสมอ
+            mc_list.sort(key=lambda mc: (len(mc.name), mc.name))
+            active_grouped_layers[p_html] = mc_list
+
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
     GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
 
@@ -608,7 +625,6 @@ def generate_map():
 
     /* ========================================================
        ระบบ World-Class Auto-Update (ทำงานร่วมกับ Backend) 
-       (อัปเดต: ป้องกัน Browser Cache 100%)
        ======================================================== */
     var currentDataVersion = null;
 
@@ -618,7 +634,7 @@ def generate_map():
             .then(response => response.json())
             .then(data => {{
                 if (currentDataVersion === null) {{
-                    currentDataVersion = data.version; // จดจำเวอร์ชันแรกตอนเปิดเว็บ
+                    currentDataVersion = data.version; 
                 }} else if (data.version > currentDataVersion) {{
                     console.log("พบข้อมูลใหม่จาก SCADA! กำลังอัปเดตหน้าจอ...");
                     performSeamlessReload();
@@ -630,13 +646,12 @@ def generate_map():
         var map = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
         if (map) {{
-            // จดจำตำแหน่งปัจจุบันที่ผู้ใช้กำลังดูอยู่
             var center = map.getCenter();
             sessionStorage.setItem('scada_saved_lat', center.lat);
             sessionStorage.setItem('scada_saved_lng', center.lng);
             sessionStorage.setItem('scada_saved_zoom', map.getZoom());
         }}
-        // บังคับโหลดหน้าใหม่โดยหลีกเลี่ยง Cache
+        // รีโหลดหน้าจอแบบบังคับ
         window.location.href = window.location.pathname + '?v=' + new Date().getTime();
     }}
 
@@ -644,7 +659,7 @@ def generate_map():
         var map = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
         if (map) {{
-            // ทันทีที่โหลดเสร็จ ให้ดีดตัวกลับมาที่ตำแหน่งเดิมเป๊ะๆ
+            // ดีดตัวกลับมาที่ตำแหน่งเดิม
             var sLat = sessionStorage.getItem('scada_saved_lat');
             var sLng = sessionStorage.getItem('scada_saved_lng');
             var sZoom = sessionStorage.getItem('scada_saved_zoom');
@@ -657,7 +672,7 @@ def generate_map():
             }}
         }}
         
-        // เริ่มส่งบอทจิ๋วไปกระซิบถามหลังบ้านทุกๆ 30 วินาที
+        // เช็คเวอร์ชันทุกๆ 30 วินาที
         setInterval(checkServerForUpdate, 30000);
         checkServerForUpdate();
     }}, 800);
@@ -667,48 +682,63 @@ def generate_map():
     return m.get_root().render()
 
 def background_task():
-    """พนักงานหลังร้าน: แอบดึงข้อมูลและวาดแผนที่ใบใหม่แบบเงียบๆ"""
-    global cached_map_html, last_update_time, is_updating, map_version
+    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์ให้ทุกคนอ่าน"""
     try:
-        new_map = generate_map() # สั่งไปวาดแผนที่
-        cached_map_html = new_map # เอาแผนที่ใหม่มาแปะทับของเก่า
-        last_update_time = time.time()
-        map_version += 1 # อัปเดตเวอร์ชันให้รู้ว่ามีของใหม่แล้ว!
-        print(f"อัปเดตแผนที่เบื้องหลังเสร็จสมบูรณ์! (เวอร์ชัน {map_version})")
+        print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
+        new_html = generate_map()
+        
+        # บันทึกไฟล์แผนที่ HTML
+        with open(CACHE_HTML_FILE, 'w', encoding='utf-8') as f:
+            f.write(new_html)
+            
+        # บันทึกตัวเลขเวอร์ชัน (บวก 1 จากของเดิม)
+        meta = get_meta()
+        new_version = meta['version'] + 1
+        with open(CACHE_META_FILE, 'w') as f:
+            json.dump({'version': new_version, 'last_update': time.time()}, f)
+            
+        print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
     finally:
-        is_updating = False
+        # ปลดล็อกให้รอบถัดไปทำงานได้
+        if os.path.exists(LOCK_FILE):
+            try: os.remove(LOCK_FILE)
+            except: pass
+
+def trigger_update_if_needed():
+    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงานถ้าถึงเวลา"""
+    meta = get_meta()
+    if time.time() - meta['last_update'] > CACHE_DURATION:
+        # เช็คว่ามีคนกำลังดึงข้อมูลอยู่ไหม (ถ้าค้างเกิน 5 นาทีให้ลบทิ้งทลายกำแพง)
+        if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
+            try: os.remove(LOCK_FILE)
+            except: pass
+            
+        if not os.path.exists(LOCK_FILE):
+            try:
+                open(LOCK_FILE, 'w').close()
+                threading.Thread(target=background_task).start()
+            except:
+                pass
 
 @app.route('/api/version')
 def api_version():
-    """ช่องทางสำหรับเช็คว่ามีแผนที่เวอร์ชันใหม่หรือยัง"""
-    global last_update_time, is_updating, map_version
-    current_time = time.time()
-    
-    # ถ้าครบ 5 นาทีแล้ว ให้สั่งพนักงานหลังร้านไปทำงาน
-    if current_time - last_update_time > CACHE_TIME:
-        if not is_updating:
-            is_updating = True
-            threading.Thread(target=background_task).start()
-            
-    # ตอบกลับไปว่าตอนนี้แผนที่เวอร์ชันอะไร
-    return jsonify({"version": map_version})
+    """ช่องทางสำหรับให้บอทจากหน้าเว็บแวะมาถามเวอร์ชัน"""
+    trigger_update_if_needed()
+    meta = get_meta()
+    return jsonify({"version": meta['version']})
 
 @app.route('/')
 def index():
-    """หน้าร้านหลัก แสดงผลแผนที่เต็มจอทันที"""
-    global cached_map_html, last_update_time, is_updating
+    """ส่งแผนที่หน้าจอหลักให้คนที่กดเข้าเว็บ"""
+    trigger_update_if_needed()
     
-    # ถ้าเพิ่งเปิดเซิร์ฟเวอร์ครั้งแรก ยังไม่มีแผนที่
-    if cached_map_html is None:
-        if not is_updating:
-            is_updating = True
-            threading.Thread(target=background_task).start()
+    try:
+        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
         return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะโหลดหน้าเว็บอัตโนมัติในไม่ช้า</h2><script>setTimeout(()=>window.location.reload(), 5000);</script>", 503
-        
-    # ส่งแผนที่ฉบับล่าสุดให้ทันที
-    return cached_map_html
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
