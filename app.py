@@ -11,14 +11,14 @@ from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache แบบ File-Based (เสถียรบน Render) ---
+# --- ระบบ Cache แบบ File-Based ---
 CACHE_HTML_FILE = '/tmp/scada_cache.html'
 CACHE_META_FILE = '/tmp/scada_meta.json'
 LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตทุก 5 นาที
 
 def get_meta():
-    """อ่านเวอร์ชันล่าสุดจากไฟล์ เพื่อให้พนักงานทุกคนเข้าใจตรงกัน"""
+    """อ่านเวอร์ชันล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -619,70 +619,15 @@ def generate_map():
     inp.addEventListener('click', handleSearchFocus); 
     inp.addEventListener('blur', function() {{ box.classList.remove('focus'); setTimeout(function(){{ res.style.display = 'none'; }}, 200); }});
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
-
-    /* ========================================================
-       ระบบ Fast Reload แบบไร้รอยต่อ (จำพิกัดเดิม + อัปเดตไว)
-       ======================================================== */
-    var currentDataVersion = null;
-
-    function checkServerForUpdate() {{
-        fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
-            .then(response => response.json())
-            .then(data => {{
-                if (currentDataVersion === null) {{
-                    currentDataVersion = data.version; 
-                }} else if (data.version > currentDataVersion) {{
-                    console.log("พบข้อมูลใหม่จาก SCADA! กำลังอัปเดตหน้าจอ...");
-                    performSeamlessReload();
-                }}
-            }}).catch(e => console.log("Check update error:", e));
-    }}
-
-    function performSeamlessReload() {{
-        var map = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
-        if (map) {{
-            // จดจำพิกัดปัจจุบันก่อนกดปุ่มรีเฟรชออโต้
-            var center = map.getCenter();
-            sessionStorage.setItem('scada_saved_lat', center.lat);
-            sessionStorage.setItem('scada_saved_lng', center.lng);
-            sessionStorage.setItem('scada_saved_zoom', map.getZoom());
-        }}
-        window.location.href = window.location.pathname + '?v=' + new Date().getTime();
-    }}
-
-    setTimeout(function() {{
-        var map = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
-        if (map) {{
-            // ดีดตัวกลับมาที่ตำแหน่งเดิมทันทีที่โหลดเสร็จ
-            var sLat = sessionStorage.getItem('scada_saved_lat');
-            var sLng = sessionStorage.getItem('scada_saved_lng');
-            var sZoom = sessionStorage.getItem('scada_saved_zoom');
-            
-            if (sLat && sLng && sZoom) {{
-                map.setView([parseFloat(sLat), parseFloat(sLng)], parseInt(sZoom), {{animate: false}});
-                sessionStorage.removeItem('scada_saved_lat');
-                sessionStorage.removeItem('scada_saved_lng');
-                sessionStorage.removeItem('scada_saved_zoom');
-            }}
-        }}
-        
-        // ส่งบอทจิ๋วไปถามหลังบ้านทุกๆ 30 วินาที
-        setInterval(checkServerForUpdate, 30000);
-        checkServerForUpdate();
-    }}, 800);
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
     return m.get_root().render()
 
 def background_task():
-    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์ให้ทุกคนอ่าน"""
+    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์"""
     try:
-        print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
         new_html = generate_map()
-        
         with open(CACHE_HTML_FILE, 'w', encoding='utf-8') as f:
             f.write(new_html)
             
@@ -691,7 +636,6 @@ def background_task():
         with open(CACHE_META_FILE, 'w') as f:
             json.dump({'version': new_version, 'last_update': time.time()}, f)
             
-        print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
     finally:
@@ -700,7 +644,7 @@ def background_task():
             except: pass
 
 def trigger_update_if_needed():
-    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงานถ้าถึงเวลา"""
+    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงาน"""
     meta = get_meta()
     if time.time() - meta['last_update'] > CACHE_DURATION:
         if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
@@ -711,26 +655,129 @@ def trigger_update_if_needed():
             try:
                 open(LOCK_FILE, 'w').close()
                 threading.Thread(target=background_task).start()
-            except:
-                pass
+            except: pass
+
+@app.route('/map-data')
+def map_data():
+    """ส่งข้อมูลแผนที่เพียวๆ เพื่อนำไปใส่ในกรอบสลับฉาก"""
+    try:
+        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        return "<h2 style='text-align:center; margin-top:20%; color:white; font-family:sans-serif;'>ระบบกำลังเตรียมข้อมูล...</h2>", 503
 
 @app.route('/api/version')
 def api_version():
-    """ช่องทางสำหรับให้บอทกระซิบถามเวอร์ชัน (ดึงตรงนี้บอท Cronjob จะไม่แจ้งเตือนส้มแล้ว)"""
+    """บอทกระซิบถามเวอร์ชัน (เบามาก ใช้เน็ตแค่ 15 Bytes)"""
     trigger_update_if_needed()
     meta = get_meta()
     return jsonify({"version": meta['version']})
 
 @app.route('/')
 def index():
-    """ส่งแผนที่หน้าจอหลัก (โหลดตรงทันที ไม่ต้องมี Iframe ไม่ต้องมีจอดำ)"""
+    """หน้าร้านหลัก แสดงผลแผนที่แบบสลับฉากหลังเวที (Crossfade)"""
     trigger_update_if_needed()
     
-    try:
-        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
-            return f.read()
-    except:
+    if not os.path.exists(CACHE_HTML_FILE):
         return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะโหลดหน้าเว็บอัตโนมัติในไม่ช้า</h2><script>setTimeout(()=>window.location.reload(), 5000);</script>", 503
+
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>SCADA Map Dashboard</title>
+        <style>
+            body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #282a2d; }
+            .map-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; transition: opacity 0.8s ease-in-out; }
+            #layer1 { z-index: 2; opacity: 1; }
+            #layer2 { z-index: 1; opacity: 0; }
+        </style>
+    </head>
+    <body>
+        <!-- ซ้อนจอ 2 ชั้น ไร้หน้าโหลดกวนใจ -->
+        <iframe id="layer1" class="map-layer" src="/map-data?v=init"></iframe>
+        <iframe id="layer2" class="map-layer" src="about:blank"></iframe>
+
+        <script>
+            let activeLayer = 1;
+            let currentVersion = null;
+
+            function getMap(iframe) {
+                try {
+                    let win = iframe.contentWindow;
+                    for (let key in win) {
+                        if (key.startsWith('map_')) return win[key];
+                    }
+                } catch(e) {}
+                return null;
+            }
+
+            function checkServerForUpdate() {
+                fetch('/api/version?t=' + Date.now(), { cache: 'no-store' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (currentVersion === null) {
+                            currentVersion = data.version;
+                        } else if (data.version > currentVersion) {
+                            console.log("🔥 พบข้อมูลใหม่! แอบโหลดแผนที่หลังเวที...");
+                            currentVersion = data.version; 
+                            swapMap();
+                        }
+                    }).catch(e => console.log(e));
+            }
+
+            function swapMap() {
+                let activeIframe = document.getElementById('layer' + activeLayer);
+                let nextLayerNum = activeLayer === 1 ? 2 : 1;
+                let nextIframe = document.getElementById('layer' + nextLayerNum);
+
+                // โหลดข้อมูลใส่แผ่นหลังเวทีเงียบๆ
+                nextIframe.src = '/map-data?v=' + currentVersion + '&t=' + Date.now();
+                
+                nextIframe.onload = function() {
+                    // รอเสี้ยววินาทีให้แผนที่วาดตัวมันเองเสร็จชัวร์ๆ
+                    let checkMapReady = setInterval(() => {
+                        let currentMap = getMap(activeIframe);
+                        let nextMap = getMap(nextIframe);
+                        
+                        if (nextMap) {
+                            clearInterval(checkMapReady);
+                            
+                            // ก๊อปปี้ตำแหน่งซูม/พิกัด ให้ตรงกันเป๊ะ
+                            if (currentMap) {
+                                nextMap.setView(currentMap.getCenter(), currentMap.getZoom(), {animate: false});
+                            }
+
+                            // สลับการแสดงผลแบบ Crossfade เนียนๆ
+                            nextIframe.style.zIndex = 2;
+                            nextIframe.style.opacity = 1;
+                            
+                            activeIframe.style.zIndex = 1;
+                            activeIframe.style.opacity = 0;
+                            
+                            activeLayer = nextLayerNum;
+
+                            // คืนพื้นที่ RAM หลังสลับฉากเสร็จ
+                            setTimeout(() => {
+                                activeIframe.src = 'about:blank'; 
+                            }, 2000);
+                        }
+                    }, 100);
+                    
+                    // ป้องกันลูปค้าง
+                    setTimeout(() => clearInterval(checkMapReady), 5000);
+                };
+            }
+
+            // ตั้งเวลาแอบกระซิบถามเซิร์ฟเวอร์ทุกๆ 15 วินาที
+            setInterval(checkServerForUpdate, 15000); 
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
