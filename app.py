@@ -11,14 +11,14 @@ from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache แบบ File-Based (ย้ายไปไว้ที่ /tmp/ เพื่อความเสถียรบน Render) ---
+# --- ระบบ Cache แบบ File-Based ---
 CACHE_HTML_FILE = '/tmp/scada_cache.html'
 CACHE_META_FILE = '/tmp/scada_meta.json'
 LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตทุก 5 นาที
 
 def get_meta():
-    """อ่านเวอร์ชันล่าสุดจากไฟล์ เพื่อให้พนักงานทุกคนเข้าใจตรงกัน"""
+    """อ่านเวอร์ชันล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -131,7 +131,6 @@ def generate_map():
             custom_cluster_js = f"function(c) {{ var count = c.getChildCount(); return new L.DivIcon({{ html: '<div class=\"map-cluster-inner {safe_status} {safe_parent}\" style=\"background-color: {h_color}; color: white; border-radius: 50%; width: 44px; height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Prompt, sans-serif; font-weight: 600; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.7); transition: all 0.3s ease;\"><i class=\"fa fa-{icon_name}\" style=\"font-size: 12px; margin-bottom: 2px;\"></i><span style=\"font-size: 13px; line-height: 1;\">' + count + '</span></div>', className: 'custom-cluster-marker', iconSize: new L.Point(44, 44), iconAnchor: new L.Point(22, 22) }}); }}"
             mc = MarkerCluster(name=layer_name, show=True, icon_create_function=custom_cluster_js, control=False, options={'disableClusteringAtZoom': 17, 'maxClusterRadius': 35, 'chunkedLoading': True})
             m.add_child(mc); mc_groups[active_status] = mc
-            # [แก้ไข] เก็บ active_status คู่กับ mc ไว้เพื่อใช้เรียงลำดับได้อย่างปลอดภัย
             grouped_layers[p_html].append((active_status, mc))
         
         target_group, table_rows = mc_groups[active_status], ""
@@ -184,15 +183,10 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # =========================================================================
-    # [แก้ไข] ระบบจัดเรียงลำดับชั้นของ Layer อย่างปลอดภัย 100%
-    # =========================================================================
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
-            # Sort จากข้อความสถานะ (x[0]) เรียงจากสั้นไปยาว เช่น "Connecting" โดนดึงขึ้นมาอยู่บนสุด
             items_list.sort(key=lambda x: (len(x[0]), x[0]))
-            # แยกร่างเอาเฉพาะตัว Layer (x[1]) กลับมาส่งให้ระบบ
             active_grouped_layers[p_html] = [x[1] for x in items_list]
 
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
@@ -625,59 +619,6 @@ def generate_map():
     inp.addEventListener('click', handleSearchFocus); 
     inp.addEventListener('blur', function() {{ box.classList.remove('focus'); setTimeout(function(){{ res.style.display = 'none'; }}, 200); }});
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
-
-    /* ========================================================
-       ระบบ World-Class Auto-Update (ทำงานร่วมกับ Backend) 
-       ======================================================== */
-    var currentDataVersion = null;
-
-    function checkServerForUpdate() {{
-        // บังคับไม่ให้แคชคำตอบ
-        fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
-            .then(response => response.json())
-            .then(data => {{
-                if (currentDataVersion === null) {{
-                    currentDataVersion = data.version; 
-                }} else if (data.version > currentDataVersion) {{
-                    console.log("พบข้อมูลใหม่จาก SCADA! กำลังอัปเดตหน้าจอ...");
-                    performSeamlessReload();
-                }}
-            }}).catch(e => console.log("Check update error:", e));
-    }}
-
-    function performSeamlessReload() {{
-        var map = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
-        if (map) {{
-            var center = map.getCenter();
-            sessionStorage.setItem('scada_saved_lat', center.lat);
-            sessionStorage.setItem('scada_saved_lng', center.lng);
-            sessionStorage.setItem('scada_saved_zoom', map.getZoom());
-        }}
-        window.location.href = window.location.pathname + '?v=' + new Date().getTime();
-    }}
-
-    setTimeout(function() {{
-        var map = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
-        if (map) {{
-            // ดีดตัวกลับมาที่ตำแหน่งเดิม
-            var sLat = sessionStorage.getItem('scada_saved_lat');
-            var sLng = sessionStorage.getItem('scada_saved_lng');
-            var sZoom = sessionStorage.getItem('scada_saved_zoom');
-            
-            if (sLat && sLng && sZoom) {{
-                map.setView([parseFloat(sLat), parseFloat(sLng)], parseInt(sZoom), {{animate: false}});
-                sessionStorage.removeItem('scada_saved_lat');
-                sessionStorage.removeItem('scada_saved_lng');
-                sessionStorage.removeItem('scada_saved_zoom');
-            }}
-        }}
-        
-        // เช็คเวอร์ชันทุกๆ 30 วินาที
-        setInterval(checkServerForUpdate, 30000);
-        checkServerForUpdate();
-    }}, 800);
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
@@ -686,14 +627,10 @@ def generate_map():
 def background_task():
     """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์ให้ทุกคนอ่าน"""
     try:
-        print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
         new_html = generate_map()
-        
-        # บันทึกไฟล์แผนที่ HTML
         with open(CACHE_HTML_FILE, 'w', encoding='utf-8') as f:
             f.write(new_html)
             
-        # บันทึกตัวเลขเวอร์ชัน (บวก 1 จากของเดิม)
         meta = get_meta()
         new_version = meta['version'] + 1
         with open(CACHE_META_FILE, 'w') as f:
@@ -703,7 +640,6 @@ def background_task():
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
     finally:
-        # ปลดล็อกให้รอบถัดไปทำงานได้
         if os.path.exists(LOCK_FILE):
             try: os.remove(LOCK_FILE)
             except: pass
@@ -712,7 +648,6 @@ def trigger_update_if_needed():
     """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงานถ้าถึงเวลา"""
     meta = get_meta()
     if time.time() - meta['last_update'] > CACHE_DURATION:
-        # เช็คว่ามีคนกำลังดึงข้อมูลอยู่ไหม (ถ้าค้างเกิน 5 นาทีให้ลบทิ้งทลายกำแพง)
         if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
             try: os.remove(LOCK_FILE)
             except: pass
@@ -721,26 +656,137 @@ def trigger_update_if_needed():
             try:
                 open(LOCK_FILE, 'w').close()
                 threading.Thread(target=background_task).start()
-            except:
-                pass
+            except: pass
+
+@app.route('/map-data')
+def map_data():
+    """ปล่อยข้อมูลแผนที่เพียวๆ (สำหรับเอาไปใส่กรอบสลับฉาก)"""
+    try:
+        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        return "<h2 style='text-align:center; margin-top:20%; color:white; font-family:sans-serif;'>กำลังโหลด...</h2>", 503
 
 @app.route('/api/version')
 def api_version():
-    """ช่องทางสำหรับให้บอทจากหน้าเว็บแวะมาถามเวอร์ชัน"""
+    """ช่องทางสำหรับให้บอทกระซิบถามเวอร์ชัน (เบามาก ใช้เน็ตแค่ 15 Bytes)"""
     trigger_update_if_needed()
     meta = get_meta()
     return jsonify({"version": meta['version']})
 
 @app.route('/')
 def index():
-    """ส่งแผนที่หน้าจอหลักให้คนที่กดเข้าเว็บ"""
+    """หน้าร้านหลัก แสดงผลแผนที่เต็มจอแบบ Double-Buffering (ไร้รอยต่อ 100%)"""
     trigger_update_if_needed()
     
-    try:
-        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
-            return f.read()
-    except:
+    # ถ้าเพิ่งรันเซิร์ฟเวอร์ ยังไม่มีไฟล์แคชเลย ให้โชว์หน้าโหลด
+    if not os.path.exists(CACHE_HTML_FILE):
         return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะโหลดหน้าเว็บอัตโนมัติในไม่ช้า</h2><script>setTimeout(()=>window.location.reload(), 5000);</script>", 503
+
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>SCADA Map Dashboard</title>
+        <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+        <style>
+            body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #282a2d; font-family: 'Prompt', sans-serif; }
+            .map-frame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; transition: opacity 0.6s ease-in-out; }
+            #frameA { z-index: 2; opacity: 1; }
+            #frameB { z-index: 1; opacity: 0; }
+            .loading-overlay { position: absolute; z-index: 9999; top: 0; left: 0; width: 100%; height: 100%; background: #282a2d; display: flex; justify-content: center; align-items: center; color: white; transition: opacity 0.5s; pointer-events: none; }
+        </style>
+    </head>
+    <body>
+        <div id="loader" class="loading-overlay"><h2>กำลังเชื่อมต่อระบบ SCADA...</h2></div>
+        
+        <!-- กระดาษวาดแผนที่ 2 แผ่น สำหรับสลับฉาก -->
+        <iframe id="frameA" class="map-frame" src="/map-data?v=init"></iframe>
+        <iframe id="frameB" class="map-frame" src="about:blank"></iframe>
+
+        <script>
+            let currentDataVersion = null;
+            let activeFrame = 'A';
+            
+            function getMapInstance(iframe) {
+                try {
+                    let win = iframe.contentWindow;
+                    for (let key in win) {
+                        if (key.startsWith('map_')) return win[key];
+                    }
+                } catch(e) {}
+                return null;
+            }
+
+            // ซ่อนหน้าจอโหลดเมื่อกระดาษแผ่นแรกวาดเสร็จ
+            document.getElementById('frameA').onload = function() {
+                let loader = document.getElementById('loader');
+                if(loader) {
+                    loader.style.opacity = 0;
+                    setTimeout(() => loader.style.display = 'none', 500);
+                }
+            };
+
+            function checkServerForUpdate() {
+                fetch('/api/version?t=' + new Date().getTime(), { cache: 'no-store' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (currentDataVersion === null) {
+                            currentDataVersion = data.version;
+                        } else if (data.version > currentDataVersion) {
+                            console.log("🔥 พบข้อมูลใหม่เวอร์ชัน " + data.version + " แอบโหลดแผนที่หลังฉาก...");
+                            currentDataVersion = data.version; 
+                            loadNewMap(data.version);
+                        }
+                    }).catch(e => console.log(e));
+            }
+
+            function loadNewMap(version) {
+                let nextFrameId = activeFrame === 'A' ? 'frameB' : 'frameA';
+                let currentFrameId = activeFrame === 'A' ? 'frameA' : 'frameB';
+                let nextFrame = document.getElementById(nextFrameId);
+                let currentFrame = document.getElementById(currentFrameId);
+
+                // โหลดข้อมูลใส่ Frame ที่ซ่อนอยู่หลังจอ
+                nextFrame.src = '/map-data?v=' + version + '&t=' + new Date().getTime();
+                
+                nextFrame.onload = function() {
+                    let currentMap = getMapInstance(currentFrame);
+                    let nextMap = getMapInstance(nextFrame);
+                    
+                    // ก๊อปปี้ตำแหน่งซูม/พิกัด ให้ตรงกันเป๊ะ
+                    if (currentMap && nextMap) {
+                        let center = currentMap.getCenter();
+                        let zoom = currentMap.getZoom();
+                        nextMap.setView(center, zoom, {animate: false});
+                    }
+
+                    // สลับการแสดงผลแบบ Crossfade (เฟดสลับหน้า)
+                    nextFrame.style.zIndex = 2;
+                    nextFrame.style.opacity = 1;
+                    
+                    currentFrame.style.zIndex = 1;
+                    currentFrame.style.opacity = 0;
+                    
+                    // ล้างข้อมูล iframe เก่าทิ้งเพื่อคืนพื้นที่ RAM (เซิร์ฟเวอร์ฟรีจะได้ไม่ล่ม)
+                    setTimeout(() => {
+                        currentFrame.src = 'about:blank'; 
+                    }, 1000);
+
+                    activeFrame = activeFrame === 'A' ? 'B' : 'A';
+                    console.log("✅ สลับหน้าจอแผนที่เป็นข้อมูลล่าสุด ไร้รอยต่อสำเร็จ!");
+                };
+            }
+
+            // ตั้งเวลาแอบกระซิบถามเซิร์ฟเวอร์ทุกๆ 15 วินาที
+            setInterval(checkServerForUpdate, 15000); 
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
