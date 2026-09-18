@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import pandas as pd
 import folium
 import json
@@ -607,42 +607,44 @@ def generate_map():
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
 
     /* ========================================================
-       ระบบ World-Class Auto-Update (ทำงานร่วมกับ Backend)
+       ระบบ World-Class Auto-Update (ทำงานร่วมกับ Backend) 
+       (อัปเดต: ป้องกัน Browser Cache 100%)
        ======================================================== */
     var currentDataVersion = null;
 
     function checkServerForUpdate() {{
-        fetch('/api/version')
+        // ใส่ ?t=... ท้ายลิงก์ เพื่อบังคับให้เบราว์เซอร์วิ่งไปถามเซิร์ฟเวอร์ใหม่ทุกครั้ง
+        fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
             .then(response => response.json())
             .then(data => {{
                 if (currentDataVersion === null) {{
                     currentDataVersion = data.version; // จดจำเวอร์ชันแรกตอนเปิดเว็บ
                 }} else if (data.version > currentDataVersion) {{
-                    console.log("พบข้อมูลใหม่จาก SCADA! กำลังอัปเดตหน้าจอแบบไร้รอยต่อ...");
+                    console.log("พบข้อมูลใหม่จาก SCADA! กำลังอัปเดตหน้าจอ...");
                     performSeamlessReload();
                 }}
-            }}).catch(e => console.log(e));
+            }}).catch(e => console.log("Check update error:", e));
     }}
 
     function performSeamlessReload() {{
         var map = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
         if (map) {{
-            // 1. จดจำตำแหน่งปัจจุบันที่ผู้ใช้กำลังดูอยู่
+            // จดจำตำแหน่งปัจจุบันที่ผู้ใช้กำลังดูอยู่
             var center = map.getCenter();
             sessionStorage.setItem('scada_saved_lat', center.lat);
             sessionStorage.setItem('scada_saved_lng', center.lng);
             sessionStorage.setItem('scada_saved_zoom', map.getZoom());
         }}
-        // 2. รีโหลดหน้าเพื่อดึงข้อมูลใหม่
-        window.location.reload();
+        // บังคับโหลดหน้าใหม่โดยหลีกเลี่ยง Cache
+        window.location.href = window.location.pathname + '?v=' + new Date().getTime();
     }}
 
     setTimeout(function() {{
         var map = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ map = window[key]; break; }} }}
         if (map) {{
-            // 3. ทันทีที่โหลดเสร็จ ให้ดีดตัวกลับมาที่ตำแหน่งเดิมเป๊ะๆ
+            // ทันทีที่โหลดเสร็จ ให้ดีดตัวกลับมาที่ตำแหน่งเดิมเป๊ะๆ
             var sLat = sessionStorage.getItem('scada_saved_lat');
             var sLng = sessionStorage.getItem('scada_saved_lng');
             var sZoom = sessionStorage.getItem('scada_saved_zoom');
@@ -655,7 +657,7 @@ def generate_map():
             }}
         }}
         
-        // 4. เริ่มส่งบอทจิ๋วไปกระซิบถามหลังบ้านทุกๆ 30 วินาที
+        // เริ่มส่งบอทจิ๋วไปกระซิบถามหลังบ้านทุกๆ 30 วินาที
         setInterval(checkServerForUpdate, 30000);
         checkServerForUpdate();
     }}, 800);
@@ -680,7 +682,7 @@ def background_task():
 
 @app.route('/api/version')
 def api_version():
-    """ช่องทางใหม่! สำหรับรับสายกระซิบจากหน้าเว็บ และ Cron-job"""
+    """ช่องทางสำหรับเช็คว่ามีแผนที่เวอร์ชันใหม่หรือยัง"""
     global last_update_time, is_updating, map_version
     current_time = time.time()
     
@@ -690,7 +692,7 @@ def api_version():
             is_updating = True
             threading.Thread(target=background_task).start()
             
-    # ตอบกลับไปว่าตอนนี้แผนที่เวอร์ชันอะไร (ใช้เน็ตแค่ 15 bytes!)
+    # ตอบกลับไปว่าตอนนี้แผนที่เวอร์ชันอะไร
     return jsonify({"version": map_version})
 
 @app.route('/')
