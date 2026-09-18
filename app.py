@@ -11,10 +11,10 @@ from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache แบบ File-Based (ป้องกันปัญหา Server พนักงานหลายคน) ---
-CACHE_HTML_FILE = 'scada_cache.html'
-CACHE_META_FILE = 'scada_meta.json'
-LOCK_FILE = 'updating.lock'
+# --- ระบบ Cache แบบ File-Based (ย้ายไปไว้ที่ /tmp/ เพื่อความเสถียรบน Render) ---
+CACHE_HTML_FILE = '/tmp/scada_cache.html'
+CACHE_META_FILE = '/tmp/scada_meta.json'
+LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตทุก 5 นาที
 
 def get_meta():
@@ -130,7 +130,9 @@ def generate_map():
             layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({status_counts[active_status]})</span></span>"
             custom_cluster_js = f"function(c) {{ var count = c.getChildCount(); return new L.DivIcon({{ html: '<div class=\"map-cluster-inner {safe_status} {safe_parent}\" style=\"background-color: {h_color}; color: white; border-radius: 50%; width: 44px; height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Prompt, sans-serif; font-weight: 600; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.7); transition: all 0.3s ease;\"><i class=\"fa fa-{icon_name}\" style=\"font-size: 12px; margin-bottom: 2px;\"></i><span style=\"font-size: 13px; line-height: 1;\">' + count + '</span></div>', className: 'custom-cluster-marker', iconSize: new L.Point(44, 44), iconAnchor: new L.Point(22, 22) }}); }}"
             mc = MarkerCluster(name=layer_name, show=True, icon_create_function=custom_cluster_js, control=False, options={'disableClusteringAtZoom': 17, 'maxClusterRadius': 35, 'chunkedLoading': True})
-            m.add_child(mc); mc_groups[active_status] = mc; grouped_layers[p_html].append(mc)
+            m.add_child(mc); mc_groups[active_status] = mc
+            # [แก้ไข] เก็บ active_status คู่กับ mc ไว้เพื่อใช้เรียงลำดับได้อย่างปลอดภัย
+            grouped_layers[p_html].append((active_status, mc))
         
         target_group, table_rows = mc_groups[active_status], ""
         
@@ -183,14 +185,15 @@ def generate_map():
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
     # =========================================================================
-    # [ส่วนที่แก้ไข 1] ระบบจัดเรียงลำดับชั้นของ Layer (สลับ Connecting ขึ้นบน)
+    # [แก้ไข] ระบบจัดเรียงลำดับชั้นของ Layer อย่างปลอดภัย 100%
     # =========================================================================
     active_grouped_layers = {}
-    for p_html, mc_list in grouped_layers.items():
-        if len(mc_list) > 0:
-            # เรียงลำดับจากความยาวชื่อ ทำให้ข้อความสั้นๆ อย่าง "Connecting" โดนดึงขึ้นมาอยู่บนสุดเสมอ
-            mc_list.sort(key=lambda mc: (len(mc.name), mc.name))
-            active_grouped_layers[p_html] = mc_list
+    for p_html, items_list in grouped_layers.items():
+        if len(items_list) > 0:
+            # Sort จากข้อความสถานะ (x[0]) เรียงจากสั้นไปยาว เช่น "Connecting" โดนดึงขึ้นมาอยู่บนสุด
+            items_list.sort(key=lambda x: (len(x[0]), x[0]))
+            # แยกร่างเอาเฉพาะตัว Layer (x[1]) กลับมาส่งให้ระบบ
+            active_grouped_layers[p_html] = [x[1] for x in items_list]
 
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
     GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
@@ -629,7 +632,7 @@ def generate_map():
     var currentDataVersion = null;
 
     function checkServerForUpdate() {{
-        // ใส่ ?t=... ท้ายลิงก์ เพื่อบังคับให้เบราว์เซอร์วิ่งไปถามเซิร์ฟเวอร์ใหม่ทุกครั้ง
+        // บังคับไม่ให้แคชคำตอบ
         fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
             .then(response => response.json())
             .then(data => {{
@@ -651,7 +654,6 @@ def generate_map():
             sessionStorage.setItem('scada_saved_lng', center.lng);
             sessionStorage.setItem('scada_saved_zoom', map.getZoom());
         }}
-        // รีโหลดหน้าจอแบบบังคับ
         window.location.href = window.location.pathname + '?v=' + new Date().getTime();
     }}
 
