@@ -1,18 +1,20 @@
-from flask import Flask
+from flask import Flask, render_template_string
 import pandas as pd
 import folium
 import json
 import hashlib
 import html
 import time
+import threading
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache Memory ---
+# --- ระบบ Cache & Background Thread ---
+CACHE_TIME = 300 # แคชข้อมูลไว้ 5 นาที (300 วินาที)
 cached_map_html = None
 last_update_time = 0
-CACHE_DURATION = 300 # แคชข้อมูลไว้ 5 นาที (300 วินาที)
+is_updating = False
 
 def get_status_config(status_text):
     status_upper = str(status_text).upper()
@@ -36,16 +38,8 @@ def get_status_config(status_text):
         else: return raw_parent, "lightgreen", "wrench"
     else: return "สถานะอื่นๆ", "gray", "info-circle"
 
-@app.route('/')
-def index():
-    global cached_map_html, last_update_time
-    
-    # เช็คว่ามีแคชที่อายุไม่เกิน 5 นาทีหรือไม่ ถ้ามีให้ส่งแคชกลับไปเลย (โหลดเร็วมาก)
-    current_time = time.time()
-    if cached_map_html and (current_time - last_update_time < CACHE_DURATION):
-        print("ส่งข้อมูลจาก Cache (โหลดเร็ว)")
-        return cached_map_html
-
+def generate_map():
+    """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่ (ทำงานเบื้องหลัง)"""
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
@@ -53,8 +47,8 @@ def index():
     try:
         df = pd.read_csv(csv_export_url)
     except Exception as e:
-        if cached_map_html: return cached_map_html # ถ้าเน็ตหลุด ให้ส่งแผนที่เก่าแทน
-        return f"<h1>เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}</h1>"
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        raise e
 
     status_hash_map = {}
     def get_hash(text):
@@ -613,12 +607,67 @@ def index():
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
-    
-    # 3. อัปเดตข้อมูลแคชก่อนส่งผลลัพธ์
-    cached_map_html = m.get_root().render()
-    last_update_time = current_time
-    
+    return m.get_root().render()
+
+def background_task():
+    """พนักงานหลังร้าน: แอบดึงข้อมูลและวาดแผนที่ใบใหม่แบบเงียบๆ"""
+    global cached_map_html, last_update_time, is_updating
+    try:
+        new_map = generate_map() # สั่งไปวาดแผนที่
+        cached_map_html = new_map # เอาแผนที่ใหม่มาแปะทับของเก่า
+        last_update_time = time.time()
+        print("อัปเดตแผนที่เบื้องหลังเสร็จสมบูรณ์!")
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
+    finally:
+        is_updating = False
+
+@app.route('/map-data')
+def map_data():
+    """ช่องทางปล่อยแผนที่ (จะถูกโหลดเข้าไปในกรอบ Iframe)"""
+    global cached_map_html
+    if cached_map_html is None:
+        return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะแสดงผลอัตโนมัติในไม่ช้า กรุณารอสักครู่ครับ</h2>", 503
     return cached_map_html
 
+@app.route('/')
+def index():
+    """หน้าร้านหลัก: แสดงผลและคอยสั่งอัปเดต"""
+    global last_update_time, is_updating, cached_map_html
+    current_time = time.time()
+    
+    # ถ้า Cache หมดอายุ หรือยังไม่มี Cache ให้กระซิบสั่งพนักงานหลังร้านไปทำงาน
+    if current_time - last_update_time > CACHE_TIME or cached_map_html is None:
+        if not is_updating:
+            is_updating = True
+            threading.Thread(target=background_task).start()
+
+    # หน้าจอหลักที่จะแอบรีเฟรชแค่กรอบแผนที่ด้านในทุก 5 นาที
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>SCADA Map Dashboard</title>
+        <style>
+            body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #f4f4f9; }
+            iframe { width: 100%; height: 100%; border: none; display: block; }
+        </style>
+    </head>
+    <body>
+        <iframe id="mapFrame" src="/map-data"></iframe>
+        <script>
+            // แอบรีเฟรชดึงข้อมูลใหม่ทุกๆ 5 นาที (300,000 มิลลิวินาที)
+            setInterval(function() {
+                console.log("กำลังอัปเดตแผนที่ให้เป็นข้อมูลล่าสุด...");
+                document.getElementById('mapFrame').src = "/map-data?" + new Date().getTime();
+            }, 300000); 
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html_content)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=10000)
