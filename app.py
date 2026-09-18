@@ -15,10 +15,10 @@ app = Flask(__name__)
 CACHE_HTML_FILE = '/tmp/scada_cache.html'
 CACHE_META_FILE = '/tmp/scada_meta.json'
 LOCK_FILE = '/tmp/updating.lock'
-CACHE_DURATION = 300 # อัปเดตทุก 5 นาที
+CACHE_DURATION = 300 # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
 
 def get_meta():
-    """อ่านเวอร์ชันล่าสุดจากไฟล์"""
+    """อ่านข้อมูลเวลาอัปเดตล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -619,23 +619,103 @@ def generate_map():
     inp.addEventListener('click', handleSearchFocus); 
     inp.addEventListener('blur', function() {{ box.classList.remove('focus'); setTimeout(function(){{ res.style.display = 'none'; }}, 200); }});
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
+
+    /* ========================================================
+       ระบบ Smooth Overlay Update (ไร้รอยต่อ ไร้จอขาว โหลดไว)
+       ======================================================== */
+    // ตรวจสอบว่าเป็นหน้าต่างหลักเท่านั้น (ป้องกัน iframe ซ้อนกันเอง)
+    if (window === window.top) {{
+        var currentDataVersion = null;
+        var overlayIframe = null;
+
+        function getMapInstance(win) {{
+            try {{
+                for (var key in win) {{ if (key.startsWith('map_')) return win[key]; }}
+            }} catch(e) {{}}
+            return null;
+        }}
+
+        function checkServerForUpdate() {{
+            // ใช้เวลาปัจจุบันต่อท้าย เพื่อบังคับไม่ให้เบราว์เซอร์จำค่าเก่า
+            fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (currentDataVersion === null) {{
+                        currentDataVersion = data.version; 
+                    }} else if (data.version !== currentDataVersion) {{
+                        console.log("พบข้อมูล SCADA ใหม่! (เวอร์ชัน: " + data.version + ") กำลังสลับหน้าจอ...");
+                        currentDataVersion = data.version;
+                        performSmoothOverlay();
+                    }}
+                }}).catch(e => console.log("Check update error:", e));
+        }}
+
+        function performSmoothOverlay() {{
+            // สร้างกระดาษแผ่นใหม่ (iframe) มาซ้อนทับแบบโปร่งใส
+            var newIframe = document.createElement('iframe');
+            newIframe.style.position = 'fixed';
+            newIframe.style.top = '0';
+            newIframe.style.left = '0';
+            newIframe.style.width = '100%';
+            newIframe.style.height = '100%';
+            newIframe.style.border = 'none';
+            newIframe.style.zIndex = '999999'; // ให้ลอยอยู่บนสุด
+            newIframe.style.opacity = '0';     // ซ่อนไว้ก่อน
+            newIframe.style.transition = 'opacity 0.8s ease-in-out'; // กำหนดให้เฟดเนียนๆ 0.8 วิ
+            
+            // สั่งดึงข้อมูลล่าสุดมาวาด
+            newIframe.src = '/?v=' + currentDataVersion + '&t=' + new Date().getTime();
+
+            newIframe.onload = function() {{
+                // 1. หาแผนที่แผ่นปัจจุบัน และแผ่นใหม่
+                var oldWin = overlayIframe ? overlayIframe.contentWindow : window;
+                var oldMap = getMapInstance(oldWin);
+                var newMap = getMapInstance(newIframe.contentWindow);
+                
+                // 2. ก๊อปปี้ตำแหน่งพิกัดและซูม ให้ตรงกันเป๊ะ
+                if (oldMap && newMap) {{
+                    newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {{animate: false}});
+                }}
+
+                // 3. สั่งเฟดโชว์กระดาษแผ่นใหม่
+                newIframe.style.opacity = '1';
+
+                // 4. รอให้เฟดเสร็จ แล้วลบกระดาษแผ่นเก่าทิ้งเพื่อคืนหน่วยความจำให้คอมพิวเตอร์
+                setTimeout(function() {{
+                    if (overlayIframe) {{
+                        document.body.removeChild(overlayIframe);
+                    }}
+                    overlayIframe = newIframe;
+                }}, 1000);
+            }};
+
+            document.body.appendChild(newIframe);
+        }}
+
+        // ตั้งเวลาส่งบอทจิ๋วไปถามหลังบ้านทุกๆ 30 วินาที
+        setInterval(checkServerForUpdate, 30000);
+        setTimeout(checkServerForUpdate, 2000); // เช็คครั้งแรกหลังเปิดเว็บ
+    }}
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
     return m.get_root().render()
 
 def background_task():
-    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์"""
+    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์ (ใช้เวลา Timestamp ป้องกันบั๊ก)"""
     try:
+        print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
         new_html = generate_map()
+        
         with open(CACHE_HTML_FILE, 'w', encoding='utf-8') as f:
             f.write(new_html)
             
-        meta = get_meta()
-        new_version = meta['version'] + 1
+        # [แก้ไข] ใช้ Timestamp เป็นตัวเลขเวอร์ชัน แก้บั๊ก Render รีเซ็ตตัวเอง
+        new_version = int(time.time())
         with open(CACHE_META_FILE, 'w') as f:
             json.dump({'version': new_version, 'last_update': time.time()}, f)
             
+        print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
     finally:
@@ -644,7 +724,7 @@ def background_task():
             except: pass
 
 def trigger_update_if_needed():
-    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงาน"""
+    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงานถ้าถึงเวลา 5 นาที"""
     meta = get_meta()
     if time.time() - meta['last_update'] > CACHE_DURATION:
         if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
@@ -657,127 +737,24 @@ def trigger_update_if_needed():
                 threading.Thread(target=background_task).start()
             except: pass
 
-@app.route('/map-data')
-def map_data():
-    """ส่งข้อมูลแผนที่เพียวๆ เพื่อนำไปใส่ในกรอบสลับฉาก"""
-    try:
-        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
-            return f.read()
-    except:
-        return "<h2 style='text-align:center; margin-top:20%; color:white; font-family:sans-serif;'>ระบบกำลังเตรียมข้อมูล...</h2>", 503
-
 @app.route('/api/version')
 def api_version():
-    """บอทกระซิบถามเวอร์ชัน (เบามาก ใช้เน็ตแค่ 15 Bytes)"""
+    """ช่องทางสำหรับให้บอทหน้าเว็บกระซิบถามเวอร์ชัน"""
     trigger_update_if_needed()
     meta = get_meta()
     return jsonify({"version": meta['version']})
 
 @app.route('/')
 def index():
-    """หน้าร้านหลัก แสดงผลแผนที่แบบสลับฉากหลังเวที (Crossfade)"""
+    """หน้าจอหลัก: ส่งไฟล์แคชแผนที่ล่าสุดให้ทันที"""
     trigger_update_if_needed()
     
-    if not os.path.exists(CACHE_HTML_FILE):
+    try:
+        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        # จะโชว์หน้านี้แค่ครั้งแรกสุดตอนเปิดเซิร์ฟเวอร์ใหม่เท่านั้น
         return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะโหลดหน้าเว็บอัตโนมัติในไม่ช้า</h2><script>setTimeout(()=>window.location.reload(), 5000);</script>", 503
-
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="th">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>SCADA Map Dashboard</title>
-        <style>
-            body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #282a2d; }
-            .map-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; transition: opacity 0.8s ease-in-out; }
-            #layer1 { z-index: 2; opacity: 1; }
-            #layer2 { z-index: 1; opacity: 0; }
-        </style>
-    </head>
-    <body>
-        <!-- ซ้อนจอ 2 ชั้น ไร้หน้าโหลดกวนใจ -->
-        <iframe id="layer1" class="map-layer" src="/map-data?v=init"></iframe>
-        <iframe id="layer2" class="map-layer" src="about:blank"></iframe>
-
-        <script>
-            let activeLayer = 1;
-            let currentVersion = null;
-
-            function getMap(iframe) {
-                try {
-                    let win = iframe.contentWindow;
-                    for (let key in win) {
-                        if (key.startsWith('map_')) return win[key];
-                    }
-                } catch(e) {}
-                return null;
-            }
-
-            function checkServerForUpdate() {
-                fetch('/api/version?t=' + Date.now(), { cache: 'no-store' })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (currentVersion === null) {
-                            currentVersion = data.version;
-                        } else if (data.version > currentVersion) {
-                            console.log("🔥 พบข้อมูลใหม่! แอบโหลดแผนที่หลังเวที...");
-                            currentVersion = data.version; 
-                            swapMap();
-                        }
-                    }).catch(e => console.log(e));
-            }
-
-            function swapMap() {
-                let activeIframe = document.getElementById('layer' + activeLayer);
-                let nextLayerNum = activeLayer === 1 ? 2 : 1;
-                let nextIframe = document.getElementById('layer' + nextLayerNum);
-
-                // โหลดข้อมูลใส่แผ่นหลังเวทีเงียบๆ
-                nextIframe.src = '/map-data?v=' + currentVersion + '&t=' + Date.now();
-                
-                nextIframe.onload = function() {
-                    // รอเสี้ยววินาทีให้แผนที่วาดตัวมันเองเสร็จชัวร์ๆ
-                    let checkMapReady = setInterval(() => {
-                        let currentMap = getMap(activeIframe);
-                        let nextMap = getMap(nextIframe);
-                        
-                        if (nextMap) {
-                            clearInterval(checkMapReady);
-                            
-                            // ก๊อปปี้ตำแหน่งซูม/พิกัด ให้ตรงกันเป๊ะ
-                            if (currentMap) {
-                                nextMap.setView(currentMap.getCenter(), currentMap.getZoom(), {animate: false});
-                            }
-
-                            // สลับการแสดงผลแบบ Crossfade เนียนๆ
-                            nextIframe.style.zIndex = 2;
-                            nextIframe.style.opacity = 1;
-                            
-                            activeIframe.style.zIndex = 1;
-                            activeIframe.style.opacity = 0;
-                            
-                            activeLayer = nextLayerNum;
-
-                            // คืนพื้นที่ RAM หลังสลับฉากเสร็จ
-                            setTimeout(() => {
-                                activeIframe.src = 'about:blank'; 
-                            }, 2000);
-                        }
-                    }, 100);
-                    
-                    // ป้องกันลูปค้าง
-                    setTimeout(() => clearInterval(checkMapReady), 5000);
-                };
-            }
-
-            // ตั้งเวลาแอบกระซิบถามเซิร์ฟเวอร์ทุกๆ 15 วินาที
-            setInterval(checkServerForUpdate, 15000); 
-        </script>
-    </body>
-    </html>
-    """
-    return html_content
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
