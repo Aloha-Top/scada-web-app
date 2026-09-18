@@ -1,29 +1,18 @@
-from flask import Flask, jsonify, request
+from flask import Flask
 import pandas as pd
 import folium
 import json
 import hashlib
 import html
 import time
-import threading
-import os
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
 
-# --- ระบบ Cache แบบ File-Based ---
-CACHE_HTML_FILE = '/tmp/scada_cache.html'
-CACHE_META_FILE = '/tmp/scada_meta.json'
-LOCK_FILE = '/tmp/updating.lock'
-CACHE_DURATION = 300 # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
-
-def get_meta():
-    """อ่านข้อมูลเวลาอัปเดตล่าสุดจากไฟล์"""
-    try:
-        with open(CACHE_META_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {'version': 0, 'last_update': 0}
+# --- ระบบ Cache Memory ---
+cached_map_html = None
+last_update_time = 0
+CACHE_DURATION = 300 # แคชข้อมูลไว้ 5 นาที (300 วินาที)
 
 def get_status_config(status_text):
     status_upper = str(status_text).upper()
@@ -47,8 +36,16 @@ def get_status_config(status_text):
         else: return raw_parent, "lightgreen", "wrench"
     else: return "สถานะอื่นๆ", "gray", "info-circle"
 
-def generate_map():
-    """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่"""
+@app.route('/')
+def index():
+    global cached_map_html, last_update_time
+    
+    # เช็คว่ามีแคชที่อายุไม่เกิน 5 นาทีหรือไม่ ถ้ามีให้ส่งแคชกลับไปเลย (โหลดเร็วมาก)
+    current_time = time.time()
+    if cached_map_html and (current_time - last_update_time < CACHE_DURATION):
+        print("ส่งข้อมูลจาก Cache (โหลดเร็ว)")
+        return cached_map_html
+
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
@@ -56,8 +53,8 @@ def generate_map():
     try:
         df = pd.read_csv(csv_export_url)
     except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
-        raise e
+        if cached_map_html: return cached_map_html # ถ้าเน็ตหลุด ให้ส่งแผนที่เก่าแทน
+        return f"<h1>เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}</h1>"
 
     status_hash_map = {}
     def get_hash(text):
@@ -130,8 +127,7 @@ def generate_map():
             layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({status_counts[active_status]})</span></span>"
             custom_cluster_js = f"function(c) {{ var count = c.getChildCount(); return new L.DivIcon({{ html: '<div class=\"map-cluster-inner {safe_status} {safe_parent}\" style=\"background-color: {h_color}; color: white; border-radius: 50%; width: 44px; height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Prompt, sans-serif; font-weight: 600; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.7); transition: all 0.3s ease;\"><i class=\"fa fa-{icon_name}\" style=\"font-size: 12px; margin-bottom: 2px;\"></i><span style=\"font-size: 13px; line-height: 1;\">' + count + '</span></div>', className: 'custom-cluster-marker', iconSize: new L.Point(44, 44), iconAnchor: new L.Point(22, 22) }}); }}"
             mc = MarkerCluster(name=layer_name, show=True, icon_create_function=custom_cluster_js, control=False, options={'disableClusteringAtZoom': 17, 'maxClusterRadius': 35, 'chunkedLoading': True})
-            m.add_child(mc); mc_groups[active_status] = mc
-            grouped_layers[p_html].append((active_status, mc))
+            m.add_child(mc); mc_groups[active_status] = mc; grouped_layers[p_html].append(mc)
         
         target_group, table_rows = mc_groups[active_status], ""
         
@@ -183,12 +179,7 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    active_grouped_layers = {}
-    for p_html, items_list in grouped_layers.items():
-        if len(items_list) > 0:
-            items_list.sort(key=lambda x: (len(x[0]), x[0]))
-            active_grouped_layers[p_html] = [x[1] for x in items_list]
-
+    active_grouped_layers = {k: v for k, v in grouped_layers.items() if len(v) > 0}
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
     GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
 
@@ -619,142 +610,15 @@ def generate_map():
     inp.addEventListener('click', handleSearchFocus); 
     inp.addEventListener('blur', function() {{ box.classList.remove('focus'); setTimeout(function(){{ res.style.display = 'none'; }}, 200); }});
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
-
-    /* ========================================================
-       ระบบ Smooth Overlay Update (ไร้รอยต่อ ไร้จอขาว โหลดไว)
-       ======================================================== */
-    // ตรวจสอบว่าเป็นหน้าต่างหลักเท่านั้น (ป้องกัน iframe ซ้อนกันเอง)
-    if (window === window.top) {{
-        var currentDataVersion = null;
-        var overlayIframe = null;
-
-        function getMapInstance(win) {{
-            try {{
-                for (var key in win) {{ if (key.startsWith('map_')) return win[key]; }}
-            }} catch(e) {{}}
-            return null;
-        }}
-
-        function checkServerForUpdate() {{
-            // ใช้เวลาปัจจุบันต่อท้าย เพื่อบังคับไม่ให้เบราว์เซอร์จำค่าเก่า
-            fetch('/api/version?t=' + new Date().getTime(), {{ cache: 'no-store' }})
-                .then(response => response.json())
-                .then(data => {{
-                    if (currentDataVersion === null) {{
-                        currentDataVersion = data.version; 
-                    }} else if (data.version !== currentDataVersion) {{
-                        console.log("พบข้อมูล SCADA ใหม่! (เวอร์ชัน: " + data.version + ") กำลังสลับหน้าจอ...");
-                        currentDataVersion = data.version;
-                        performSmoothOverlay();
-                    }}
-                }}).catch(e => console.log("Check update error:", e));
-        }}
-
-        function performSmoothOverlay() {{
-            // สร้างกระดาษแผ่นใหม่ (iframe) มาซ้อนทับแบบโปร่งใส
-            var newIframe = document.createElement('iframe');
-            newIframe.style.position = 'fixed';
-            newIframe.style.top = '0';
-            newIframe.style.left = '0';
-            newIframe.style.width = '100%';
-            newIframe.style.height = '100%';
-            newIframe.style.border = 'none';
-            newIframe.style.zIndex = '999999'; // ให้ลอยอยู่บนสุด
-            newIframe.style.opacity = '0';     // ซ่อนไว้ก่อน
-            newIframe.style.transition = 'opacity 0.8s ease-in-out'; // กำหนดให้เฟดเนียนๆ 0.8 วิ
-            
-            // สั่งดึงข้อมูลล่าสุดมาวาด
-            newIframe.src = '/?v=' + currentDataVersion + '&t=' + new Date().getTime();
-
-            newIframe.onload = function() {{
-                // 1. หาแผนที่แผ่นปัจจุบัน และแผ่นใหม่
-                var oldWin = overlayIframe ? overlayIframe.contentWindow : window;
-                var oldMap = getMapInstance(oldWin);
-                var newMap = getMapInstance(newIframe.contentWindow);
-                
-                // 2. ก๊อปปี้ตำแหน่งพิกัดและซูม ให้ตรงกันเป๊ะ
-                if (oldMap && newMap) {{
-                    newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {{animate: false}});
-                }}
-
-                // 3. สั่งเฟดโชว์กระดาษแผ่นใหม่
-                newIframe.style.opacity = '1';
-
-                // 4. รอให้เฟดเสร็จ แล้วลบกระดาษแผ่นเก่าทิ้งเพื่อคืนหน่วยความจำให้คอมพิวเตอร์
-                setTimeout(function() {{
-                    if (overlayIframe) {{
-                        document.body.removeChild(overlayIframe);
-                    }}
-                    overlayIframe = newIframe;
-                }}, 1000);
-            }};
-
-            document.body.appendChild(newIframe);
-        }}
-
-        // ตั้งเวลาส่งบอทจิ๋วไปถามหลังบ้านทุกๆ 30 วินาที
-        setInterval(checkServerForUpdate, 30000);
-        setTimeout(checkServerForUpdate, 2000); // เช็คครั้งแรกหลังเปิดเว็บ
-    }}
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
-    return m.get_root().render()
-
-def background_task():
-    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์ (ใช้เวลา Timestamp ป้องกันบั๊ก)"""
-    try:
-        print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
-        new_html = generate_map()
-        
-        with open(CACHE_HTML_FILE, 'w', encoding='utf-8') as f:
-            f.write(new_html)
-            
-        # [แก้ไข] ใช้ Timestamp เป็นตัวเลขเวอร์ชัน แก้บั๊ก Render รีเซ็ตตัวเอง
-        new_version = int(time.time())
-        with open(CACHE_META_FILE, 'w') as f:
-            json.dump({'version': new_version, 'last_update': time.time()}, f)
-            
-        print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
-    finally:
-        if os.path.exists(LOCK_FILE):
-            try: os.remove(LOCK_FILE)
-            except: pass
-
-def trigger_update_if_needed():
-    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงานถ้าถึงเวลา 5 นาที"""
-    meta = get_meta()
-    if time.time() - meta['last_update'] > CACHE_DURATION:
-        if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
-            try: os.remove(LOCK_FILE)
-            except: pass
-            
-        if not os.path.exists(LOCK_FILE):
-            try:
-                open(LOCK_FILE, 'w').close()
-                threading.Thread(target=background_task).start()
-            except: pass
-
-@app.route('/api/version')
-def api_version():
-    """ช่องทางสำหรับให้บอทหน้าเว็บกระซิบถามเวอร์ชัน"""
-    trigger_update_if_needed()
-    meta = get_meta()
-    return jsonify({"version": meta['version']})
-
-@app.route('/')
-def index():
-    """หน้าจอหลัก: ส่งไฟล์แคชแผนที่ล่าสุดให้ทันที"""
-    trigger_update_if_needed()
     
-    try:
-        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
-            return f.read()
-    except:
-        # จะโชว์หน้านี้แค่ครั้งแรกสุดตอนเปิดเซิร์ฟเวอร์ใหม่เท่านั้น
-        return "<h2 style='text-align:center; margin-top:20%; font-family:sans-serif;'>กำลังเตรียมข้อมูล SCADA ครั้งแรก...<br>ระบบจะโหลดหน้าเว็บอัตโนมัติในไม่ช้า</h2><script>setTimeout(()=>window.location.reload(), 5000);</script>", 503
+    # 3. อัปเดตข้อมูลแคชก่อนส่งผลลัพธ์
+    cached_map_html = m.get_root().render()
+    last_update_time = current_time
+    
+    return cached_map_html
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
