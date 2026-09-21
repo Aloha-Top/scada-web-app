@@ -130,7 +130,6 @@ def generate_map():
             layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({status_counts[active_status]})</span></span>"
             custom_cluster_js = f"function(c) {{ var count = c.getChildCount(); return new L.DivIcon({{ html: '<div class=\"map-cluster-inner {safe_status} {safe_parent}\" style=\"background-color: {h_color}; color: white; border-radius: 50%; width: 44px; height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Prompt, sans-serif; font-weight: 600; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.7); transition: all 0.3s ease;\"><i class=\"fa fa-{icon_name}\" style=\"font-size: 12px; margin-bottom: 2px;\"></i><span style=\"font-size: 13px; line-height: 1;\">' + count + '</span></div>', className: 'custom-cluster-marker', iconSize: new L.Point(44, 44), iconAnchor: new L.Point(22, 22) }}); }}"
             mc = MarkerCluster(name=layer_name, show=True, icon_create_function=custom_cluster_js, control=False, options={'disableClusteringAtZoom': 17, 'maxClusterRadius': 35, 'chunkedLoading': True})
-            # [ลบคำสั่งวาดแผนที่ตรงนี้ออก เพื่อรอจัดเรียงก่อน]
             mc_groups[active_status] = mc
             grouped_layers[p_html].append((active_status, mc))
         
@@ -184,16 +183,14 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # =========================================================================
-    # [แก้ไข 1] จัดเรียงความสั้นยาวของสถานะก่อนวาด เพื่อดัน Connecting ขึ้นบนสุด 100%
-    # =========================================================================
+    # จัดเรียง Connecting ขึ้นบนสุด
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
             items_list.sort(key=lambda x: (len(x[0]), x[0]))
             sorted_mcs = []
             for active_status, mc in items_list:
-                m.add_child(mc) # วาดลงแผนที่ตามลำดับที่เรียงแล้วเท่านั้น
+                m.add_child(mc)
                 sorted_mcs.append(mc)
             active_grouped_layers[p_html] = sorted_mcs
 
@@ -204,7 +201,6 @@ def generate_map():
     export_json = json.dumps(export_data_list, ensure_ascii=False)
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
 
-    # [แก้ไข 2] อัปเดต CSS ยืดหยุ่นแก้การเลื่อนไม่ไป และตัดโค้ดที่รบกวนการ Scroll ทิ้ง
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -246,10 +242,6 @@ def generate_map():
     .popup-table td:first-child {{ color: #5f6368; font-weight: 500; width: 45%; vertical-align: top; padding-right: 8px; }}
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
 
-    body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
-    body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
-    body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
-
     .standalone-filter-btn {{ position: fixed; right: 16px; top: 16px; width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: transform 0.1s, background-color 0.2s; border: 1px solid #444746; }}
     .standalone-filter-btn:hover {{ background-color: #3c4043; }}
     .standalone-filter-btn:active {{ transform: scale(0.92); }}
@@ -258,7 +250,19 @@ def generate_map():
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: 72px; right: 16px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 99999; }}
     .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-    .custom-filter-wrapper .leaflet-control-layers-list {{ flex: 1 1 auto !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; min-height: 0 !important; }}
+    
+    /* [แก้ไข] บังคับให้ Layer List แสดง Scrollbar ได้อย่างอิสระ */
+    .custom-filter-wrapper .leaflet-control-layers-list {{ 
+        flex: 1 1 auto !important; 
+        max-height: calc(100dvh - 160px) !important;
+        overflow-y: auto !important; 
+        overflow-x: hidden !important; 
+        padding: 0 0 12px 0 !important; 
+        margin: 0 !important; 
+        overscroll-behavior: contain !important; 
+        -webkit-overflow-scrolling: touch !important; 
+    }}
+    
     .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
     .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
@@ -393,9 +397,10 @@ def generate_map():
             filterBtn.addEventListener('click', function(e) {{ e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); }});
             document.addEventListener('click', function(e) {{ if (filterWrapper.classList.contains('show')) {{ if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ filterWrapper.classList.remove('show'); }} }} }});
             
-            // [แก้ไข 2] ป้องกันแผนที่แย่งการรับรู้เหตุการณ์ Scroll ทำให้เลื่อนติ๊กในมือถือได้ลื่นไหล
+            // [แก้ไขล่าสุด] ปลดล็อกการเลื่อน Scrollbar ให้เป็นอิสระ ป้องกันซูมด้วย stopPropagation
             L.DomEvent.disableClickPropagation(filterWrapper);
-            L.DomEvent.disableScrollPropagation(filterWrapper);
+            filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+            filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
 
             filterWrapper.addEventListener('mouseenter', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.disable(); }} }});
             filterWrapper.addEventListener('mouseleave', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.enable(); }} }});
