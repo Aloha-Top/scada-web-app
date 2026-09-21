@@ -214,6 +214,42 @@ def generate_map():
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
     body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
+    /* 🎨 ซ่อน/โชว์ Scrollbar แบบเว็บชั้นนำระดับโลก (Mac OS Style) */
+    .custom-filter-wrapper .leaflet-control-layers-list,
+    .g-search-results,
+    .popup-body {{
+        scrollbar-width: thin;
+        scrollbar-color: rgba(154, 160, 166, 0.3) transparent; /* สำหรับ Firefox */
+    }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
+    .g-search-results::-webkit-scrollbar,
+    .popup-body::-webkit-scrollbar {{ 
+        width: 6px; 
+    }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
+    .g-search-results::-webkit-scrollbar-track,
+    .popup-body::-webkit-scrollbar-track {{ 
+        background: transparent; 
+    }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
+    .g-search-results::-webkit-scrollbar-thumb,
+    .popup-body::-webkit-scrollbar-thumb {{ 
+        background-color: rgba(154, 160, 166, 0); /* ปกติซ่อนไว้ (โปร่งใส) */
+        border-radius: 10px; 
+    }}
+    /* โชว์ Scrollbar จางๆ เมื่อเอาเมาส์เข้าใกล้กล่อง */
+    .custom-filter-wrapper .leaflet-control-layers-list:hover::-webkit-scrollbar-thumb,
+    .g-search-results:hover::-webkit-scrollbar-thumb,
+    .popup-body:hover::-webkit-scrollbar-thumb {{ 
+        background-color: rgba(154, 160, 166, 0.4); 
+    }}
+    /* สว่างขึ้นเมื่อเอาเมาส์ชี้ที่ตัว Scrollbar โดยตรง */
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb:hover,
+    .g-search-results::-webkit-scrollbar-thumb:hover,
+    .popup-body::-webkit-scrollbar-thumb:hover {{ 
+        background-color: rgba(138, 180, 248, 0.8); 
+    }}
+
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; }}
     @media (max-width: 768px) {{ .custom-info-panel {{ top: auto !important; bottom: 20px !important; left: 16px; width: calc(100vw - 32px); max-height: 48vh !important; animation: slideUpFade 0.3s ease-out; }} .popup-body {{ max-height: calc(48vh - 125px) !important; }} }}
     @keyframes slideDownFade {{ from {{ opacity: 0; transform: translateY(-15px); }} to {{ opacity: 1; transform: translateY(0); }} }}
@@ -251,7 +287,6 @@ def generate_map():
     .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
     
-    /* [แก้ไข] บังคับให้ Layer List แสดง Scrollbar ได้อย่างอิสระ */
     .custom-filter-wrapper .leaflet-control-layers-list {{ 
         flex: 1 1 auto !important; 
         max-height: calc(100dvh - 160px) !important;
@@ -397,7 +432,6 @@ def generate_map():
             filterBtn.addEventListener('click', function(e) {{ e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); }});
             document.addEventListener('click', function(e) {{ if (filterWrapper.classList.contains('show')) {{ if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ filterWrapper.classList.remove('show'); }} }} }});
             
-            // [แก้ไขล่าสุด] ปลดล็อกการเลื่อน Scrollbar ให้เป็นอิสระ ป้องกันซูมด้วย stopPropagation
             L.DomEvent.disableClickPropagation(filterWrapper);
             filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
             filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
