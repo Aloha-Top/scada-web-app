@@ -30,7 +30,6 @@ def get_status_config(status_text):
     if 'TELEMETRY' in status_upper: return "Telemetry Failure", "gold", "wrench"
     elif 'CONNECTING' in status_upper:
         raw_parent = "Connecting"
-        # [เพิ่มใหม่] ดักจับสถานะ เคยแก้ไขแล้วกลับมา Offline ให้อยู่กลุ่ม Connecting สีม่วง และใช้ไอคอน history (ย้อนเวลา/ประวัติ)
         if 'เคยแก้ไข' in status_upper and 'OFFLINE' in status_upper: return raw_parent, "purple", "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: return raw_parent, "orange", "user"
         elif 'ระบบสื่อสาร' in status_upper: return raw_parent, "purple", "wrench"
@@ -112,8 +111,6 @@ def generate_map():
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
-        
-        # [ปรับปรุง] ตัดคำขึ้นบรรทัดใหม่ให้สวยงาม ไม่ว่าจะมาจากระบบสื่อสาร หรือ ผบอ.
         active_status_display = active_status.replace("เคยแก้ไขแล้ว กลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline").replace("เคยแก้ไขแล้วกลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline")
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
@@ -163,8 +160,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            # [ปรับปรุง] ช่วยตัดบรรทัดข้อมูลใน Popup Table ให้สวยงาม
-            display_val = val_str.replace("เคยแก้ไขแล้ว กลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline").replace("เคยแก้ไขแล้วกลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline")
+            display_val = val_str.replace("Connecting ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline", "Connecting ระบบสื่อสารเคยแก้ไขแล้ว<br>กลับมา Offline")
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -188,7 +184,6 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # จัดเรียง Connecting ขึ้นบนสุด
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
@@ -219,41 +214,27 @@ def generate_map():
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
     body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
-    /* 🎨 ซ่อน/โชว์ Scrollbar แบบเว็บชั้นนำระดับโลก (Mac OS Style) */
     .custom-filter-wrapper .leaflet-control-layers-list,
     .g-search-results,
     .popup-body {{
         scrollbar-width: thin;
-        scrollbar-color: rgba(154, 160, 166, 0.3) transparent; /* สำหรับ Firefox */
+        scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
     }}
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
-    .popup-body::-webkit-scrollbar {{ 
-        width: 6px; 
-    }}
+    .popup-body::-webkit-scrollbar {{ width: 6px; }}
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
     .g-search-results::-webkit-scrollbar-track,
-    .popup-body::-webkit-scrollbar-track {{ 
-        background: transparent; 
-    }}
+    .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
-    .popup-body::-webkit-scrollbar-thumb {{ 
-        background-color: rgba(154, 160, 166, 0); /* ปกติซ่อนไว้ (โปร่งใส) */
-        border-radius: 10px; 
-    }}
-    /* โชว์ Scrollbar จางๆ เมื่อเอาเมาส์เข้าใกล้กล่อง */
+    .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
     .custom-filter-wrapper .leaflet-control-layers-list:hover::-webkit-scrollbar-thumb,
     .g-search-results:hover::-webkit-scrollbar-thumb,
-    .popup-body:hover::-webkit-scrollbar-thumb {{ 
-        background-color: rgba(154, 160, 166, 0.4); 
-    }}
-    /* สว่างขึ้นเมื่อเอาเมาส์ชี้ที่ตัว Scrollbar โดยตรง */
+    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb:hover,
     .g-search-results::-webkit-scrollbar-thumb:hover,
-    .popup-body::-webkit-scrollbar-thumb:hover {{ 
-        background-color: rgba(138, 180, 248, 0.8); 
-    }}
+    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; }}
     @media (max-width: 768px) {{ .custom-info-panel {{ top: auto !important; bottom: 20px !important; left: 16px; width: calc(100vw - 32px); max-height: 48vh !important; animation: slideUpFade 0.3s ease-out; }} .popup-body {{ max-height: calc(48vh - 125px) !important; }} }}
@@ -435,8 +416,8 @@ def generate_map():
             document.body.appendChild(filterWrapper); filterWrapper.appendChild(formElem);
             
             filterBtn.addEventListener('click', function(e) {{ e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); }});
-            document.addEventListener('click', function(e) {{ if (filterWrapper.classList.contains('show')) {{ if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ filterWrapper.classList.remove('show'); }} }} }});
             
+            // ป้องกันแผนที่ดูดกลืนคำสั่ง Click
             L.DomEvent.disableClickPropagation(filterWrapper);
             filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
             filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
@@ -445,6 +426,22 @@ def generate_map():
             filterWrapper.addEventListener('mouseleave', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.enable(); }} }});
             
             document.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ cb.addEventListener('change', reapplyHighlight); }});
+
+            // [เพิ่มคำสั่งใหม่] ปิดเมนูเมื่อมีการกดพื้นที่นอกกล่อง (ทั้งคลิกและทัช)
+            document.addEventListener('click', function(e) {{ 
+                if (filterWrapper.classList.contains('show')) {{ 
+                    if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                        filterWrapper.classList.remove('show'); 
+                    }} 
+                }} 
+            }});
+            document.addEventListener('touchstart', function(e) {{ 
+                if (filterWrapper.classList.contains('show')) {{ 
+                    if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                        filterWrapper.classList.remove('show'); 
+                    }} 
+                }} 
+            }}, {{passive: true}});
 
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
@@ -504,6 +501,13 @@ def generate_map():
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
         if (globalMap) {{
+
+            // [เพิ่มคำสั่งใหม่] ปิดเมนูสถานะทันทีที่มีการกดหรือเลื่อนแผนที่
+            globalMap.on('click dragstart popupopen', function() {{
+                var fw = document.getElementById('customFilterWrapper');
+                if (fw) fw.classList.remove('show');
+            }});
+
             globalMap.on('popupopen', function(e) {{
                 var content = e.popup.getContent();
                 var htmlStr = typeof content === 'string' ? content : content.innerHTML;
@@ -615,7 +619,16 @@ def generate_map():
     var res = document.getElementById('searchResults');
     var clr = document.getElementById('searchClear');
 
-    function handleSearchFocus() {{ box.classList.add('focus'); hideCustomPanel(); triggerSearch(); }}
+    function handleSearchFocus() {{ 
+        box.classList.add('focus'); 
+        hideCustomPanel(); 
+        
+        // ปิดเมนูสถานะอัตโนมัติเมื่อกดช่องค้นหา
+        var fw = document.getElementById('customFilterWrapper');
+        if (fw) fw.classList.remove('show');
+        
+        triggerSearch(); 
+    }}
 
     function triggerSearch() {{
         var val = inp.value.toLowerCase().trim();
