@@ -26,27 +26,51 @@ def get_meta():
         return {'version': 0, 'last_update': 0}
 
 def get_status_config(status_text):
-    status_upper = str(status_text).upper()
-    if 'TELEMETRY' in status_upper: return "Telemetry Failure", "gold", "wrench"
-    elif 'CONNECTING' in status_upper:
+    """กำหนด หมวดหมู่(Parent), สี, และ ไอคอน ตามสถานะ"""
+    status_upper = str(status_text).strip().upper()
+    
+    # 1. เช็คคำขึ้นต้นเพื่อกำหนดหมวดหมู่หลักและสี
+    if status_upper.startswith('TELEMETRY'):
+        return "Telemetry Failure", "gold", "wrench"
+        
+    elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        if 'เคยแก้ไข' in status_upper and 'OFFLINE' in status_upper: return raw_parent, "purple", "history"
-        elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: return raw_parent, "orange", "user"
-        elif 'ระบบสื่อสาร' in status_upper: return raw_parent, "purple", "wrench"
-        elif 'ผบอ.' in status_upper: return raw_parent, "orange", "check"
-        elif 'ผอส.' in status_upper: return raw_parent, "purple", "check" 
-        else: return raw_parent, "orange", "wrench"
-    elif 'OFFLINE' in status_upper:
+        color = "purple" if 'ระบบสื่อสาร' in status_upper else "orange"
+        
+        # 2. เช็คเงื่อนไขย่อยเพื่อกำหนดไอคอน
+        if 'เคยแก้ไข' in status_upper: icon = "history"
+        elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
+        elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
+        else: icon = "wrench"
+        return raw_parent, color, icon
+        
+    elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
-        if 'ผบอ.' in status_upper and 'ผอส.' in status_upper: return raw_parent, "red", "user" 
-        elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: return raw_parent, "red", "check"
-        else: return raw_parent, "red", "times"
-    elif 'ONLINE' in status_upper: return "Online", "green", "check"
-    elif 'INITIALIZING' in status_upper:
+        color = "red"
+        
+        if 'เคยแก้ไข' in status_upper: icon = "history"
+        elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
+        elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
+        else: icon = "times"
+        return raw_parent, color, icon
+        
+    elif status_upper.startswith('ONLINE'):
+        raw_parent = "Online"
+        color = "green"
+        icon = "history" if 'เคยแก้ไข' in status_upper else "check"
+        return raw_parent, color, icon
+        
+    elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
-        if 'ผบอ.' in status_upper or 'ผอส.' in status_upper: return raw_parent, "lightgreen", "check" 
-        else: return raw_parent, "lightgreen", "wrench"
-    else: return "สถานะอื่นๆ", "gray", "info-circle"
+        color = "lightgreen"
+        
+        if 'เคยแก้ไข' in status_upper: icon = "history"
+        elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
+        else: icon = "wrench"
+        return raw_parent, color, icon
+        
+    else:
+        return "สถานะอื่นๆ", "gray", "info-circle"
 
 def generate_map():
     """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่"""
@@ -220,10 +244,7 @@ def generate_map():
 
     .custom-filter-wrapper .leaflet-control-layers-list,
     .g-search-results,
-    .popup-body {{
-        scrollbar-width: thin;
-        scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
-    }}
+    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
     .popup-body::-webkit-scrollbar {{ width: 6px; }}
@@ -384,7 +405,6 @@ def generate_map():
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }});
         if (safeId) {{
             window.currentSelectedSafeId = safeId;
-            // [คำสั่งแก้ปัญหา] บังคับให้หมุดตัวอื่นๆ ทั้งหมดบนแผนที่จางลงเวลาจิ้มเลือกหมุด
             document.body.classList.add('filter-hover-active');
             
             var attempts = 0;
@@ -403,7 +423,6 @@ def generate_map():
     function clearHighlight() {{ 
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); 
         window.currentSelectedSafeId = null; 
-        // [คำสั่งแก้ปัญหา] ยืนยันการยกเลิกโหมดจาง (ดรอปสี) เมื่อคุณกดยกเลิกจิ้มหมุด (ปิด Popup)
         document.body.classList.remove('filter-hover-active');
     }}
 
@@ -475,7 +494,6 @@ def generate_map():
             }});
             lbl.addEventListener('mouseleave', function() {{
                 currentHoveredSelector = null; 
-                // [เพิ่มเงื่อนไข] ถ้าเรายังจิ้มหมุดค้างไว้อยู่ ห้ามยกเลิกโหมดจาง (ดรอปสี) เด็ดขาด
                 if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
                 document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
@@ -492,7 +510,6 @@ def generate_map():
             }});
             lbl.addEventListener('mouseleave', function() {{
                 currentHoveredSelector = null; 
-                // [เพิ่มเงื่อนไข] ถ้าเรายังจิ้มหมุดค้างไว้อยู่ ห้ามยกเลิกโหมดจาง (ดรอปสี) เด็ดขาด
                 if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
                 document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
