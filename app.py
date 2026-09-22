@@ -30,7 +30,9 @@ def get_status_config(status_text):
     if 'TELEMETRY' in status_upper: return "Telemetry Failure", "gold", "wrench"
     elif 'CONNECTING' in status_upper:
         raw_parent = "Connecting"
-        if 'ผบอ.' in status_upper and 'ผอส.' in status_upper: return raw_parent, "orange", "user"
+        # [เพิ่มใหม่] ดักจับสถานะ เคยแก้ไขแล้วกลับมา Offline ให้อยู่กลุ่ม Connecting สีม่วง และใช้ไอคอน history (ย้อนเวลา/ประวัติ)
+        if 'เคยแก้ไข' in status_upper and 'OFFLINE' in status_upper: return raw_parent, "purple", "history"
+        elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: return raw_parent, "orange", "user"
         elif 'ระบบสื่อสาร' in status_upper: return raw_parent, "purple", "wrench"
         elif 'ผบอ.' in status_upper: return raw_parent, "orange", "check"
         elif 'ผอส.' in status_upper: return raw_parent, "purple", "check" 
@@ -110,7 +112,9 @@ def generate_map():
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
-        active_status_display = active_status.replace("Connecting ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline", "Connecting ระบบสื่อสารเคยแก้ไขแล้ว<br>กลับมา Offline")
+        
+        # [ปรับปรุง] ตัดคำขึ้นบรรทัดใหม่ให้สวยงาม ไม่ว่าจะมาจากระบบสื่อสาร หรือ ผบอ.
+        active_status_display = active_status.replace("เคยแก้ไขแล้ว กลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline").replace("เคยแก้ไขแล้วกลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline")
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
         parent_counts[raw_parent] += 1
@@ -159,7 +163,8 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str.replace("Connecting ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline", "Connecting ระบบสื่อสารเคยแก้ไขแล้ว<br>กลับมา Offline")
+            # [ปรับปรุง] ช่วยตัดบรรทัดข้อมูลใน Popup Table ให้สวยงาม
+            display_val = val_str.replace("เคยแก้ไขแล้ว กลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline").replace("เคยแก้ไขแล้วกลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline")
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -719,7 +724,7 @@ def map_data():
         with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
             return f.read()
     except:
-        return "<h2 style='text-align:center; margin-top:20%; color:white; font-family:sans-serif;'>ระบบกำลังเตรียมข้อมูล...</h2>", 503
+        return "<style>body{background:transparent;}</style><script>setTimeout(()=>window.location.reload(), 3000);</script>", 503
 
 @app.route('/api/version')
 def api_version():
@@ -746,7 +751,7 @@ def index():
             .map-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
             .layer-active { z-index: 2; opacity: 1; transition: opacity 0.8s ease-in-out; }
             .layer-hidden { z-index: 1; opacity: 0; pointer-events: none; }
-            #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; z-index: 0; text-align: center; }
+            #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; z-index: 0; text-align: center; transition: opacity 0.5s; }
         </style>
     </head>
     <body>
@@ -769,16 +774,26 @@ def index():
                 } catch(e) {}
                 return null;
             }
+            
+            // ซ่อนหน้าจอโหลดเมื่อวาดแผนที่เสร็จสมบูรณ์
+            document.getElementById('layer1').onload = function() {
+                var map = getMapInstance(this);
+                if (map) {
+                    var loader = document.getElementById('loader');
+                    if (loader) {
+                        loader.style.opacity = '0';
+                        setTimeout(() => loader.style.display = 'none', 800);
+                    }
+                }
+            };
 
             function checkUpdate() {
-                // ถามเซิร์ฟเวอร์แบบเงียบๆ ว่ามีเวอร์ชันใหม่หรือยัง
                 fetch('/api/version?t=' + new Date().getTime(), { cache: 'no-store' })
                     .then(res => res.json())
                     .then(data => {
                         if (currentVersion === null) {
                             currentVersion = data.version;
                         } else if (data.version !== currentVersion && data.version > 0) {
-                            console.log("🔥 พบข้อมูลใหม่! กำลังวาดแผนที่และเตรียมสลับหน้าจอ...");
                             currentVersion = data.version;
                             swapMap();
                         }
@@ -790,11 +805,9 @@ def index():
                 var activeIframe = document.getElementById('layer' + activeLayer);
                 var nextIframe = document.getElementById('layer' + nextLayer);
 
-                // แอบโหลดแผนที่ใบใหม่ใส่กระจกบานที่ซ่อนอยู่
                 nextIframe.src = '/map-data?v=' + currentVersion + '&t=' + new Date().getTime();
 
                 nextIframe.onload = function() {
-                    // รอจนกว่าพิกัดและข้อมูลของกระจกบานใหม่จะพร้อมใช้งาน
                     var checkReady = setInterval(function() {
                         var newMap = getMapInstance(nextIframe);
                         var oldMap = getMapInstance(activeIframe);
@@ -802,30 +815,25 @@ def index():
                         if (newMap) {
                             clearInterval(checkReady);
                             
-                            // ก๊อปปี้ตำแหน่งจอให้ตรงกันเป๊ะ
                             if (oldMap) {
                                 newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false});
                             }
 
-                            // เฟดสว่างกระจกบานใหม่ขึ้นมาทับบานเก่า (เนียนกริบ)
                             nextIframe.className = 'map-layer layer-active';
                             activeIframe.className = 'map-layer layer-hidden';
                             
                             activeLayer = nextLayer;
 
-                            // คืนพื้นที่ RAM หลังสลับฉากเสร็จ
                             setTimeout(function() {
                                 activeIframe.src = 'about:blank';
                             }, 1500);
                         }
                     }, 100);
 
-                    // ตัดจบถ้าโหลดเกิน 5 วินาที
                     setTimeout(() => clearInterval(checkReady), 5000);
                 };
             }
 
-            // ส่งบอทจิ๋วไปเช็คเวอร์ชันใหม่ทุกๆ 15 วินาที
             setInterval(checkUpdate, 15000);
         </script>
     </body>
