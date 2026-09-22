@@ -35,9 +35,16 @@ def get_status_config(status_text):
         
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        color = "purple" if 'ระบบสื่อสาร' in status_upper else "orange"
         
-        # 2. เช็คเงื่อนไขย่อยเพื่อกำหนดไอคอน
+        # --- ดักจับสีเฉพาะของหมวด Connecting ---
+        if 'ระบบสื่อสาร' in status_upper:
+            color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
+            color = "purple" # คืนค่าสีม่วงให้ ผอส. ตามที่คุณต้องการ
+        else:
+            color = "orange"
+        
+        # --- ดักจับไอคอน ---
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
