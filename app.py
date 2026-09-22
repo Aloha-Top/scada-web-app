@@ -160,7 +160,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str.replace("Connecting ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline", "Connecting ระบบสื่อสารเคยแก้ไขแล้ว<br>กลับมา Offline")
+            display_val = val_str.replace("เคยแก้ไขแล้ว กลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline").replace("เคยแก้ไขแล้วกลับมา Offline", "เคยแก้ไขแล้ว<br>กลับมา Offline")
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -212,6 +212,10 @@ def generate_map():
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
+    
+    body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
+    body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
+    body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
     body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
     .custom-filter-wrapper .leaflet-control-layers-list,
@@ -380,6 +384,9 @@ def generate_map():
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }});
         if (safeId) {{
             window.currentSelectedSafeId = safeId;
+            // [คำสั่งแก้ปัญหา] บังคับให้หมุดตัวอื่นๆ ทั้งหมดบนแผนที่จางลงเวลาจิ้มเลือกหมุด
+            document.body.classList.add('filter-hover-active');
+            
             var attempts = 0;
             var tryHighlight = setInterval(function() {{
                 var targetPins = document.querySelectorAll('.pin-site-' + safeId);
@@ -393,7 +400,12 @@ def generate_map():
         }}
     }}
 
-    function clearHighlight() {{ document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); window.currentSelectedSafeId = null; }}
+    function clearHighlight() {{ 
+        document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); 
+        window.currentSelectedSafeId = null; 
+        // [คำสั่งแก้ปัญหา] ยืนยันการยกเลิกโหมดจาง (ดรอปสี) เมื่อคุณกดยกเลิกจิ้มหมุด (ปิด Popup)
+        document.body.classList.remove('filter-hover-active');
+    }}
 
     function reapplyHighlight() {{
         if (currentHoveredSelector && document.body.classList.contains('filter-hover-active')) {{
@@ -416,8 +428,8 @@ def generate_map():
             document.body.appendChild(filterWrapper); filterWrapper.appendChild(formElem);
             
             filterBtn.addEventListener('click', function(e) {{ e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); }});
+            document.addEventListener('click', function(e) {{ if (filterWrapper.classList.contains('show')) {{ if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ filterWrapper.classList.remove('show'); }} }} }});
             
-            // ป้องกันแผนที่ดูดกลืนคำสั่ง Click
             L.DomEvent.disableClickPropagation(filterWrapper);
             filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
             filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
@@ -426,22 +438,6 @@ def generate_map():
             filterWrapper.addEventListener('mouseleave', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.enable(); }} }});
             
             document.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ cb.addEventListener('change', reapplyHighlight); }});
-
-            // [เพิ่มคำสั่งใหม่] ปิดเมนูเมื่อมีการกดพื้นที่นอกกล่อง (ทั้งคลิกและทัช)
-            document.addEventListener('click', function(e) {{ 
-                if (filterWrapper.classList.contains('show')) {{ 
-                    if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
-                        filterWrapper.classList.remove('show'); 
-                    }} 
-                }} 
-            }});
-            document.addEventListener('touchstart', function(e) {{ 
-                if (filterWrapper.classList.contains('show')) {{ 
-                    if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
-                        filterWrapper.classList.remove('show'); 
-                    }} 
-                }} 
-            }}, {{passive: true}});
 
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
@@ -478,7 +474,10 @@ def generate_map():
                 if (statusHashMap[targetStr]) {{ document.body.classList.add('filter-hover-active'); document.querySelectorAll(currentHoveredSelector).forEach(function(el) {{ el.classList.add('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = 9999; }}); }}
             }});
             lbl.addEventListener('mouseleave', function() {{
-                currentHoveredSelector = null; document.body.classList.remove('filter-hover-active'); document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
+                currentHoveredSelector = null; 
+                // [เพิ่มเงื่อนไข] ถ้าเรายังจิ้มหมุดค้างไว้อยู่ ห้ามยกเลิกโหมดจาง (ดรอปสี) เด็ดขาด
+                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
         }});
 
@@ -492,7 +491,10 @@ def generate_map():
                 }}
             }});
             lbl.addEventListener('mouseleave', function() {{
-                currentHoveredSelector = null; document.body.classList.remove('filter-hover-active'); document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
+                currentHoveredSelector = null; 
+                // [เพิ่มเงื่อนไข] ถ้าเรายังจิ้มหมุดค้างไว้อยู่ ห้ามยกเลิกโหมดจาง (ดรอปสี) เด็ดขาด
+                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
         }});
     }}, 1500);
@@ -502,7 +504,6 @@ def generate_map():
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
         if (globalMap) {{
 
-            // [เพิ่มคำสั่งใหม่] ปิดเมนูสถานะทันทีที่มีการกดหรือเลื่อนแผนที่
             globalMap.on('click dragstart popupopen', function() {{
                 var fw = document.getElementById('customFilterWrapper');
                 if (fw) fw.classList.remove('show');
@@ -622,11 +623,8 @@ def generate_map():
     function handleSearchFocus() {{ 
         box.classList.add('focus'); 
         hideCustomPanel(); 
-        
-        // ปิดเมนูสถานะอัตโนมัติเมื่อกดช่องค้นหา
         var fw = document.getElementById('customFilterWrapper');
         if (fw) fw.classList.remove('show');
-        
         triggerSearch(); 
     }}
 
