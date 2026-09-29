@@ -134,7 +134,8 @@ def generate_map():
         row, lat, lon, active_status, active_status_display = node['row'], node['lat'], node['lon'], node['active_status'], node['active_status_display']
         raw_parent, icon_name, h_color = node['raw_parent'], node['icon_name'], hex_color_map.get(node['color'], '#575757')
         
-        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[raw_parent][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[raw_parent][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
+        c_hex, label = raw_parent_keys[raw_parent]
+        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{c_hex}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
         safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
 
         if active_status not in mc_groups:
@@ -194,7 +195,6 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # --- นำ MarkerCluster ลงแผนที่ ---
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
@@ -209,12 +209,10 @@ def generate_map():
                 elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s: w = 6
                 else: w = 10
                 return (w, len(s), s)
-                
             items_list.sort(key=custom_sort)
-            
             sorted_mcs = []
             for active_status, mc in items_list:
-                m.add_child(mc) # [สำคัญ] นี่คือคำสั่งแปะหมุดลงแผนที่ที่ผมเผลอลบไป
+                m.add_child(mc)
                 sorted_mcs.append(mc)
             active_grouped_layers[p_html] = sorted_mcs
 
@@ -225,14 +223,17 @@ def generate_map():
     export_json = json.dumps(export_data_list, ensure_ascii=False)
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
 
+    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว (ไม่มีบัค Filter หาย หรือหัวข้อเรียงผิด) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
     .leaflet-top {{ z-index: 999 !important; }}
     .leaflet-bottom {{ z-index: 998 !important; }}
-    .leaflet-top.leaflet-left .leaflet-control-layers, .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
+    .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
+    .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
@@ -240,6 +241,7 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
+    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
     .custom-filter-wrapper .leaflet-control-layers-list,
     .g-search-results,
@@ -260,8 +262,37 @@ def generate_map():
     .g-search-results::-webkit-scrollbar-thumb:hover,
     .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; }}
-    @media (max-width: 768px) {{ .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 55vh !important; border-radius: 20px 20px 0 0 !important; animation: slideUpFade 0.3s ease-out; border-bottom: none !important;}} .popup-body {{ max-height: calc(55vh - 125px) !important; }} .g-search-container {{ width: calc(100vw - 32px) !important; max-width: none !important; }} }}
+    .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
+    .g-search-box {{ pointer-events: auto; background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
+
+    .standalone-filter-btn {{ position: fixed; right: 16px; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex !important; align-items: center; justify-content: center; cursor: pointer; z-index: 999999 !important; transition: transform 0.1s, background-color 0.2s; border: 1px solid #444746; pointer-events: auto !important; }}
+    .standalone-filter-btn:hover {{ background-color: #3c4043; }}
+    .standalone-filter-btn:active {{ transform: scale(0.92); }}
+    .standalone-filter-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
+
+    /* ซ่อนกล่อง Base Map ใน Filter เผื่อ Folium แอบแทรกเข้ามา */
+    .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
+
+    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998 !important; pointer-events: auto; padding-top: 8px; }}
+    .custom-filter-wrapper.show {{ display: flex !important; }}
+
+    .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; pointer-events: auto; }}
+
+    @media (max-width: 768px) {{ 
+        .g-search-container {{ width: calc(100vw - 88px) !important; max-width: none !important; }} 
+        .custom-filter-wrapper {{ top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px) !important; right: 16px !important; left: 16px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
+        .custom-info-panel {{ 
+            top: auto !important; bottom: 0 !important; left: 0 !important; 
+            width: 100vw !important; max-width: 100vw !important; 
+            max-height: 55vh !important; 
+            border-radius: 20px 20px 0 0 !important; 
+            animation: slideUpFade 0.3s ease-out; 
+            border-bottom: none !important;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }} 
+        .popup-body {{ max-height: calc(55vh - 125px - env(safe-area-inset-bottom, 0px)) !important; }} 
+    }}
+
     @keyframes slideDownFade {{ from {{ opacity: 0; transform: translateY(-15px); }} to {{ opacity: 1; transform: translateY(0); }} }}
     @keyframes slideUpFade {{ from {{ opacity: 0; transform: translateY(100%); }} to {{ opacity: 1; transform: translateY(0); }} }}
 
@@ -288,26 +319,14 @@ def generate_map():
     .popup-table td:first-child {{ color: #5f6368; font-weight: 500; width: 45%; vertical-align: top; padding-right: 8px; }}
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
 
-    .standalone-filter-btn {{ position: fixed; right: 16px; top: 16px; width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: transform 0.1s, background-color 0.2s; border: 1px solid #444746; }}
-    .standalone-filter-btn:hover {{ background-color: #3c4043; }}
-    .standalone-filter-btn:active {{ transform: scale(0.92); }}
-    .standalone-filter-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; }}
-
-    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: 72px; right: 16px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 99999; }}
-    .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-
-    .custom-filter-wrapper .leaflet-control-layers-list {{ 
-        flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; 
-        padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; 
-    }}
-
+    .custom-filter-wrapper .leaflet-control-layers-list {{ flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; }}
     .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
     .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
     .custom-filter-wrapper .leaflet-control-layers-group-name {{ display: block !important; width: 100%; transition: background-color 0.2s; }}
     .custom-filter-wrapper .leaflet-control-layers-group-name:hover {{ background-color: #35363a !important; }}
-    .custom-filter-wrapper label {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; padding: 6px 16px !important; margin: 0 !important; cursor: pointer; transition: background-color 0.15s; }}
+    .custom-filter-wrapper label {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; padding: 6px 16px !important; margin: 0 !important; cursor: pointer; transition: background-color 0.15s; pointer-events: auto; }}
     .custom-filter-wrapper label:hover {{ background-color: #35363a !important; }}
     .custom-filter-wrapper label > span {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; white-space: normal !important; }}
     .custom-filter-wrapper input[type="checkbox"] {{ flex-shrink: 0 !important; -webkit-appearance: none !important; -moz-appearance: none !important; appearance: none !important; width: 18px !important; height: 18px !important; border: 2px solid #8e918f !important; border-radius: 3px !important; margin: 2px 14px 0 0 !important; position: relative !important; cursor: pointer; outline: none; transition: all 0.2s ease; background-color: transparent !important; }}
@@ -320,15 +339,12 @@ def generate_map():
     .g-export-btn:active {{ transform: scale(0.97) !important; }}
     .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
-    .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: 16px; left: 16px; width: 380px; margin: 0; }}
-    @media (max-width: 768px) {{ .g-search-container {{ width: calc(100vw - 88px); max-width: 400px; }} }}
-    .g-search-box {{ background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8; }}
     .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
-    .g-search-input {{ flex: 1; border: none; outline: none; background: transparent; font-size: 14px; color: #e8eaed; margin-left: 10px; width: 100%; font-family: 'Prompt', sans-serif; }}
+    .g-search-input {{ flex: 1; border: none; outline: none; background: transparent; font-size: 14px; color: #e8eaed; margin-left: 10px; width: 100%; font-family: 'Prompt', sans-serif; pointer-events: auto; }}
     .g-search-input::placeholder {{ color: #9aa0a6; font-weight: 400; }}
-    .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; }}
-    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; }}
+    .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
+    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
     .g-search-item {{ padding: 12px 16px; display: flex; flex-direction: column; cursor: pointer; border-bottom: 1px solid #35363a; transition: background-color 0.2s, border-left 0.2s; border-left: 3px solid transparent; gap: 6px; }}
     .g-search-item:last-child {{ border-bottom: none; }}
@@ -352,11 +368,11 @@ def generate_map():
     @keyframes cone-breathe {{ 0% {{ transform: scale(0.85); opacity: 0.7; }} 50% {{ transform: scale(1.1); opacity: 1; }} 100% {{ transform: scale(0.85); opacity: 0.7; }} }}
     .my-location-dot {{ position: absolute; background-color: #4285F4; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2; }}
 
-    .g-layer-container {{ position: absolute; bottom: 24px; left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; }}
-    .g-layer-main-btn {{ width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
+    .g-layer-container {{ position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; pointer-events: none; }}
+    .g-layer-main-btn {{ pointer-events: auto; width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
     .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
     .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
-    .g-layer-panel {{ background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
+    .g-layer-panel {{ pointer-events: auto; background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
     .g-layer-container:hover .g-layer-panel {{ max-width: 500px; padding: 0 20px; opacity: 1; }}
     .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 6px; padding: 4px; border-radius: 10px; transition: background-color 0.2s; }}
     .g-layer-item:hover {{ background-color: rgba(255,255,255,0.1); }}
@@ -365,12 +381,14 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
+    <div id="standaloneFilterBtn" class="standalone-filter-btn"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
+    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
+
     <div id="customInfoPanel" class="custom-info-panel">
         <div class="panel-close-btn" id="closeInfoPanelBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
         <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
 
-    <div id="standaloneFilterBtn" class="standalone-filter-btn"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
             <div class="g-search-icon"><svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:20px; height:20px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
@@ -386,8 +404,34 @@ def generate_map():
 
     <script>
     var statusHashMap = {status_hash_json};
+    var expData = {export_json};
+    var sData = {search_json};
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
+
+    var filterBtn = document.getElementById('standaloneFilterBtn');
+    var filterWrapper = document.getElementById('customFilterWrapper');
+
+    if (filterBtn && filterWrapper) {{
+        filterBtn.addEventListener('click', function(e) {{ 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            filterWrapper.classList.toggle('show'); 
+        }});
+        
+        document.addEventListener('click', function(e) {{ 
+            if (filterWrapper.classList.contains('show')) {{ 
+                if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                    filterWrapper.classList.remove('show'); 
+                }} 
+            }} 
+        }});
+        
+        L.DomEvent.disableClickPropagation(filterBtn);
+        L.DomEvent.disableClickPropagation(filterWrapper);
+        filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+        filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+    }}
 
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
@@ -396,9 +440,7 @@ def generate_map():
         for (var key in window) {{
             if (key.startsWith('map_')) {{
                 var map = window[key];
-                if (map && typeof map.closePopup === 'function') {{
-                    map.closePopup();
-                }}
+                if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }}
             }}
         }}
     }}
@@ -433,40 +475,112 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    setTimeout(function() {{
-        var filterBtn = document.getElementById('standaloneFilterBtn');
-        var layerControl = document.querySelector('.leaflet-top.leaflet-right .leaflet-control-layers'); 
-        var formElem = layerControl ? layerControl.querySelector('form') : null;
+    // --- ดึงฟอร์มสถานะเข้ากล่อง Filter แบบล๊อกเป้า 100% ---
+    var checkMapReady = setInterval(function() {{
+        var targetForm = null;
+        document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
+            if (f.querySelector('.leaflet-control-layers-group')) {{
+                targetForm = f;
+            }}
+        }});
+        
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
 
-        if (filterBtn && formElem) {{
-            var filterWrapper = document.createElement('div');
-            filterWrapper.id = 'customFilterWrapper';
-            filterWrapper.className = 'custom-filter-wrapper';
-            document.body.appendChild(filterWrapper); filterWrapper.appendChild(formElem);
+        if (targetForm && globalMap && filterWrapper) {{
+            clearInterval(checkMapReady); 
             
-            filterBtn.addEventListener('click', function(e) {{ e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); }});
-            document.addEventListener('click', function(e) {{ if (filterWrapper.classList.contains('show')) {{ if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ filterWrapper.classList.remove('show'); }} }} }});
+            filterWrapper.addEventListener('mouseenter', function () {{ globalMap.scrollWheelZoom.disable(); }});
+            filterWrapper.addEventListener('mouseleave', function () {{ globalMap.scrollWheelZoom.enable(); }});
             
-            L.DomEvent.disableClickPropagation(filterWrapper);
-            filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-            filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+            filterWrapper.appendChild(targetForm);
+            
+            var controlList = filterWrapper.querySelector('.leaflet-control-layers-overlays');
+            if (controlList) {{
+                var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
+                groups.forEach(function(group) {{
+                    var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
+                    
+                    itemLabels.sort(function(a, b) {{
+                        var snA = a.querySelector('.status-text');
+                        var snB = b.querySelector('.status-text');
+                        var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
+                        var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
+                        
+                        function getWeight(s) {{
+                            if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
+                            if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
+                            if (s.includes("รอ ผบอ. และ ผอส.") || s.includes("และ ผอส")) return 3;
+                            if (s.includes("รอ ผอส.")) return 4;
+                            if (s.includes("ผบอ. เคยแก้ไข")) return 5;
+                            if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
+                            return 10;
+                        }}
+                        var weightA = getWeight(sA);
+                        var weightB = getWeight(sB);
+                        if (weightA !== weightB) return weightA - weightB;
+                        if (sA.length !== sB.length) return sA.length - sB.length;
+                        return sA.localeCompare(sB);
+                    }});
+                    itemLabels.forEach(function(label) {{ group.appendChild(label); }});
+                }});
+            }}
 
-            filterWrapper.addEventListener('mouseenter', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.disable(); }} }});
-            filterWrapper.addEventListener('mouseleave', function () {{ if(globalMap) {{ globalMap.scrollWheelZoom.enable(); }} }});
-            
-            document.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ cb.addEventListener('change', reapplyHighlight); }});
+            filterWrapper.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ 
+                cb.addEventListener('change', reapplyHighlight); 
+            }});
+
+            filterWrapper.querySelectorAll('label').forEach(function(lbl) {{
+                lbl.addEventListener('mouseenter', function() {{
+                    var statusNode = this.querySelector('.status-text');
+                    var targetStr = statusNode ? statusNode.getAttribute('data-status') : this.textContent.replace(/●/g,'').trim();
+                    currentHoveredSelector = ".s_" + statusHashMap[targetStr];
+                    if (statusHashMap[targetStr]) {{ document.body.classList.add('filter-hover-active'); document.querySelectorAll(currentHoveredSelector).forEach(function(el) {{ el.classList.add('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = 9999; }}); }}
+                }});
+                lbl.addEventListener('mouseleave', function() {{
+                    currentHoveredSelector = null; 
+                    if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                    document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
+                }});
+            }});
+
+            filterWrapper.querySelectorAll('.leaflet-control-layers-group-label').forEach(function(lbl) {{
+                lbl.title = 'คลิกเพื่อ เลือก/ยกเลิก ทั้งหมดในกลุ่มนี้';
+                lbl.addEventListener('click', function(e) {{
+                    e.preventDefault(); e.stopPropagation();
+                    var parentGroup = this.closest('.leaflet-control-layers-group') || this.parentElement.parentElement;
+                    if (!parentGroup) return;
+                    var checkboxes = parentGroup.querySelectorAll('.leaflet-control-layers-selector');
+                    if (checkboxes.length === 0) return;
+                    var allChecked = true;
+                    checkboxes.forEach(function(cb) {{ if (!cb.checked) allChecked = false; }});
+                    checkboxes.forEach(function(cb) {{ if (cb.checked !== !allChecked) {{ cb.click(); }} }});
+                    reapplyHighlight(); 
+                }});
+                lbl.addEventListener('mouseenter', function() {{
+                    var parentNode = this.querySelector('.parent-text');
+                    if(parentNode) {{
+                        var parentStr = parentNode.getAttribute('data-parent');
+                        currentHoveredSelector = ".p_" + statusHashMap[parentStr];
+                        if(statusHashMap[parentStr]) {{ document.body.classList.add('filter-hover-active'); document.querySelectorAll(currentHoveredSelector).forEach(function(el) {{ el.classList.add('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = 9999; }}); }}
+                    }}
+                }});
+                lbl.addEventListener('mouseleave', function() {{
+                    currentHoveredSelector = null; 
+                    if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                    document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
+                }});
+            }});
 
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
                 exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
-                formElem.appendChild(exportDiv);
+                targetForm.appendChild(exportDiv);
 
                 document.getElementById('exportCsvBtn').onclick = function(e) {{
                     e.preventDefault(); e.stopPropagation();
                     var activeStatuses = [];
-                    document.querySelectorAll('.leaflet-control-layers-selector:checked').forEach(function(inp) {{
+                    filterWrapper.querySelectorAll('.leaflet-control-layers-selector:checked').forEach(function(inp) {{
                         var lbl = inp.nextElementSibling || inp.parentElement;
                         var statusNode = lbl.querySelector('.status-text');
                         activeStatuses.push(statusNode ? statusNode.getAttribute('data-status') : lbl.textContent.replace(/●/g,'').trim());
@@ -482,70 +596,7 @@ def generate_map():
                 }};
             }}
         }}
-    }}, 1000);
-
-    setTimeout(function() {{
-        var controlList = document.querySelector('.leaflet-control-layers-overlays');
-        if (controlList) {{
-            var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
-            groups.forEach(function(group) {{
-                var labels = Array.from(group.querySelectorAll('label'));
-                labels.sort(function(a, b) {{
-                    var sA = a.textContent.trim().toUpperCase();
-                    var sB = b.textContent.trim().toUpperCase();
-                    
-                    function getWeight(s) {{
-                        if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
-                        if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
-                        if (s.includes("รอ ผบอ. และ ผอส.") || s.includes("และ ผอส")) return 3;
-                        if (s.includes("รอ ผอส.")) return 4;
-                        if (s.includes("ผบอ. เคยแก้ไข")) return 5;
-                        if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
-                        return 10;
-                    }}
-                    
-                    var weightA = getWeight(sA);
-                    var weightB = getWeight(sB);
-                    
-                    if (weightA !== weightB) return weightA - weightB;
-                    if (sA.length !== sB.length) return sA.length - sB.length;
-                    return sA.localeCompare(sB);
-                }});
-                
-                labels.forEach(function(label) {{ group.appendChild(label); }});
-            }});
-        }}
-
-        document.querySelectorAll('.custom-filter-wrapper label').forEach(function(lbl) {{
-            lbl.addEventListener('mouseenter', function() {{
-                var statusNode = this.querySelector('.status-text');
-                var targetStr = statusNode ? statusNode.getAttribute('data-status') : this.textContent.replace(/●/g,'').trim();
-                currentHoveredSelector = ".s_" + statusHashMap[targetStr];
-                if (statusHashMap[targetStr]) {{ document.body.classList.add('filter-hover-active'); document.querySelectorAll(currentHoveredSelector).forEach(function(el) {{ el.classList.add('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = 9999; }}); }}
-            }});
-            lbl.addEventListener('mouseleave', function() {{
-                currentHoveredSelector = null; 
-                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
-                document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
-            }});
-        }});
-
-        document.querySelectorAll('.leaflet-control-layers-group-label').forEach(function(lbl) {{
-            lbl.addEventListener('mouseenter', function() {{
-                var parentNode = this.querySelector('.parent-text');
-                if(parentNode) {{
-                    var parentStr = parentNode.getAttribute('data-parent');
-                    currentHoveredSelector = ".p_" + statusHashMap[parentStr];
-                    if(statusHashMap[parentStr]) {{ document.body.classList.add('filter-hover-active'); document.querySelectorAll(currentHoveredSelector).forEach(function(el) {{ el.classList.add('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = 9999; }}); }}
-                }}
-            }});
-            lbl.addEventListener('mouseleave', function() {{
-                currentHoveredSelector = null; 
-                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
-                document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
-            }});
-        }});
-    }}, 1500);
+    }}, 100); 
 
     setTimeout(function() {{
         var globalMap = null;
@@ -617,11 +668,11 @@ def generate_map():
     var mapConfigs = [
         {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
         {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
-        {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
         {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
+        {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
         {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
-    
+
     var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
@@ -630,44 +681,38 @@ def generate_map():
         div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
         panel.appendChild(div);
     }});
+
     function getRadioByKeyword(kw) {{
         var labels = document.querySelectorAll('.leaflet-control-layers-base label');
         for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
         return null;
     }}
+
     function switchMapLayer(idx) {{
-        currentMapIndex = idx; var radio = getRadioByKeyword(mapConfigs[idx].keyword); if (radio && !radio.checked) radio.click();
-        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ if(i === idx) item.classList.add('active'); else item.classList.remove('active'); }});
-        var nextIdx = (idx + 1) % mapConfigs.length;
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[nextIdx].thumb + ')';
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
-    }}
-    document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
-    
-    // บังคับเปลี่ยนแผนที่ตอนโหลดหน้าจอ เพื่อรับรองว่าพื้นหลังและไอคอนตรงกันชัวร์ 100%
-    setTimeout(function() {{ 
-        switchMapLayer(0); 
-    }}, 500);
-
-    var expData = {export_json};
-    setTimeout(function() {{
-        document.querySelectorAll('.leaflet-control-layers-group-name').forEach(function(header) {{
-            header.title = 'คลิกเพื่อ เลือก/ยกเลิก ทั้งหมดในกลุ่มนี้';
-            header.addEventListener('click', function(e) {{
-                e.preventDefault(); e.stopPropagation();
-                var parentGroup = this.closest('.leaflet-control-layers-group') || this.parentElement.parentElement;
-                if (!parentGroup) return;
-                var checkboxes = parentGroup.querySelectorAll('.leaflet-control-layers-selector');
-                if (checkboxes.length === 0) return;
-                var allChecked = true;
-                checkboxes.forEach(function(cb) {{ if (!cb.checked) allChecked = false; }});
-                checkboxes.forEach(function(cb) {{ if (cb.checked !== !allChecked) {{ cb.click(); }} }});
-                reapplyHighlight(); 
-            }});
+        currentMapIndex = idx; 
+        var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
+        if (radio && !radio.checked) {{
+            radio.checked = true;
+            radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
+        }}
+        
+        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
+            if(i === idx) item.classList.add('active'); 
+            else item.classList.remove('active'); 
         }});
-    }}, 1400);
+        
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
+    }}
 
-    var sData = {search_json};
+    document.getElementById('gLayerMainBtn').onclick = function(e) {{ 
+        e.stopPropagation(); 
+        switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
+    }};
+
+    setTimeout(function() {{ switchMapLayer(0); }}, 800);
+
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
