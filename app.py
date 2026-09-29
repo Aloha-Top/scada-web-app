@@ -18,7 +18,6 @@ LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
 
 def get_meta():
-    """อ่านข้อมูลเวลาอัปเดตล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -26,69 +25,50 @@ def get_meta():
         return {'version': 0, 'last_update': 0}
 
 def get_status_config(status_text):
-    """กำหนด หมวดหมู่(Parent), สี, และ ไอคอน ตามสถานะ"""
     status_upper = str(status_text).strip().upper()
     
     if status_upper.startswith('TELEMETRY'):
         return "Telemetry Failure", "gold", "wrench"
-        
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        
-        # --- ดักจับสีเฉพาะของหมวด Connecting ---
-        if 'ระบบสื่อสาร' in status_upper:
-            color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
-            color = "purple" 
-        else:
-            color = "orange"
-        
-        # --- ดักจับไอคอน ---
+        if 'ระบบสื่อสาร' in status_upper: color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple" 
+        else: color = "orange"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
         color = "red"
-        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "times"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('ONLINE'):
         raw_parent = "Online"
         color = "green"
         icon = "history" if 'เคยแก้ไข' in status_upper else "check"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
         color = "lightgreen"
-        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-        
     else:
         return "สถานะอื่นๆ", "gray", "info-circle"
 
 def generate_map():
-    """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่"""
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
-    try:
-        df = pd.read_csv(csv_export_url)
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
-        raise e
+    try: df = pd.read_csv(csv_export_url)
+    except Exception as e: raise e
 
     status_hash_map = {}
     def get_hash(text):
@@ -104,7 +84,6 @@ def generate_map():
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
-    # [แก้ไขที่ 1] ย้ายแผนที่ภูมิประเทศขึ้นเป็นบรรทัดแรกสุด เพื่อบังคับให้ระบบมองเป็นแผนที่ตั้งต้น
     folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
     folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
@@ -155,7 +134,7 @@ def generate_map():
         row, lat, lon, active_status, active_status_display = node['row'], node['lat'], node['lon'], node['active_status'], node['active_status_display']
         raw_parent, icon_name, h_color = node['raw_parent'], node['icon_name'], hex_color_map.get(node['color'], '#575757')
         
-        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[raw_parent][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[raw_parent][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
+        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[raw_parent][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
         safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
 
         if active_status not in mc_groups:
@@ -191,7 +170,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str
+            display_val = val_str 
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -229,9 +208,7 @@ def generate_map():
                 elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s: w = 6
                 else: w = 10
                 return (w, len(s), s)
-                
             items_list.sort(key=custom_sort)
-            
             sorted_mcs = []
             for active_status, mc in items_list:
                 m.add_child(mc)
@@ -253,11 +230,11 @@ def generate_map():
     .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers, .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+    
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
-    
-    /* สั่งจางเฉพาะตอนชี้เมนูขวา (filter-hover-active) เท่านั้น */
+
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
@@ -281,10 +258,22 @@ def generate_map():
     .g-search-results::-webkit-scrollbar-thumb:hover,
     .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
+    /* Responsive Web App Design (Mobile Bottom Sheet) */
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; }}
-    @media (max-width: 768px) {{ .custom-info-panel {{ top: auto !important; bottom: 20px !important; left: 16px; width: calc(100vw - 32px); max-height: 48vh !important; animation: slideUpFade 0.3s ease-out; }} .popup-body {{ max-height: calc(48vh - 125px) !important; }} }}
+    @media (max-width: 768px) {{ 
+        .custom-info-panel {{ 
+            top: auto !important; bottom: 0 !important; left: 0 !important; 
+            width: 100vw !important; max-width: 100vw !important; 
+            max-height: 55vh !important; 
+            border-radius: 20px 20px 0 0 !important; 
+            animation: slideUpFade 0.3s ease-out; 
+            border-bottom: none !important;
+        }} 
+        .popup-body {{ max-height: calc(55vh - 125px) !important; }} 
+        .g-search-container {{ width: calc(100vw - 32px) !important; max-width: none !important; }}
+    }}
     @keyframes slideDownFade {{ from {{ opacity: 0; transform: translateY(-15px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-    @keyframes slideUpFade {{ from {{ opacity: 0; transform: translateY(20px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+    @keyframes slideUpFade {{ from {{ opacity: 0; transform: translateY(100%); }} to {{ opacity: 1; transform: translateY(0); }} }}
 
     .panel-close-btn {{ position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; background: rgba(0,0,0,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; transition: 0.2s; }}
     .panel-close-btn:hover {{ background: rgba(0,0,0,0.6); }}
@@ -317,12 +306,11 @@ def generate_map():
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: 72px; right: 16px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 99999; }}
     .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-
+    
     .custom-filter-wrapper .leaflet-control-layers-list {{ 
         flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; 
         padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; 
     }}
-
     .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
     .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
@@ -342,7 +330,6 @@ def generate_map():
     .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: 16px; left: 16px; width: 380px; margin: 0; }}
-    @media (max-width: 768px) {{ .g-search-container {{ width: calc(100vw - 88px); max-width: 400px; }} }}
     .g-search-box {{ background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8; }}
     .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
@@ -408,26 +395,25 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
+    // --- แก้ไขปัญหาหมุนจอ/หน้าต่างแล้วแผนที่ค้างแหว่ง ---
+    window.addEventListener('resize', function() {{
+        if(typeof globalMap !== 'undefined' && globalMap) {{ setTimeout(function() {{ globalMap.invalidateSize(); }}, 200); }}
+    }});
+    window.addEventListener('orientationchange', function() {{
+        if(typeof globalMap !== 'undefined' && globalMap) {{ setTimeout(function() {{ globalMap.invalidateSize(); }}, 300); }}
+    }});
+
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
         clearHighlight();
-        for (var key in window) {{
-            if (key.startsWith('map_')) {{
-                var map = window[key];
-                if (map && typeof map.closePopup === 'function') {{
-                    map.closePopup();
-                }}
-            }}
-        }}
+        for (var key in window) {{ if (key.startsWith('map_')) {{ var map = window[key]; if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }} }} }}
     }}
 
     function highlightPin(safeId) {{
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }});
         if (safeId) {{
             window.currentSelectedSafeId = safeId;
-            // [แก้ไข 2] เอาการเรียก filter-hover-active ออก เพื่อไม่ให้หมุดตัวอื่นจางลงตอนคลิกเลือกหมุด
-            
             var attempts = 0;
             var tryHighlight = setInterval(function() {{
                 var targetPins = document.querySelectorAll('.pin-site-' + safeId);
@@ -645,7 +631,7 @@ def generate_map():
         {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
     
-    // [แก้ไข 3] ตั้งค่าให้เริ่มที่แผนที่ภูมิประเทศ (Index 0 ตามลำดับใหม่)
+    // [แก้ไขที่ 2] ตั้งให้ UI ปุ่มแผนที่สอดคล้องกับ Terrain ซึ่งตอนนี้อยู่ Index 0
     var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
@@ -667,10 +653,8 @@ def generate_map():
         document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
     }}
     
-    // บังคับเปลี่ยนแผนที่ตอนโหลดหน้าจอ เพื่อความชัวร์ 100%
-    setTimeout(function() {{ 
-        switchMapLayer(0); 
-    }}, 300);
+    // [แก้ไขที่ 3] สั่งคลิกเปลี่ยนแผนที่เป็น Terrain ซ้ำอีกรอบเพื่อความชัวร์ (การันตีพื้นหลังและไอคอนตรงกัน)
+    setTimeout(function() {{ switchMapLayer(0); }}, 300);
 
     var expData = {export_json};
     setTimeout(function() {{
@@ -766,22 +750,16 @@ def generate_map():
     return m.get_root().render()
 
 def background_task():
-    """พนักงานหลังร้าน: แอบดึงข้อมูลและบันทึกลงไฟล์แบบปลอดภัย"""
     try:
         print("กำลังดึงข้อมูลและสร้างแผนที่เบื้องหลัง...")
         new_html = generate_map()
-        
         tmp_html = CACHE_HTML_FILE + '.tmp'
-        with open(tmp_html, 'w', encoding='utf-8') as f:
-            f.write(new_html)
+        with open(tmp_html, 'w', encoding='utf-8') as f: f.write(new_html)
         os.replace(tmp_html, CACHE_HTML_FILE)
-        
         new_version = int(time.time())
         tmp_meta = CACHE_META_FILE + '.tmp'
-        with open(tmp_meta, 'w') as f:
-            json.dump({'version': new_version, 'last_update': time.time()}, f)
+        with open(tmp_meta, 'w') as f: json.dump({'version': new_version, 'last_update': time.time()}, f)
         os.replace(tmp_meta, CACHE_META_FILE)
-            
         print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
@@ -791,13 +769,11 @@ def background_task():
             except: pass
 
 def trigger_update_if_needed():
-    """เช็คเวลาและสั่งให้พนักงานหลังร้านไปทำงาน"""
     meta = get_meta()
     if time.time() - meta['last_update'] > CACHE_DURATION:
         if os.path.exists(LOCK_FILE) and (time.time() - os.path.getmtime(LOCK_FILE) > 300):
             try: os.remove(LOCK_FILE)
             except: pass
-            
         if not os.path.exists(LOCK_FILE):
             try:
                 open(LOCK_FILE, 'w').close()
@@ -806,25 +782,20 @@ def trigger_update_if_needed():
 
 @app.route('/map-data')
 def map_data():
-    """ส่งข้อมูลแผนที่เพียวๆ เพื่อนำไปใส่ในกรอบหน้ากาก (Wrapper)"""
     try:
-        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f:
-            return f.read()
+        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f: return f.read()
     except:
         return "<style>body{background:transparent;}</style><script>setTimeout(()=>window.location.reload(), 3000);</script>", 503
 
 @app.route('/api/version')
 def api_version():
-    """บอทกระซิบถามเวอร์ชันจากหน้ากาก (เบามาก ใช้เน็ตแค่ 15 Bytes)"""
     trigger_update_if_needed()
     meta = get_meta()
     return jsonify({"version": meta['version']})
 
 @app.route('/')
 def index():
-    """หน้าจอหลัก: แสดงหน้ากาก (Wrapper) ที่คอยจัดการสลับฉากหลังเวทีให้แบบเนียนๆ"""
     trigger_update_if_needed()
-    
     html_wrapper = """
     <!DOCTYPE html>
     <html lang="th">
@@ -843,8 +814,6 @@ def index():
     </head>
     <body>
         <div id="loader"><h2>กำลังเตรียมข้อมูล SCADA...</h2><p>รอการเชื่อมต่อแผนที่ครั้งแรก</p></div>
-        
-        <!-- กระจก 2 บานสำหรับสลับฉาก ไร้จอขาวกวนใจ -->
         <iframe id="layer1" class="map-layer layer-active" src="/map-data"></iframe>
         <iframe id="layer2" class="map-layer layer-hidden" src="about:blank"></iframe>
 
@@ -852,17 +821,28 @@ def index():
             var currentVersion = null;
             var activeLayer = 1;
 
+            // ส่งคำสั่งแก้ปัญหาให้ Iframe อัปเดตขนาดตัวเองเมื่อมีการพลิกจอ (แนวนอน-ตั้ง)
+            window.addEventListener('resize', () => {
+                document.querySelectorAll('iframe').forEach(ifr => {
+                    var map = getMapInstance(ifr);
+                    if(map) setTimeout(() => map.invalidateSize(), 200);
+                });
+            });
+            window.addEventListener('orientationchange', () => {
+                document.querySelectorAll('iframe').forEach(ifr => {
+                    var map = getMapInstance(ifr);
+                    if(map) setTimeout(() => map.invalidateSize(), 300);
+                });
+            });
+
             function getMapInstance(iframe) {
                 try {
                     var win = iframe.contentWindow;
-                    for (var key in win) {
-                        if (key.startsWith('map_')) return win[key];
-                    }
+                    for (var key in win) { if (key.startsWith('map_')) return win[key]; }
                 } catch(e) {}
                 return null;
             }
             
-            // ซ่อนหน้าจอโหลดเมื่อวาดแผนที่เสร็จสมบูรณ์
             document.getElementById('layer1').onload = function() {
                 var map = getMapInstance(this);
                 if (map) {
@@ -878,9 +858,8 @@ def index():
                 fetch('/api/version?t=' + new Date().getTime(), { cache: 'no-store' })
                     .then(res => res.json())
                     .then(data => {
-                        if (currentVersion === null) {
-                            currentVersion = data.version;
-                        } else if (data.version !== currentVersion && data.version > 0) {
+                        if (currentVersion === null) { currentVersion = data.version; } 
+                        else if (data.version !== currentVersion && data.version > 0) {
                             currentVersion = data.version;
                             swapMap();
                         }
@@ -901,22 +880,13 @@ def index():
 
                         if (newMap) {
                             clearInterval(checkReady);
-                            
-                            if (oldMap) {
-                                newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false});
-                            }
-
+                            if (oldMap) { newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false}); }
                             nextIframe.className = 'map-layer layer-active';
                             activeIframe.className = 'map-layer layer-hidden';
-                            
                             activeLayer = nextLayer;
-
-                            setTimeout(function() {
-                                activeIframe.src = 'about:blank';
-                            }, 1500);
+                            setTimeout(function() { activeIframe.src = 'about:blank'; }, 1500);
                         }
                     }, 100);
-
                     setTimeout(() => clearInterval(checkReady), 5000);
                 };
             }
