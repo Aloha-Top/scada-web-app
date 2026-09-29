@@ -32,7 +32,7 @@ def get_status_config(status_text):
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
         if 'ระบบสื่อสาร' in status_upper: color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple" 
         else: color = "orange"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
@@ -84,11 +84,10 @@ def generate_map():
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
-    # [ปรับปรุง] จัดเรียง TileLayer ให้ตรงกับ JS mapConfigs และบังคับให้ Terrain แสดงผลเป็นตัวเริ่มต้น (show=True)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
     folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
+    folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
     raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
@@ -171,7 +170,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str
+            display_val = val_str 
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -195,8 +194,32 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
+    # --- นำ MarkerCluster ลงแผนที่ ---
+    active_grouped_layers = {}
+    for p_html, items_list in grouped_layers.items():
+        if len(items_list) > 0:
+            def custom_sort(x):
+                s = x[0].upper()
+                w = 100
+                if s in ["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"]: w = 1
+                elif "รอ ผบอ. เข้าแก้ไข" in s and "ผอส" not in s: w = 2
+                elif "รอ ผบอ. และ ผอส." in s or "และ ผอส" in s: w = 3
+                elif "รอ ผอส." in s: w = 4
+                elif "ผบอ. เคยแก้ไข" in s: w = 5
+                elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s: w = 6
+                else: w = 10
+                return (w, len(s), s)
+                
+            items_list.sort(key=custom_sort)
+            
+            sorted_mcs = []
+            for active_status, mc in items_list:
+                m.add_child(mc) # [สำคัญ] นี่คือคำสั่งแปะหมุดลงแผนที่ที่ผมเผลอลบไป
+                sorted_mcs.append(mc)
+            active_grouped_layers[p_html] = sorted_mcs
+
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
-    GroupedLayerControl(groups={}, exclusive_groups=False, collapsed=True).add_to(m) # ไม่ใช้ group layer ของ folium จะใช้ JS ควบคุมแทน
+    GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
 
     search_json = json.dumps(search_data, ensure_ascii=False)
     export_json = json.dumps(export_data_list, ensure_ascii=False)
@@ -329,7 +352,6 @@ def generate_map():
     @keyframes cone-breathe {{ 0% {{ transform: scale(0.85); opacity: 0.7; }} 50% {{ transform: scale(1.1); opacity: 1; }} 100% {{ transform: scale(0.85); opacity: 0.7; }} }}
     .my-location-dot {{ position: absolute; background-color: #4285F4; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2; }}
 
-    /* ดีไซน์เมนูแผนที่มุมซ้ายล่างแบบ Google Maps */
     .g-layer-container {{ position: absolute; bottom: 24px; left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; }}
     .g-layer-main-btn {{ width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
     .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
@@ -592,7 +614,6 @@ def generate_map():
 
     document.getElementById('closeInfoPanelBtn').onclick = function(e) {{ e.stopPropagation(); hideCustomPanel(); }};
 
-    // [แก้ไข 1] จัดลำดับตัวแปรแผนที่ให้ตรงกับการประกาศ TileLayer ด้านบนแบบเป๊ะๆ
     var mapConfigs = [
         {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
         {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -601,7 +622,6 @@ def generate_map():
         {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
     
-    // ตั้งค่า Index 0 (แผนที่ภูมิประเทศ) เป็นแผนที่ตั้งต้นบน UI
     var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
@@ -610,34 +630,24 @@ def generate_map():
         div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
         panel.appendChild(div);
     }});
-    
     function getRadioByKeyword(kw) {{
         var labels = document.querySelectorAll('.leaflet-control-layers-base label');
         for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
         return null;
     }}
-    
     function switchMapLayer(idx) {{
-        currentMapIndex = idx; 
-        var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
-        if (radio && !radio.checked) radio.click();
-        
-        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
-            if(i === idx) item.classList.add('active'); 
-            else item.classList.remove('active'); 
-        }});
-        
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
+        currentMapIndex = idx; var radio = getRadioByKeyword(mapConfigs[idx].keyword); if (radio && !radio.checked) radio.click();
+        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ if(i === idx) item.classList.add('active'); else item.classList.remove('active'); }});
+        var nextIdx = (idx + 1) % mapConfigs.length;
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[nextIdx].thumb + ')';
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
     }}
+    document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
     
-    // สั่งวาด UI เริ่มต้นทันทีที่โหลดสคริปต์
+    // บังคับเปลี่ยนแผนที่ตอนโหลดหน้าจอ เพื่อรับรองว่าพื้นหลังและไอคอนตรงกันชัวร์ 100%
     setTimeout(function() {{ 
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[0].thumb + ')'; 
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[0].name; 
-        var items = panel.querySelectorAll('.g-layer-item');
-        if(items.length > 0) items[0].classList.add('active');
-    }}, 100);
+        switchMapLayer(0); 
+    }}, 500);
 
     var expData = {export_json};
     setTimeout(function() {{
