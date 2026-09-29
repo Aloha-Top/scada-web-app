@@ -34,13 +34,16 @@ def get_status_config(status_text):
         
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
+        
+        # --- ดักจับสีเฉพาะของหมวด Connecting ---
         if 'ระบบสื่อสาร' in status_upper:
             color = "purple"
         elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
-            color = "purple"
+            color = "purple" 
         else:
             color = "orange"
         
+        # --- ดักจับไอคอน ---
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
@@ -50,6 +53,7 @@ def get_status_config(status_text):
     elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
         color = "red"
+        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
@@ -65,6 +69,7 @@ def get_status_config(status_text):
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
         color = "lightgreen"
+        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
@@ -99,12 +104,12 @@ def generate_map():
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
-    # [แก้ไข] ตั้งค่าให้แผนที่ภูมิประเทศ (Google Terrain) เป็นตัวเริ่มต้น (show=True) ส่วนตัวอื่นปิดไว้ (show=False)
+    # [แก้ไขที่ 1] ย้ายแผนที่ภูมิประเทศขึ้นเป็นบรรทัดแรกสุด เพื่อบังคับให้ระบบมองเป็นแผนที่ตั้งต้น
+    folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
+    folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
-    folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
     raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
     hex_color_map = {'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 'green': '#72b026', 'lightgreen': '#82c91e', 'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 'beige': '#f5c07f', 'gold': '#ffc107'}
@@ -137,8 +142,6 @@ def generate_map():
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
-        
-        # [แก้ไข] ปล่อยให้ข้อความเรียงติดกันในบรรทัดเดียว (ไม่ใช้ <br>)
         active_status_display = active_status
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
@@ -188,7 +191,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str 
+            display_val = val_str
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -212,7 +215,6 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # --- [แก้ไข] จัดเรียงลำดับ Custom Sort ให้กลุ่ม Connecting สวยงามเหมือนฝั่ง Bat File ---
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
@@ -424,7 +426,7 @@ def generate_map():
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }});
         if (safeId) {{
             window.currentSelectedSafeId = safeId;
-            // [แก้ไข 2] เอาการเรียก filter-hover-active ออก เพื่อไม่ให้หมุดตัวอื่นจางตอนกดเลือกหมุด
+            // [แก้ไข 2] เอาการเรียก filter-hover-active ออก เพื่อไม่ให้หมุดตัวอื่นจางลงตอนคลิกเลือกหมุด
             
             var attempts = 0;
             var tryHighlight = setInterval(function() {{
@@ -504,7 +506,6 @@ def generate_map():
     }}, 1000);
 
     setTimeout(function() {{
-        // --- [เพิ่มใหม่] จัดเรียงลำดับ Custom Sort ใน JS ให้สวยงาม ---
         var controlList = document.querySelector('.leaflet-control-layers-overlays');
         if (controlList) {{
             var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
@@ -637,15 +638,15 @@ def generate_map():
     document.getElementById('closeInfoPanelBtn').onclick = function(e) {{ e.stopPropagation(); hideCustomPanel(); }};
 
     var mapConfigs = [
+        {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
+        {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
         {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
         {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
-        {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }},
-        {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
-        {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }}
+        {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
     
-    // [แก้ไข 3] ตั้งค่าให้ไอคอนด้านล่างซ้ายซิงค์ตรงกับแผนที่ภูมิประเทศ (Index 3)
-    var currentMapIndex = 3; 
+    // [แก้ไข 3] ตั้งค่าให้เริ่มที่แผนที่ภูมิประเทศ (Index 0 ตามลำดับใหม่)
+    var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
         var div = document.createElement('div'); div.className = 'g-layer-item';
@@ -665,11 +666,11 @@ def generate_map():
         document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[nextIdx].thumb + ')';
         document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
     }}
-    document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
+    
+    // บังคับเปลี่ยนแผนที่ตอนโหลดหน้าจอ เพื่อความชัวร์ 100%
     setTimeout(function() {{ 
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[4].thumb + ')'; 
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[4].name; 
-    }}, 100);
+        switchMapLayer(0); 
+    }}, 300);
 
     var expData = {export_json};
     setTimeout(function() {{
