@@ -18,6 +18,7 @@ LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
 
 def get_meta():
+    """อ่านข้อมูลเวลาอัปเดตล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -25,20 +26,27 @@ def get_meta():
         return {'version': 0, 'last_update': 0}
 
 def get_status_config(status_text):
+    """กำหนด หมวดหมู่(Parent), สี, และ ไอคอน ตามสถานะ"""
     status_upper = str(status_text).strip().upper()
     
     if status_upper.startswith('TELEMETRY'):
         return "Telemetry Failure", "gold", "wrench"
+        
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        if 'ระบบสื่อสาร' in status_upper: color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple" 
-        else: color = "orange"
+        if 'ระบบสื่อสาร' in status_upper:
+            color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
+            color = "purple"
+        else:
+            color = "orange"
+        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
+        
     elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
         color = "red"
@@ -47,11 +55,13 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "times"
         return raw_parent, color, icon
+        
     elif status_upper.startswith('ONLINE'):
         raw_parent = "Online"
         color = "green"
         icon = "history" if 'เคยแก้ไข' in status_upper else "check"
         return raw_parent, color, icon
+        
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
         color = "lightgreen"
@@ -59,16 +69,21 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
+        
     else:
         return "สถานะอื่นๆ", "gray", "info-circle"
 
 def generate_map():
+    """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่"""
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
-    try: df = pd.read_csv(csv_export_url)
-    except Exception as e: raise e
+    try:
+        df = pd.read_csv(csv_export_url)
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        raise e
 
     status_hash_map = {}
     def get_hash(text):
@@ -134,7 +149,7 @@ def generate_map():
         row, lat, lon, active_status, active_status_display = node['row'], node['lat'], node['lon'], node['active_status'], node['active_status_display']
         raw_parent, icon_name, h_color = node['raw_parent'], node['icon_name'], hex_color_map.get(node['color'], '#575757')
         
-        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[raw_parent][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
+        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[raw_parent][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[raw_parent][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
         safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
 
         if active_status not in mc_groups:
@@ -208,7 +223,9 @@ def generate_map():
                 elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s: w = 6
                 else: w = 10
                 return (w, len(s), s)
+                
             items_list.sort(key=custom_sort)
+            
             sorted_mcs = []
             for active_status, mc in items_list:
                 m.add_child(mc)
@@ -230,11 +247,10 @@ def generate_map():
     .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers, .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
-    
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
-
+    
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
@@ -258,20 +274,8 @@ def generate_map():
     .g-search-results::-webkit-scrollbar-thumb:hover,
     .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    /* Responsive Web App Design (Mobile Bottom Sheet) */
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; }}
-    @media (max-width: 768px) {{ 
-        .custom-info-panel {{ 
-            top: auto !important; bottom: 0 !important; left: 0 !important; 
-            width: 100vw !important; max-width: 100vw !important; 
-            max-height: 55vh !important; 
-            border-radius: 20px 20px 0 0 !important; 
-            animation: slideUpFade 0.3s ease-out; 
-            border-bottom: none !important;
-        }} 
-        .popup-body {{ max-height: calc(55vh - 125px) !important; }} 
-        .g-search-container {{ width: calc(100vw - 32px) !important; max-width: none !important; }}
-    }}
+    @media (max-width: 768px) {{ .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 55vh !important; border-radius: 20px 20px 0 0 !important; animation: slideUpFade 0.3s ease-out; border-bottom: none !important;}} .popup-body {{ max-height: calc(55vh - 125px) !important; }} .g-search-container {{ width: calc(100vw - 32px) !important; max-width: none !important; }} }}
     @keyframes slideDownFade {{ from {{ opacity: 0; transform: translateY(-15px); }} to {{ opacity: 1; transform: translateY(0); }} }}
     @keyframes slideUpFade {{ from {{ opacity: 0; transform: translateY(100%); }} to {{ opacity: 1; transform: translateY(0); }} }}
 
@@ -330,6 +334,7 @@ def generate_map():
     .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: 16px; left: 16px; width: 380px; margin: 0; }}
+    @media (max-width: 768px) {{ .g-search-container {{ width: calc(100vw - 88px); max-width: 400px; }} }}
     .g-search-box {{ background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8; }}
     .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
@@ -395,19 +400,16 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
-    // --- แก้ไขปัญหาหมุนจอ/หน้าต่างแล้วแผนที่ค้างแหว่ง ---
-    window.addEventListener('resize', function() {{
-        if(typeof globalMap !== 'undefined' && globalMap) {{ setTimeout(function() {{ globalMap.invalidateSize(); }}, 200); }}
-    }});
-    window.addEventListener('orientationchange', function() {{
-        if(typeof globalMap !== 'undefined' && globalMap) {{ setTimeout(function() {{ globalMap.invalidateSize(); }}, 300); }}
-    }});
-
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
         clearHighlight();
-        for (var key in window) {{ if (key.startsWith('map_')) {{ var map = window[key]; if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }} }} }}
+        for (var key in window) {{
+            if (key.startsWith('map_')) {{
+                var map = window[key];
+                if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }}
+            }}
+        }}
     }}
 
     function highlightPin(safeId) {{
@@ -519,9 +521,7 @@ def generate_map():
                     return sA.localeCompare(sB);
                 }});
                 
-                labels.forEach(function(label) {{
-                    group.appendChild(label);
-                }});
+                labels.forEach(function(label) {{ group.appendChild(label); }});
             }});
         }}
 
@@ -630,8 +630,6 @@ def generate_map():
         {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
         {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
-    
-    // [แก้ไขที่ 2] ตั้งให้ UI ปุ่มแผนที่สอดคล้องกับ Terrain ซึ่งตอนนี้อยู่ Index 0
     var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
@@ -652,9 +650,11 @@ def generate_map():
         document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[nextIdx].thumb + ')';
         document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
     }}
-    
-    // [แก้ไขที่ 3] สั่งคลิกเปลี่ยนแผนที่เป็น Terrain ซ้ำอีกรอบเพื่อความชัวร์ (การันตีพื้นหลังและไอคอนตรงกัน)
-    setTimeout(function() {{ switchMapLayer(0); }}, 300);
+    document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
+    setTimeout(function() {{ 
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[1].thumb + ')'; 
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[1].name; 
+    }}, 100);
 
     var expData = {export_json};
     setTimeout(function() {{
@@ -785,7 +785,8 @@ def map_data():
     try:
         with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f: return f.read()
     except:
-        return "<style>body{background:transparent;}</style><script>setTimeout(()=>window.location.reload(), 3000);</script>", 503
+        # ไม่บังคับรีเฟรชหน้า Iframe แล้ว ปล่อยให้หน้ากากหลัก (Fetch API) จัดการเอง
+        return "<style>body{background:#282a2d;}</style>", 503
 
 @app.route('/api/version')
 def api_version():
@@ -813,15 +814,23 @@ def index():
         </style>
     </head>
     <body>
-        <div id="loader"><h2>กำลังเตรียมข้อมูล SCADA...</h2><p>รอการเชื่อมต่อแผนที่ครั้งแรก</p></div>
-        <iframe id="layer1" class="map-layer layer-active" src="/map-data"></iframe>
+        <div id="loader"><h2 id="loading-text">กำลังเตรียมข้อมูล SCADA...</h2><p>รอการเชื่อมต่อแผนที่ครั้งแรก</p></div>
+        <iframe id="layer1" class="map-layer layer-hidden" src="about:blank"></iframe>
         <iframe id="layer2" class="map-layer layer-hidden" src="about:blank"></iframe>
 
         <script>
-            var currentVersion = null;
+            var currentVersion = 0; // เปลี่ยนการนับเวอร์ชันเริ่มต้น
             var activeLayer = 1;
 
-            // ส่งคำสั่งแก้ปัญหาให้ Iframe อัปเดตขนาดตัวเองเมื่อมีการพลิกจอ (แนวนอน-ตั้ง)
+            var dotCount = 0;
+            setInterval(() => {
+                var loaderText = document.getElementById('loading-text');
+                if(loaderText && currentVersion === 0) {
+                    dotCount = (dotCount + 1) % 4;
+                    loaderText.innerText = "กำลังเตรียมข้อมูล SCADA" + ".".repeat(dotCount);
+                }
+            }, 500);
+
             window.addEventListener('resize', () => {
                 document.querySelectorAll('iframe').forEach(ifr => {
                     var map = getMapInstance(ifr);
@@ -842,24 +851,12 @@ def index():
                 } catch(e) {}
                 return null;
             }
-            
-            document.getElementById('layer1').onload = function() {
-                var map = getMapInstance(this);
-                if (map) {
-                    var loader = document.getElementById('loader');
-                    if (loader) {
-                        loader.style.opacity = '0';
-                        setTimeout(() => loader.style.display = 'none', 800);
-                    }
-                }
-            };
 
             function checkUpdate() {
                 fetch('/api/version?t=' + new Date().getTime(), { cache: 'no-store' })
                     .then(res => res.json())
                     .then(data => {
-                        if (currentVersion === null) { currentVersion = data.version; } 
-                        else if (data.version !== currentVersion && data.version > 0) {
+                        if (data.version > 0 && data.version !== currentVersion) {
                             currentVersion = data.version;
                             swapMap();
                         }
@@ -881,15 +878,28 @@ def index():
                         if (newMap) {
                             clearInterval(checkReady);
                             if (oldMap) { newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false}); }
+                            
                             nextIframe.className = 'map-layer layer-active';
                             activeIframe.className = 'map-layer layer-hidden';
                             activeLayer = nextLayer;
+                            
+                            var loader = document.getElementById('loader');
+                            if (loader) {
+                                loader.style.opacity = '0';
+                                setTimeout(() => loader.style.display = 'none', 800);
+                            }
+
                             setTimeout(function() { activeIframe.src = 'about:blank'; }, 1500);
                         }
-                    }, 100);
-                    setTimeout(() => clearInterval(checkReady), 5000);
+                    }, 200);
+                    setTimeout(() => clearInterval(checkReady), 8000);
                 };
             }
+
+            var initialPoll = setInterval(() => {
+                if(currentVersion === 0) checkUpdate();
+                else clearInterval(initialPoll);
+            }, 3000);
 
             setInterval(checkUpdate, 15000);
         </script>
