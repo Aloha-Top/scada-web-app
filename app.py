@@ -29,22 +29,18 @@ def get_status_config(status_text):
     """กำหนด หมวดหมู่(Parent), สี, และ ไอคอน ตามสถานะ"""
     status_upper = str(status_text).strip().upper()
     
-    # 1. เช็คคำขึ้นต้นเพื่อกำหนดหมวดหมู่หลักและสี
     if status_upper.startswith('TELEMETRY'):
         return "Telemetry Failure", "gold", "wrench"
         
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        
-        # --- ดักจับสีเฉพาะของหมวด Connecting ---
         if 'ระบบสื่อสาร' in status_upper:
             color = "purple"
         elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
-            color = "purple" # คืนค่าสีม่วงให้ ผอส.
+            color = "purple"
         else:
             color = "orange"
         
-        # --- ดักจับไอคอน ---
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
@@ -54,7 +50,6 @@ def get_status_config(status_text):
     elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
         color = "red"
-        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
@@ -70,7 +65,6 @@ def get_status_config(status_text):
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
         color = "lightgreen"
-        
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
@@ -105,10 +99,11 @@ def generate_map():
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
-    folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
+    # [แก้ไข] ตั้งค่าให้แผนที่ภูมิประเทศ (Google Terrain) เป็นตัวเริ่มต้น (show=True) ส่วนตัวอื่นปิดไว้ (show=False)
+    folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
+    folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
     folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
     raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
@@ -143,7 +138,7 @@ def generate_map():
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
         
-        # [แก้ไข 1] ไม่ตัดคำ ปล่อยให้เรียงบรรทัดเดียวเหมือนตัวอื่น
+        # [แก้ไข] ปล่อยให้ข้อความเรียงติดกันในบรรทัดเดียว (ไม่ใช้ <br>)
         active_status_display = active_status
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
@@ -217,7 +212,7 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    # --- จัดเรียงลำดับ Custom Sort ในเมนูให้สวยงาม ---
+    # --- [แก้ไข] จัดเรียงลำดับ Custom Sort ให้กลุ่ม Connecting สวยงามเหมือนฝั่ง Bat File ---
     active_grouped_layers = {}
     for p_html, items_list in grouped_layers.items():
         if len(items_list) > 0:
@@ -320,18 +315,12 @@ def generate_map():
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: 72px; right: 16px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 99999; }}
     .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-    
+
     .custom-filter-wrapper .leaflet-control-layers-list {{ 
-        flex: 1 1 auto !important; 
-        max-height: calc(100dvh - 160px) !important;
-        overflow-y: auto !important; 
-        overflow-x: hidden !important; 
-        padding: 0 0 12px 0 !important; 
-        margin: 0 !important; 
-        overscroll-behavior: contain !important; 
-        -webkit-overflow-scrolling: touch !important; 
+        flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; 
+        padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; 
     }}
-    
+
     .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
     .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
@@ -421,14 +410,21 @@ def generate_map():
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
         clearHighlight();
-        for (var key in window) {{ if (key.startsWith('map_')) {{ var map = window[key]; if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }} }} }}
+        for (var key in window) {{
+            if (key.startsWith('map_')) {{
+                var map = window[key];
+                if (map && typeof map.closePopup === 'function') {{
+                    map.closePopup();
+                }}
+            }}
+        }}
     }}
 
     function highlightPin(safeId) {{
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }});
         if (safeId) {{
             window.currentSelectedSafeId = safeId;
-            // [แก้ไข 2] เอาคำสั่ง document.body.classList.add('filter-hover-active'); ออก เพื่อไม่ให้หมุดตัวอื่นจางลง
+            // [แก้ไข 2] เอาการเรียก filter-hover-active ออก เพื่อไม่ให้หมุดตัวอื่นจางตอนกดเลือกหมุด
             
             var attempts = 0;
             var tryHighlight = setInterval(function() {{
@@ -446,7 +442,6 @@ def generate_map():
     function clearHighlight() {{ 
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); 
         window.currentSelectedSafeId = null; 
-        // สั่งเคลียร์โหมดจาง (ดรอปสี) ออกเผื่อไว้
         document.body.classList.remove('filter-hover-active');
     }}
 
@@ -509,6 +504,40 @@ def generate_map():
     }}, 1000);
 
     setTimeout(function() {{
+        // --- [เพิ่มใหม่] จัดเรียงลำดับ Custom Sort ใน JS ให้สวยงาม ---
+        var controlList = document.querySelector('.leaflet-control-layers-overlays');
+        if (controlList) {{
+            var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
+            groups.forEach(function(group) {{
+                var labels = Array.from(group.querySelectorAll('label'));
+                labels.sort(function(a, b) {{
+                    var sA = a.textContent.trim().toUpperCase();
+                    var sB = b.textContent.trim().toUpperCase();
+                    
+                    function getWeight(s) {{
+                        if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
+                        if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
+                        if (s.includes("รอ ผบอ. และ ผอส.") || s.includes("และ ผอส")) return 3;
+                        if (s.includes("รอ ผอส.")) return 4;
+                        if (s.includes("ผบอ. เคยแก้ไข")) return 5;
+                        if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
+                        return 10;
+                    }}
+                    
+                    var weightA = getWeight(sA);
+                    var weightB = getWeight(sB);
+                    
+                    if (weightA !== weightB) return weightA - weightB;
+                    if (sA.length !== sB.length) return sA.length - sB.length;
+                    return sA.localeCompare(sB);
+                }});
+                
+                labels.forEach(function(label) {{
+                    group.appendChild(label);
+                }});
+            }});
+        }}
+
         document.querySelectorAll('.custom-filter-wrapper label').forEach(function(lbl) {{
             lbl.addEventListener('mouseenter', function() {{
                 var statusNode = this.querySelector('.status-text');
@@ -518,7 +547,7 @@ def generate_map():
             }});
             lbl.addEventListener('mouseleave', function() {{
                 currentHoveredSelector = null; 
-                document.body.classList.remove('filter-hover-active');
+                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
                 document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
         }});
@@ -534,7 +563,7 @@ def generate_map():
             }});
             lbl.addEventListener('mouseleave', function() {{
                 currentHoveredSelector = null; 
-                document.body.classList.remove('filter-hover-active');
+                if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
                 document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
             }});
         }});
@@ -614,7 +643,9 @@ def generate_map():
         {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
         {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }}
     ];
-    var currentMapIndex = 1; 
+    
+    // [แก้ไข 3] ตั้งค่าให้ไอคอนด้านล่างซ้ายซิงค์ตรงกับแผนที่ภูมิประเทศ (Index 3)
+    var currentMapIndex = 3; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
         var div = document.createElement('div'); div.className = 'g-layer-item';
@@ -635,45 +666,13 @@ def generate_map():
         document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
     }}
     document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
-    setTimeout(function() {{ document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[2].thumb + ')'; document.getElementById('gLayerMainLabel').innerText = mapConfigs[2].name; }}, 100);
+    setTimeout(function() {{ 
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[4].thumb + ')'; 
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[4].name; 
+    }}, 100);
 
     var expData = {export_json};
-    
-    // --- [เพิ่มใหม่] จัดเรียงลำดับ Custom Sort ในเมนูให้สวยงามเหมือนฝั่ง bat ไฟล์ ---
     setTimeout(function() {{
-        var controlList = document.querySelector('.leaflet-control-layers-overlays');
-        if (controlList) {{
-            var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
-            groups.forEach(function(group) {{
-                var labels = Array.from(group.querySelectorAll('label'));
-                labels.sort(function(a, b) {{
-                    var sA = a.textContent.trim().toUpperCase();
-                    var sB = b.textContent.trim().toUpperCase();
-                    
-                    function getWeight(s) {{
-                        if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
-                        if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
-                        if (s.includes("รอ ผบอ. และ ผอส.") || s.includes("และ ผอส")) return 3;
-                        if (s.includes("รอ ผอส.")) return 4;
-                        if (s.includes("ผบอ. เคยแก้ไข")) return 5;
-                        if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
-                        return 10;
-                    }}
-                    
-                    var weightA = getWeight(sA);
-                    var weightB = getWeight(sB);
-                    
-                    if (weightA !== weightB) return weightA - weightB;
-                    if (sA.length !== sB.length) return sA.length - sB.length;
-                    return sA.localeCompare(sB);
-                }});
-                
-                labels.forEach(function(label) {{
-                    group.appendChild(label);
-                }});
-            }});
-        }}
-
         document.querySelectorAll('.leaflet-control-layers-group-name').forEach(function(header) {{
             header.title = 'คลิกเพื่อ เลือก/ยกเลิก ทั้งหมดในกลุ่มนี้';
             header.addEventListener('click', function(e) {{
