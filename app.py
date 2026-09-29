@@ -18,7 +18,6 @@ LOCK_FILE = '/tmp/updating.lock'
 CACHE_DURATION = 300 # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
 
 def get_meta():
-    """อ่านข้อมูลเวลาอัปเดตล่าสุดจากไฟล์"""
     try:
         with open(CACHE_META_FILE, 'r') as f:
             return json.load(f)
@@ -26,27 +25,20 @@ def get_meta():
         return {'version': 0, 'last_update': 0}
 
 def get_status_config(status_text):
-    """กำหนด หมวดหมู่(Parent), สี, และ ไอคอน ตามสถานะ"""
     status_upper = str(status_text).strip().upper()
     
     if status_upper.startswith('TELEMETRY'):
         return "Telemetry Failure", "gold", "wrench"
-        
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
-        if 'ระบบสื่อสาร' in status_upper:
-            color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper:
-            color = "purple"
-        else:
-            color = "orange"
-        
+        if 'ระบบสื่อสาร' in status_upper: color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple"
+        else: color = "orange"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('OFFLINE'):
         raw_parent = "Offline"
         color = "red"
@@ -55,13 +47,11 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "times"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('ONLINE'):
         raw_parent = "Online"
         color = "green"
         icon = "history" if 'เคยแก้ไข' in status_upper else "check"
         return raw_parent, color, icon
-        
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
         color = "lightgreen"
@@ -69,21 +59,16 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-        
     else:
         return "สถานะอื่นๆ", "gray", "info-circle"
 
 def generate_map():
-    """ฟังก์ชันหลักสำหรับดึง Google Sheets และวาดแผนที่"""
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
-    try:
-        df = pd.read_csv(csv_export_url)
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
-        raise e
+    try: df = pd.read_csv(csv_export_url)
+    except Exception as e: raise e
 
     status_hash_map = {}
     def get_hash(text):
@@ -99,10 +84,11 @@ def generate_map():
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
+    # [ปรับปรุง] จัดเรียง TileLayer ให้ตรงกับ JS mapConfigs และบังคับให้ Terrain แสดงผลเป็นตัวเริ่มต้น (show=True)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
     folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
+    folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
     raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
@@ -185,7 +171,7 @@ def generate_map():
                 except: pass
                 
             val_str = str(val)
-            display_val = val_str 
+            display_val = val_str
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
@@ -209,31 +195,8 @@ def generate_map():
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
-    active_grouped_layers = {}
-    for p_html, items_list in grouped_layers.items():
-        if len(items_list) > 0:
-            def custom_sort(x):
-                s = x[0].upper()
-                w = 100
-                if s in ["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"]: w = 1
-                elif "รอ ผบอ. เข้าแก้ไข" in s and "ผอส" not in s: w = 2
-                elif "รอ ผบอ. และ ผอส." in s or "และ ผอส" in s: w = 3
-                elif "รอ ผอส." in s: w = 4
-                elif "ผบอ. เคยแก้ไข" in s: w = 5
-                elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s: w = 6
-                else: w = 10
-                return (w, len(s), s)
-                
-            items_list.sort(key=custom_sort)
-            
-            sorted_mcs = []
-            for active_status, mc in items_list:
-                m.add_child(mc)
-                sorted_mcs.append(mc)
-            active_grouped_layers[p_html] = sorted_mcs
-
     folium.LayerControl(position='topleft', collapsed=True).add_to(m)
-    GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
+    GroupedLayerControl(groups={}, exclusive_groups=False, collapsed=True).add_to(m) # ไม่ใช้ group layer ของ folium จะใช้ JS ควบคุมแทน
 
     search_json = json.dumps(search_data, ensure_ascii=False)
     export_json = json.dumps(export_data_list, ensure_ascii=False)
@@ -250,7 +213,7 @@ def generate_map():
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
-    
+
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
@@ -310,11 +273,12 @@ def generate_map():
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: 72px; right: 16px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 99999; }}
     .custom-filter-wrapper.show {{ display: flex; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-    
+
     .custom-filter-wrapper .leaflet-control-layers-list {{ 
         flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; 
         padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; 
     }}
+
     .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
     .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
@@ -365,15 +329,18 @@ def generate_map():
     @keyframes cone-breathe {{ 0% {{ transform: scale(0.85); opacity: 0.7; }} 50% {{ transform: scale(1.1); opacity: 1; }} 100% {{ transform: scale(0.85); opacity: 0.7; }} }}
     .my-location-dot {{ position: absolute; background-color: #4285F4; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2; }}
 
-    .g-layer-container {{ position: absolute; bottom: 24px; left: 16px; z-index: 9999; display: flex; align-items: flex-end; }}
-    .g-layer-main-btn {{ width: 50px; height: 50px; border-radius: 12px; border: 2px solid #202124; box-shadow: 0 2px 6px rgba(0,0,0,0.4); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; }}
-    .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; text-align: center; padding: 3px 0; font-weight: 600; }}
-    .g-layer-panel {{ background: #282a2d; border-radius: 12px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s ease; height: 75px; align-items: center; margin-left: 10px; border: 1px solid #444746; }}
-    .g-layer-container:hover .g-layer-panel {{ max-width: 400px; padding: 0 16px; opacity: 1; }}
-    .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 4px; }}
-    .g-layer-thumb {{ width: 40px; height: 40px; border-radius: 8px; border: 2px solid transparent; background-size: cover; background-position: center; }}
-    .g-layer-item.active .g-layer-thumb {{ border-color: #8ab4f8; }}
-    .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; }}
+    /* ดีไซน์เมนูแผนที่มุมซ้ายล่างแบบ Google Maps */
+    .g-layer-container {{ position: absolute; bottom: 24px; left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; }}
+    .g-layer-main-btn {{ width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
+    .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
+    .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
+    .g-layer-panel {{ background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
+    .g-layer-container:hover .g-layer-panel {{ max-width: 500px; padding: 0 20px; opacity: 1; }}
+    .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 6px; padding: 4px; border-radius: 10px; transition: background-color 0.2s; }}
+    .g-layer-item:hover {{ background-color: rgba(255,255,255,0.1); }}
+    .g-layer-thumb {{ width: 44px; height: 44px; border-radius: 10px; border: 2px solid transparent; background-size: cover; background-position: center; box-shadow: 0 2px 6px rgba(0,0,0,0.2); transition: all 0.2s; }}
+    .g-layer-item.active .g-layer-thumb {{ border-color: #8ab4f8; box-shadow: 0 0 0 2px rgba(138,180,248,0.4); transform: scale(1.05); }}
+    .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
     <div id="customInfoPanel" class="custom-info-panel">
@@ -407,7 +374,9 @@ def generate_map():
         for (var key in window) {{
             if (key.startsWith('map_')) {{
                 var map = window[key];
-                if (map && typeof map.closePopup === 'function') {{ map.closePopup(); }}
+                if (map && typeof map.closePopup === 'function') {{
+                    map.closePopup();
+                }}
             }}
         }}
     }}
@@ -623,6 +592,7 @@ def generate_map():
 
     document.getElementById('closeInfoPanelBtn').onclick = function(e) {{ e.stopPropagation(); hideCustomPanel(); }};
 
+    // [แก้ไข 1] จัดลำดับตัวแปรแผนที่ให้ตรงกับการประกาศ TileLayer ด้านบนแบบเป๊ะๆ
     var mapConfigs = [
         {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
         {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -630,6 +600,8 @@ def generate_map():
         {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
         {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
     ];
+    
+    // ตั้งค่า Index 0 (แผนที่ภูมิประเทศ) เป็นแผนที่ตั้งต้นบน UI
     var currentMapIndex = 0; 
     var panel = document.getElementById('gLayerPanel');
     mapConfigs.forEach(function(conf, idx) {{
@@ -638,22 +610,33 @@ def generate_map():
         div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
         panel.appendChild(div);
     }});
+    
     function getRadioByKeyword(kw) {{
         var labels = document.querySelectorAll('.leaflet-control-layers-base label');
         for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
         return null;
     }}
+    
     function switchMapLayer(idx) {{
-        currentMapIndex = idx; var radio = getRadioByKeyword(mapConfigs[idx].keyword); if (radio && !radio.checked) radio.click();
-        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ if(i === idx) item.classList.add('active'); else item.classList.remove('active'); }});
-        var nextIdx = (idx + 1) % mapConfigs.length;
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[nextIdx].thumb + ')';
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[nextIdx].name;
+        currentMapIndex = idx; 
+        var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
+        if (radio && !radio.checked) radio.click();
+        
+        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
+            if(i === idx) item.classList.add('active'); 
+            else item.classList.remove('active'); 
+        }});
+        
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
     }}
-    document.getElementById('gLayerMainBtn').onclick = function() {{ switchMapLayer((currentMapIndex + 1) % mapConfigs.length); }};
+    
+    // สั่งวาด UI เริ่มต้นทันทีที่โหลดสคริปต์
     setTimeout(function() {{ 
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[1].thumb + ')'; 
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[1].name; 
+        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[0].thumb + ')'; 
+        document.getElementById('gLayerMainLabel').innerText = mapConfigs[0].name; 
+        var items = panel.querySelectorAll('.g-layer-item');
+        if(items.length > 0) items[0].classList.add('active');
     }}, 100);
 
     var expData = {export_json};
@@ -785,7 +768,6 @@ def map_data():
     try:
         with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f: return f.read()
     except:
-        # ไม่บังคับรีเฟรชหน้า Iframe แล้ว ปล่อยให้หน้ากากหลัก (Fetch API) จัดการเอง
         return "<style>body{background:#282a2d;}</style>", 503
 
 @app.route('/api/version')
@@ -819,7 +801,7 @@ def index():
         <iframe id="layer2" class="map-layer layer-hidden" src="about:blank"></iframe>
 
         <script>
-            var currentVersion = 0; // เปลี่ยนการนับเวอร์ชันเริ่มต้น
+            var currentVersion = 0; 
             var activeLayer = 1;
 
             var dotCount = 0;
