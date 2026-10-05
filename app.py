@@ -4,6 +4,7 @@ import folium
 import json
 import hashlib
 import html
+import re
 import time
 import threading
 import os
@@ -26,13 +27,11 @@ def get_meta():
 
 def get_status_config(status_text):
     status_upper = str(status_text).strip().upper()
-    
-    if status_upper.startswith('TELEMETRY'):
-        return "Telemetry Failure", "gold", "wrench"
+    if status_upper.startswith('TELEMETRY'): return "Telemetry Failure", "gold", "wrench"
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
         if 'ระบบสื่อสาร' in status_upper: color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple" 
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple"
         else: color = "orange"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
@@ -59,8 +58,52 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-    else:
-        return "สถานะอื่นๆ", "gray", "info-circle"
+    else: return "สถานะอื่นๆ", "gray", "info-circle"
+
+def get_hash(text, status_hash_map):
+    if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
+    return status_hash_map[text]
+
+def get_actual_col_name(df_columns, keywords, exclude=None):
+    for col in df_columns:
+        if all(kw.lower() in col.lower() for kw in keywords):
+            if exclude and any(ex.lower() in col.lower() for ex in exclude): continue
+            return col
+    return None
+
+def parse_thai_date(date_str):
+    if not date_str or pd.isna(date_str): return ""
+    date_str = str(date_str).strip()
+    if re.match(r'^\d{4}-\d{2}-\d{2}', date_str): return date_str[:10]
+        
+    thai_months = {
+        "ม.ค.": "01", "ก.พ.": "02", "มี.ค.": "03", "เม.ย.": "04", "พ.ค.": "05", "มิ.ย.": "06",
+        "ก.ค.": "07", "ส.ค.": "08", "ก.ย.": "09", "ต.ค.": "10", "พ.ย.": "11", "ธ.ค.": "12",
+        "มกราคม": "01", "กุมภาพันธ์": "02", "มีนาคม": "03", "เมษายน": "04", "พฤษภาคม": "05", "มิถุนายน": "06",
+        "กรกฎาคม": "07", "สิงหาคม": "08", "กันยายน": "09", "ตุลาคม": "10", "พฤศจิกายน": "11", "ธันวาคม": "12"
+    }
+    
+    match = re.search(r'(\d+)\s*([ก-๙\.]+)\s*(\d+)', date_str)
+    if match:
+        day, month_th, year_th = match.groups()
+        month = thai_months.get(month_th, "01")
+        year = int(year_th)
+        if year < 100: year += 2000
+        elif year > 2500: year -= 543
+        return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+    
+    try: 
+        dt = pd.to_datetime(date_str, dayfirst=True)
+        if pd.notna(dt): return dt.strftime("%Y-%m-%d")
+    except: pass
+    return ""
+
+def format_date_ddmmyyyy(iso_date):
+    if not iso_date: return "ไม่ระบุวันที่"
+    try:
+        parts = iso_date.split('-')
+        return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    except: return "ไม่ระบุวันที่"
 
 def generate_map():
     print("กำลังดึงข้อมูลใหม่จาก Google Sheets...")
@@ -71,16 +114,6 @@ def generate_map():
     except Exception as e: raise e
 
     status_hash_map = {}
-    def get_hash(text):
-        if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-        return status_hash_map[text]
-
-    def get_actual_col_name(df_columns, keywords, exclude=None):
-        for col in df_columns:
-            if all(kw.lower() in col.lower() for kw in keywords):
-                if exclude and any(ex.lower() in col.lower() for ex in exclude): continue
-                return col
-        return None
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
@@ -97,6 +130,22 @@ def generate_map():
     processed_nodes, status_counts, parent_counts = [], {}, {k: 0 for k in raw_parent_keys.keys()}
     seen_coords = {}
 
+    report_data_list = []
+    cmd_col_report = get_actual_col_name(df.columns, ["รหัสสั่งการ"]) or get_actual_col_name(df.columns, ["รหัสอุปกรณ์"]) or get_actual_col_name(df.columns, ["Equipment_ID"])
+    site_col_report = get_actual_col_name(df.columns, ["site id"])
+    loc_col_report = get_actual_col_name(df.columns, ["สถานที่"])
+    date_col_report = get_actual_col_name(df.columns, ["วันที่เข้าตรวจสอบ"])
+
+    state_scada_col = get_actual_col_name(df.columns, ["state scada"], exclude=["หลัง"])
+    state_after_col = get_actual_col_name(df.columns, ["state scada", "หลัง"])
+    wait_po_col = get_actual_col_name(df.columns, ["รอ ผอส"])
+    wait_bo_col = get_actual_col_name(df.columns, ["รอ ผบอ"])
+
+    col_H = df.columns[7] if len(df.columns) > 7 else None
+    col_J = df.columns[9] if len(df.columns) > 9 else None
+    col_K = df.columns[10] if len(df.columns) > 10 else None
+    target_detail_cols = [c for c in [col_H, col_J, col_K] if c is not None]
+
     google_svg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="white" style="margin-right:6px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>'
     apple_svg = '<svg viewBox="0 0 384 512" style="width: 13px; height: auto; margin-right: 6px; margin-bottom: 2px;" fill="white"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.3 48.6-.7 90.4-84.3 103-119.3-34.6-18.6-53.6-45.9-52.7-81.5zM266.4 87.8C282.5 67 292.7 39.2 292.7 11.5c0-3.3-.2-5.5-.6-7.8-33.1 1.4-62.7 20-80.8 42.1-15 18.5-26.4 46.1-24.9 71.6 3.3.4 5.5.6 7.8.6 30.5-.3 57.7-18.7 71.6-40.2z"/></svg>'
 
@@ -104,20 +153,21 @@ def generate_map():
         lat_col = get_actual_col_name(df.columns, ["lat", "long"])
         lat_lng_str = str(row[lat_col]) if lat_col and pd.notna(row[lat_col]) else ''
         if not lat_lng_str or ',' not in lat_lng_str: continue
-        try: lat, lon = float(lat_lng_str.split(',')[0].strip()), float(lat_lng_str.split(',')[1].strip())
+        try:
+            parts = lat_lng_str.split(',')
+            lat, lon = float(parts[0].strip()), float(parts[1].strip())
         except ValueError: continue
 
         coord_key = (round(lat, 5), round(lon, 5)) 
         if coord_key in seen_coords:
             seen_coords[coord_key] += 1
+            cnt = seen_coords[coord_key]
             offsets = [(0.00005, 0.00005), (-0.00005, -0.00005), (0.00005, -0.00005), (-0.00005, 0.00005), (0.00008, 0.0), (0.0, 0.00008), (-0.00008, 0.0), (0.0, -0.00008)]
-            lat += offsets[(seen_coords[coord_key] - 1) % len(offsets)][0]; lon += offsets[(seen_coords[coord_key] - 1) % len(offsets)][1]
+            lat += offsets[(cnt - 1) % len(offsets)][0]; lon += offsets[(cnt - 1) % len(offsets)][1]
         else: seen_coords[coord_key] = 0
 
-        status_col = get_actual_col_name(df.columns, ["state scada"], exclude=["หลัง"])
-        status_check_col = get_actual_col_name(df.columns, ["state scada", "หลัง"])
-        base_status = str(row[status_col]).strip() if status_col and pd.notna(row[status_col]) else 'Unknown'
-        check_status = str(row[status_check_col]).strip() if status_check_col and pd.notna(row[status_check_col]) else ''
+        base_status = str(row[state_scada_col]).strip() if state_scada_col and pd.notna(row[state_scada_col]) else 'Unknown'
+        check_status = str(row[state_after_col]).strip() if state_after_col and pd.notna(row[state_after_col]) else ''
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
@@ -125,9 +175,65 @@ def generate_map():
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
         parent_counts[raw_parent] += 1
+
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
+        # --- เตรียมข้อมูลสำหรับ Report ---
+        raw_date_val = str(row[date_col_report]).strip() if date_col_report and pd.notna(row[date_col_report]) else ""
+        if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
+            details = []
+            for d_col in target_detail_cols:
+                val = str(row[d_col]).strip()
+                if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
+                    clean_val = re.sub(r'\s+', ' ', clean_val)
+                    if clean_val and clean_val not in details:
+                        details.append(clean_val)
+            
+            detail_str = " ".join(details) if details else "-"
+            
+            resp_parts = []
+            if check_status and check_status.lower() not in ['nan', 'none']:
+                if "ผบอ" in check_status: resp_parts.append("ผบอ.กบษ.ฉ.2")
+                if "ผอส" in check_status: resp_parts.append("ผอส.กสฟ.ฉ.2")
+                    
+            val_bo = str(row[wait_bo_col]).strip() if wait_bo_col and pd.notna(row[wait_bo_col]) else ""
+            has_bo = val_bo and val_bo.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า', 'false', '0']
+            
+            val_po = str(row[wait_po_col]).strip() if wait_po_col and pd.notna(row[wait_po_col]) else ""
+            has_po = val_po and val_po.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า', 'false', '0']
+            
+            if has_bo and "ผบอ.กบษ.ฉ.2" not in resp_parts:
+                resp_parts.append("ผบอ.กบษ.ฉ.2")
+                
+            if has_po and "ผอส.กสฟ.ฉ.2" not in resp_parts:
+                resp_parts.append("ผอส.กสฟ.ฉ.2")
+                
+            if "ระบบสื่อสาร ONLINE" in detail_str.upper():
+                if "ผอส.กสฟ.ฉ.2" in resp_parts:
+                    resp_parts.remove("ผอส.กสฟ.ฉ.2")
+            
+            final_resp = []
+            for r in resp_parts:
+                if r not in final_resp: final_resp.append(r)
+                
+            responsible = " และ ".join(final_resp) if final_resp else "-"
+            final_status = base_status if base_status.lower() not in ['nan', 'none'] else "-"
+            iso_date = parse_thai_date(raw_date_val)
+            
+            report_data_list.append({
+                "iso_date": iso_date,
+                "cmd": str(row[cmd_col_report]) if cmd_col_report and pd.notna(row[cmd_col_report]) else "-",
+                "site": str(row[site_col_report]) if site_col_report and pd.notna(row[site_col_report]) else "-",
+                "loc": str(row[loc_col_report]) if loc_col_report and pd.notna(row[loc_col_report]) else "-",
+                "detail": detail_str,
+                "resp": responsible,
+                "status": final_status
+            })
+
     grouped_layers = {f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[k][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{k}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[k][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[k]})</span></span>": [] for k in raw_parent_keys.keys() if parent_counts[k] > 0}
+
     mc_groups, search_data, export_data_list = {}, [], []
 
     for node in processed_nodes:
@@ -136,7 +242,7 @@ def generate_map():
         
         c_hex, label = raw_parent_keys[raw_parent]
         p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{c_hex}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
-        safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
+        safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status, status_hash_map), "p_" + get_hash(raw_parent, status_hash_map), html.escape(active_status)
 
         if active_status not in mc_groups:
             layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({status_counts[active_status]})</span></span>"
@@ -145,12 +251,12 @@ def generate_map():
             mc_groups[active_status] = mc
             grouped_layers[p_html].append((active_status, mc))
         
-        target_group, table_rows = mc_groups[active_status], ""
+        target_group = mc_groups[active_status]
+        table_rows = ""
         
         site_id_col = get_actual_col_name(df.columns, ["site id"])
         site_id = str(row[site_id_col]) if site_id_col else 'Unknown'
-        safe_site_id = "id_" + get_hash(site_id + str(lat))
-
+        safe_site_id = "id_" + get_hash(site_id + str(lat), status_hash_map)
         cmd_code_col = get_actual_col_name(df.columns, ["รหัสสั่งการ"]) or get_actual_col_name(df.columns, ["รหัสอุปกรณ์"])
         cmd_code = str(row[cmd_code_col]) if cmd_code_col and pd.notna(row[cmd_code_col]) else ''
         loc_col = get_actual_col_name(df.columns, ["สถานที่"])
@@ -162,20 +268,21 @@ def generate_map():
             actual_col = get_actual_col_name(df.columns, keywords, exclude=excludes) or (get_actual_col_name(df.columns, ["รหัสอุปกรณ์"]) if "รหัสสั่งการ" in keywords else None)
             val = row[actual_col] if actual_col and pd.notna(row[actual_col]) else 'ไม่มีค่า'
             if str(val).strip() == '' or str(val).lower() == 'nan' or str(val) == 'None': val = 'ไม่มีค่า'
-            
             if "วันที่" in display_name and val != 'ไม่มีค่า':
                 try:
                     dt = pd.to_datetime(val)
                     thai_months = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
                     val = f"{dt.day} {thai_months[dt.month]} {str(dt.year)[-2:]}"
                 except: pass
-                
             val_str = str(val)
             display_val = val_str 
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
         export_data_list.append(export_row)
+        
+        google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
+        apple_maps_url = f"http://maps.apple.com/?daddr={lat},{lon}"
         
         popup_html = f"""
         <div class="custom-popup-card" data-safe-id="{safe_site_id}">
@@ -184,14 +291,13 @@ def generate_map():
                 <div class="popup-title"><h3>{site_id}</h3><span>{active_status_display}</span></div>
             </div>
             <div class="popup-actions">
-                <a href="https://www.google.com/maps/dir/?api=1&destination={lat},{lon}" target="_blank" class="btn-map btn-google">{google_svg} Google Maps</a>
-                <a href="http://maps.apple.com/?daddr={lat},{lon}" target="_blank" class="btn-map btn-apple">{apple_svg} Apple Maps</a>
+                <a href="{google_maps_url}" target="_blank" class="btn-map btn-google">{google_svg} Google Maps</a>
+                <a href="{apple_maps_url}" target="_blank" class="btn-map btn-apple">{apple_svg} Apple Maps</a>
             </div>
             <div class="popup-body"><table class="popup-table">{table_rows}</table></div>
         </div>
         """
         search_data.append({"id": site_id, "code": cmd_code, "name": location_name, "lat": lat, "lon": lon, "popup": popup_html, "safe_id": safe_site_id, "status": active_status_display, "color": h_color})
-
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
@@ -212,7 +318,7 @@ def generate_map():
             items_list.sort(key=custom_sort)
             sorted_mcs = []
             for active_status, mc in items_list:
-                m.add_child(mc)
+                m.add_child(mc) 
                 sorted_mcs.append(mc)
             active_grouped_layers[p_html] = sorted_mcs
 
@@ -222,18 +328,18 @@ def generate_map():
     search_json = json.dumps(search_data, ensure_ascii=False)
     export_json = json.dumps(export_data_list, ensure_ascii=False)
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
+    report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว (ไม่มีบัค Filter หาย หรือหัวข้อเรียงผิด) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
     .leaflet-top {{ z-index: 999 !important; }}
     .leaflet-bottom {{ z-index: 998 !important; }}
-    .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
-    .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
+    .leaflet-top.leaflet-left .leaflet-control-layers, .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
-
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
@@ -241,56 +347,72 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
-    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
-    .custom-filter-wrapper .leaflet-control-layers-list,
-    .g-search-results,
-    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
-    .g-search-results::-webkit-scrollbar,
-    .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
-    .g-search-results::-webkit-scrollbar-track,
-    .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
-    .g-search-results::-webkit-scrollbar-thumb,
-    .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list:hover::-webkit-scrollbar-thumb,
-    .g-search-results:hover::-webkit-scrollbar-thumb,
-    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb:hover,
-    .g-search-results::-webkit-scrollbar-thumb:hover,
-    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
+    .custom-filter-wrapper .leaflet-control-layers-list, .g-search-results, .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar, .g-search-results::-webkit-scrollbar, .popup-body::-webkit-scrollbar {{ width: 6px; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track, .g-search-results::-webkit-scrollbar-track, .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb, .g-search-results::-webkit-scrollbar-thumb, .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
 
-    .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
+    .g-search-container {{ position: fixed; z-index: 100005; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto; background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
 
-    .standalone-filter-btn {{ position: fixed; right: 16px; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex !important; align-items: center; justify-content: center; cursor: pointer; z-index: 999999 !important; transition: transform 0.1s, background-color 0.2s; border: 1px solid #444746; pointer-events: auto !important; }}
-    .standalone-filter-btn:hover {{ background-color: #3c4043; }}
-    .standalone-filter-btn:active {{ transform: scale(0.92); }}
-    .standalone-filter-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
+    .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
+    .top-action-btn:hover {{ background-color: #3c4043; transform: translateY(-2px); }}
+    .top-action-btn:active {{ transform: scale(0.92); }}
+    .standalone-filter-btn {{ right: 16px; }}
+    .standalone-report-btn {{ right: 74px; background-color: #1a73e8; border-color: #1a73e8; }}
+    .standalone-report-btn:hover {{ background-color: #1557b0; border-color: #1557b0; }}
+    .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
+    .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    /* ซ่อนกล่อง Base Map ใน Filter เผื่อ Folium แอบแทรกเข้ามา */
-    .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
-
-    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998 !important; pointer-events: auto; padding-top: 8px; }}
+    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998; pointer-events: auto; padding-top: 8px; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
+
+    .custom-alert-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
+    .custom-alert-overlay.show {{ display: flex; opacity: 1; }}
+    .custom-alert-box {{ background: #282a2d; width: 90%; max-width: 320px; border-radius: 16px; padding: 24px 20px 20px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; text-align: center; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }}
+    .custom-alert-overlay.show .custom-alert-box {{ transform: scale(1); }}
+    .custom-alert-icon {{ width: 50px; height: 50px; background: rgba(211, 61, 42, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto; border: 2px solid rgba(211, 61, 42, 0.4); }}
+    .custom-alert-icon svg {{ width: 24px; height: 24px; fill: #d33d2a; }}
+    .custom-alert-title {{ color: #e3e3e3; font-size: 16px; font-weight: 600; margin-bottom: 8px; }}
+    .custom-alert-msg {{ color: #9aa0a6; font-size: 13.5px; margin-bottom: 24px; line-height: 1.4; }}
+    .custom-alert-btn {{ background: #1a73e8; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }}
+    .custom-alert-btn:hover {{ background: #1557b0; }}
+
+    .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
+    .report-modal-overlay.show {{ display: flex; opacity: 1; }}
+    .report-modal {{ background: #282a2d; width: 90%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; transform: translateY(20px); transition: transform 0.3s ease; }}
+    .report-modal-overlay.show .report-modal {{ transform: translateY(0); }}
+    .report-modal h3 {{ color: #e3e3e3; margin: 0 0 20px 0; font-size: 18px; font-weight: 600; text-align: center; }}
+    
+    /* Trick สำหรับ Placeholder ให้โชว์เสมอบนมือถือ */
+    .date-input-group {{ display: flex; flex-direction: column; gap: 4px; flex: 1; position: relative; }}
+    .date-input-group label {{ color: #babbbe; font-size: 13px; font-weight: 400; }}
+    .date-input {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #5f6368; background: #202124; color: #e3e3e3; font-size: 14px; outline: none; font-family: 'Prompt', sans-serif; color-scheme: dark; transition: 0.2s; -webkit-appearance: none; appearance: none; position: relative; z-index: 2; }}
+    .date-input:focus {{ border-color: #8ab4f8; box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.2); }}
+    .date-placeholder-layer {{ position: absolute; left: 14px; top: 34px; color: #9aa0a6; font-size: 14px; pointer-events: none; transition: opacity 0.2s; z-index: 1; }}
+    .date-input.has-val + .date-placeholder-layer {{ opacity: 0; }}
+    .date-input::-webkit-datetime-edit {{ color: transparent; }}
+    .date-input.has-val::-webkit-datetime-edit {{ color: #e3e3e3; }}
+
+    .date-flex-container {{ display: flex; gap: 12px; margin-bottom: 8px; }}
+    .report-note {{ font-size: 11.5px; color: #9aa0a6; margin-bottom: 20px; text-align: center; }}
+    .report-btn-group {{ display: flex; gap: 12px; }}
+    .report-btn {{ flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; display: flex; justify-content: center; align-items: center; gap: 8px; }}
+    .report-btn-cancel {{ background: transparent; color: #8ab4f8; border: 1px solid #8ab4f8; }}
+    .report-btn-cancel:hover {{ background: rgba(138, 180, 248, 0.1); }}
+    .report-btn-dl {{ background: #1a73e8; color: white; }}
+    .report-btn-dl:hover {{ background: #1557b0; }}
+    .report-btn-dl:disabled {{ background: #5f6368; cursor: not-allowed; }}
 
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; pointer-events: auto; }}
 
     @media (max-width: 768px) {{ 
-        .g-search-container {{ width: calc(100vw - 88px) !important; max-width: none !important; }} 
+        .g-search-container {{ width: calc(100vw - 146px) !important; max-width: none !important; }} 
         .custom-filter-wrapper {{ top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px) !important; right: 16px !important; left: 16px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
-        .custom-info-panel {{ 
-            top: auto !important; bottom: 0 !important; left: 0 !important; 
-            width: 100vw !important; max-width: 100vw !important; 
-            max-height: 55vh !important; 
-            border-radius: 20px 20px 0 0 !important; 
-            animation: slideUpFade 0.3s ease-out; 
-            border-bottom: none !important;
-            padding-bottom: env(safe-area-inset-bottom, 0px);
-        }} 
+        .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 55vh !important; border-radius: 20px 20px 0 0 !important; animation: slideUpFade 0.3s ease-out; border-bottom: none !important; padding-bottom: env(safe-area-inset-bottom, 0px); }} 
         .popup-body {{ max-height: calc(55vh - 125px - env(safe-area-inset-bottom, 0px)) !important; }} 
+        .date-flex-container {{ flex-direction: column; }}
     }}
 
     @keyframes slideDownFade {{ from {{ opacity: 0; transform: translateY(-15px); }} to {{ opacity: 1; transform: translateY(0); }} }}
@@ -339,6 +461,7 @@ def generate_map():
     .g-export-btn:active {{ transform: scale(0.97) !important; }}
     .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
+    .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8; }}
     .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
     .g-search-input {{ flex: 1; border: none; outline: none; background: transparent; font-size: 14px; color: #e8eaed; margin-left: 10px; width: 100%; font-family: 'Prompt', sans-serif; pointer-events: auto; }}
@@ -381,14 +504,61 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
-    <div id="standaloneFilterBtn" class="standalone-filter-btn"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
-    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
+    <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+    </div>
+    <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ">
+        <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+    </div>
 
+    <!-- Modal แจ้งเตือนแบบ Custom -->
+    <div id="customAlertOverlay" class="custom-alert-overlay">
+        <div class="custom-alert-box">
+            <div class="custom-alert-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+            </div>
+            <div class="custom-alert-title">ไม่พบข้อมูล</div>
+            <div class="custom-alert-msg" id="customAlertMsg">ไม่พบข้อมูลในช่วงวันที่ที่คุณเลือกครับ</div>
+            <button class="custom-alert-btn" onclick="document.getElementById('customAlertOverlay').classList.remove('show');">ตกลง</button>
+        </div>
+    </div>
+
+    <!-- Modal สำหรับเลือก Report Range แก้ไข UI Date Picker สำหรับมือถือ -->
+    <div id="reportModalOverlay" class="report-modal-overlay">
+        <div class="report-modal">
+            <h3>ดาวน์โหลดรายงาน</h3>
+            
+            <div class="date-flex-container">
+                <div class="date-input-group">
+                    <label>จากวันที่ :</label>
+                    <input type="date" id="reportStartDate" class="date-input" onchange="this.classList.toggle('has-val', this.value !== '')">
+                    <div class="date-placeholder-layer">วว/ดด/ปปปป (ค.ศ.)</div>
+                </div>
+                <div class="date-input-group">
+                    <label>ถึงวันที่ :</label>
+                    <input type="date" id="reportEndDate" class="date-input" onchange="this.classList.toggle('has-val', this.value !== '')">
+                    <div class="date-placeholder-layer">วว/ดด/ปปปป (ค.ศ.)</div>
+                </div>
+            </div>
+            
+            <div class="report-note">
+                *หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด
+            </div>
+
+            <div class="report-btn-group">
+                <button class="report-btn report-btn-cancel" onclick="closeReportModal()">ยกเลิก</button>
+                <button id="execReportBtn" class="report-btn report-btn-dl" onclick="generateExcelReport()">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
     <div id="customInfoPanel" class="custom-info-panel">
         <div class="panel-close-btn" id="closeInfoPanelBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
         <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
-
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
             <div class="g-search-icon"><svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:20px; height:20px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
@@ -406,8 +576,135 @@ def generate_map():
     var statusHashMap = {status_hash_json};
     var expData = {export_json};
     var sData = {search_json};
+    var reportRawData = {report_json_data};
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
+
+    function showCustomAlert(msg) {{
+        document.getElementById('customAlertMsg').innerText = msg;
+        document.getElementById('customAlertOverlay').classList.add('show');
+    }}
+
+    var reportModal = document.getElementById('reportModalOverlay');
+    var reportBtn = document.getElementById('standaloneReportBtn');
+
+    if (reportBtn) {{
+        reportBtn.addEventListener('click', function(e) {{
+            e.preventDefault(); e.stopPropagation();
+            var sd = document.getElementById('reportStartDate');
+            var ed = document.getElementById('reportEndDate');
+            sd.value = ''; sd.classList.remove('has-val');
+            ed.value = ''; ed.classList.remove('has-val');
+            reportModal.classList.add('show');
+        }});
+    }}
+
+    function closeReportModal() {{ reportModal.classList.remove('show'); }}
+
+    async function generateExcelReport() {{
+        var btn = document.getElementById('execReportBtn');
+        btn.disabled = true; btn.innerHTML = 'กำลังสร้าง...';
+        
+        var startInput = document.getElementById('reportStartDate').value;
+        var endInput = document.getElementById('reportEndDate').value;
+        
+        var filteredData = reportRawData.filter(d => {{
+            if (!startInput && !endInput) return true; 
+            if (!d.iso_date || d.iso_date === "") return false; 
+            
+            var parts = d.iso_date.split('-');
+            var dDate = new Date(parts[0], parts[1] - 1, parts[2]); 
+            
+            var sDate = startInput ? new Date(startInput) : new Date(1970, 0, 1);
+            var eDate = endInput ? new Date(endInput) : new Date(2100, 0, 1);
+            
+            sDate.setHours(0,0,0,0);
+            eDate.setHours(23,59,59,999);
+
+            return dDate >= sDate && dDate <= eDate;
+        }});
+        
+        if (filteredData.length === 0) {{ 
+            showCustomAlert("ไม่พบข้อมูลรายงานในช่วงวันที่ ที่คุณเลือกครับ"); 
+            btn.disabled = false; 
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel'; 
+            return; 
+        }}
+
+        filteredData.sort(function(a, b) {{
+            var sA = a.status.toUpperCase(); var sB = b.status.toUpperCase();
+            if (sA.includes("ONLINE") && !sB.includes("ONLINE")) return -1;
+            if (!sA.includes("ONLINE") && sB.includes("ONLINE")) return 1;
+            return sA.localeCompare(sB);
+        }});
+
+        var workbook = new ExcelJS.Workbook();
+        var ws = workbook.addWorksheet('Report');
+
+        ws.mergeCells('A1:G1');
+        var titleCell = ws.getCell('A1');
+        titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine";
+        titleCell.font = {{ name: 'TH SarabunPSK', size: 20, bold: true }};
+        titleCell.alignment = {{ vertical: 'middle', horizontal: 'center' }};
+
+        var headers = ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
+        var headerRow = ws.addRow(headers);
+        headerRow.eachCell((cell) => {{
+            cell.font = {{ name: 'TH SarabunPSK', size: 16, bold: true }};
+            cell.alignment = {{ vertical: 'middle', horizontal: 'center', wrapText: true }};
+            cell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+        }});
+
+        var startMergeRow = 3; 
+        var currentStatus = filteredData[0].status;
+
+        filteredData.forEach((row, i) => {{
+            var dataRow = ws.addRow([ i+1, row.cmd, row.site, row.loc, row.detail, row.resp, row.status ]);
+            dataRow.eachCell((cell, colNumber) => {{
+                cell.font = {{ name: 'TH SarabunPSK', size: 16 }};
+                cell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+                if (colNumber === 5) {{ cell.alignment = {{ vertical: 'top', horizontal: 'left', wrapText: true }}; }} 
+                else {{ cell.alignment = {{ vertical: 'middle', horizontal: 'center', wrapText: true }}; }}
+            }});
+
+            var currentRow = i + 3;
+            var nextStatus = (i < filteredData.length - 1) ? filteredData[i+1].status : null;
+            
+            if (nextStatus !== currentStatus || i === filteredData.length - 1) {{
+                if (currentRow > startMergeRow) {{
+                    ws.mergeCells(`G${{startMergeRow}}:G${{currentRow}}`);
+                }}
+                startMergeRow = currentRow + 1;
+                currentStatus = nextStatus;
+            }}
+        }});
+
+        ws.getColumn(1).width = 6;
+        ws.getColumn(2).width = 18;
+        ws.getColumn(3).width = 18;
+        ws.getColumn(4).width = 25;
+        ws.getColumn(5).width = 60;
+        ws.getColumn(6).width = 30;
+        ws.getColumn(7).width = 20;
+
+        var buffer = await workbook.xlsx.writeBuffer();
+        var blob = new Blob([buffer], {{ type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }});
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        
+        var safeFilenameDate = "All_Dates";
+        if (startInput || endInput) {{
+            var sName = startInput ? startInput : "Start";
+            var eName = endInput ? endInput : "End";
+            safeFilenameDate = sName + "_to_" + eName;
+        }}
+        link.download = 'SCADA_Report_' + safeFilenameDate + '.xlsx';
+        
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+
+        btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel';
+        closeReportModal();
+    }}
 
     var filterBtn = document.getElementById('standaloneFilterBtn');
     var filterWrapper = document.getElementById('customFilterWrapper');
@@ -456,16 +753,14 @@ def generate_map():
                     targetPins.forEach(function(el) {{ el.classList.add('selected-pin-glow'); if(el.parentElement) el.parentElement.style.zIndex = 100000; }});
                     clearInterval(tryHighlight);
                 }}
-                attempts++;
-                if (attempts > 15) clearInterval(tryHighlight);
+                attempts++; if (attempts > 15) clearInterval(tryHighlight);
             }}, 100);
         }}
     }}
 
     function clearHighlight() {{ 
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); 
-        window.currentSelectedSafeId = null; 
-        document.body.classList.remove('filter-hover-active');
+        window.currentSelectedSafeId = null; document.body.classList.remove('filter-hover-active');
     }}
 
     function reapplyHighlight() {{
@@ -475,13 +770,10 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    // --- ดึงฟอร์มสถานะเข้ากล่อง Filter แบบล๊อกเป้า 100% ---
     var checkMapReady = setInterval(function() {{
         var targetForm = null;
         document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
-            if (f.querySelector('.leaflet-control-layers-group')) {{
-                targetForm = f;
-            }}
+            if (f.querySelector('.leaflet-control-layers-group')) {{ targetForm = f; }}
         }});
         
         var globalMap = null;
@@ -502,8 +794,7 @@ def generate_map():
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
                     
                     itemLabels.sort(function(a, b) {{
-                        var snA = a.querySelector('.status-text');
-                        var snB = b.querySelector('.status-text');
+                        var snA = a.querySelector('.status-text'); var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
                         
@@ -516,8 +807,7 @@ def generate_map():
                             if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
                             return 10;
                         }}
-                        var weightA = getWeight(sA);
-                        var weightB = getWeight(sB);
+                        var weightA = getWeight(sA); var weightB = getWeight(sB);
                         if (weightA !== weightB) return weightA - weightB;
                         if (sA.length !== sB.length) return sA.length - sB.length;
                         return sA.localeCompare(sB);
@@ -586,7 +876,7 @@ def generate_map():
                         activeStatuses.push(statusNode ? statusNode.getAttribute('data-status') : lbl.textContent.replace(/●/g,'').trim());
                     }});
                     var filtered = expData.filter(function(d) {{ return activeStatuses.includes(d._layerName.trim()); }});
-                    if(filtered.length === 0) {{ alert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
+                    if(filtered.length === 0) {{ showCustomAlert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
                     var headers = Object.keys(filtered[0]).filter(function(k) {{ return k !== '_layerName'; }});
                     var csv = headers.map(function(h) {{ return '"' + h + '"'; }}).join(',') + '\\r\\n';
                     filtered.forEach(function(row) {{ csv += headers.map(function(h) {{ return '"' + (row[h] ? row[h].toString().replace(/"/g, '""') : '') + '"'; }}).join(',') + '\\r\\n'; }});
@@ -784,7 +1074,6 @@ def generate_map():
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
     </script>
     """
-    m.get_root().html.add_child(folium.Element(custom_ui_html))
     return m.get_root().render()
 
 def background_task():
@@ -946,4 +1235,5 @@ def index():
     return html_wrapper
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
