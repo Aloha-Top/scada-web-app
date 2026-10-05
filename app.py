@@ -116,7 +116,6 @@ def generate_map():
         if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
         return status_hash_map[text]
 
-    # บังคับซ่อนปุ่ม Zoom เดิมของ Leaflet อย่างเด็ดขาด
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
     folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
@@ -177,7 +176,6 @@ def generate_map():
         parent_counts[raw_parent] += 1
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
-        # --- Report Data Extraction ---
         raw_date_val = str(row.get(date_col_report, '')).strip() if date_col_report else ""
         
         if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
@@ -329,19 +327,21 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว ล็อก CSS ไม่ให้หลุด ---
+    # --- ส่วน UI ฉบับป้องกัน Bootstrap และจัดเรียงใหม่ทั้งหมด ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    
-    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
-    .leaflet-control-zoom {{ display: none !important; }}
+    .leaflet-top {{ z-index: 999 !important; }}
+    .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+    
+    /* ซ่อนปุ่ม Zoom เดิมของ Leaflet อย่างเด็ดขาด */
+    .leaflet-control-zoom {{ display: none !important; }}
 
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
@@ -350,6 +350,7 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
+    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
     .custom-filter-wrapper .leaflet-control-layers-list,
     .g-search-results,
@@ -363,20 +364,14 @@ def generate_map():
     .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
     .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list:hover::-webkit-scrollbar-thumb,
-    .g-search-results:hover::-webkit-scrollbar-thumb,
-    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb:hover,
-    .g-search-results::-webkit-scrollbar-thumb:hover,
-    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    /* ล็อกความสวยงามกล่องค้นหา */
+    /* ล็อกความสวยงามกล่องค้นหา ห้ามสีขาวเด็ดขาด */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto !important; background-color: #282a2d !important; border-radius: 24px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; padding: 0 14px !important; height: 48px !important; border: 1px solid #444746 !important; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8 !important; }}
     .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
-    .g-search-input {{ flex: 1 !important; border: none !important; outline: none !important; background: transparent !important; background-color: transparent !important; font-size: 14px !important; color: #e8eaed !important; margin-left: 10px !important; width: 100% !important; font-family: 'Prompt', sans-serif !important; pointer-events: auto !important; box-shadow: none !important; -webkit-appearance: none !important; }}
-    .g-search-input::placeholder {{ color: #9aa0a6; font-weight: 400; }}
+    input#searchInput.g-search-input {{ flex: 1 !important; border: none !important; outline: none !important; background: transparent !important; background-color: transparent !important; font-size: 14px !important; color: #e8eaed !important; margin-left: 10px !important; width: 100% !important; font-family: 'Prompt', sans-serif !important; pointer-events: auto !important; box-shadow: none !important; -webkit-appearance: none !important; }}
+    input#searchInput.g-search-input::placeholder {{ color: #9aa0a6 !important; font-weight: 400 !important; opacity: 1 !important; }}
     .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
     .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
@@ -390,10 +385,32 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
+    /* --- ล็อก CSS Filter Box ให้เรียงแนวตั้ง ห้ามแตกแถว --- */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
-
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998 !important; pointer-events: auto; padding-top: 8px; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
+    .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
+    .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; }}
+    .custom-filter-wrapper .leaflet-control-layers-group {{ display: flex !important; flex-direction: column !important; width: 100% !important; margin-bottom: 8px !important; clear: both !important; align-items: stretch !important; }}
+    
+    .custom-filter-wrapper label.leaflet-control-layers-group-label,
+    .custom-filter-wrapper label {{ 
+        display: flex !important; 
+        flex-direction: row !important; 
+        align-items: flex-start !important; 
+        width: 100% !important; 
+        padding: 6px 16px !important; 
+        margin: 0 !important; 
+        cursor: pointer !important; 
+        float: none !important;
+        clear: both !important;
+        box-sizing: border-box !important;
+    }}
+    .custom-filter-wrapper label:hover {{ background-color: #35363a !important; }}
+    .custom-filter-wrapper label > span {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; white-space: normal !important; }}
+    .custom-filter-wrapper input[type="checkbox"] {{ flex-shrink: 0 !important; -webkit-appearance: none !important; -moz-appearance: none !important; appearance: none !important; width: 18px !important; height: 18px !important; border: 2px solid #8e918f !important; border-radius: 3px !important; margin: 2px 14px 0 0 !important; position: relative !important; cursor: pointer; outline: none; transition: all 0.2s ease; background-color: transparent !important; box-shadow: none !important; }}
+    .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
+    .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
     .custom-alert-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
     .custom-alert-overlay.show {{ display: flex; opacity: 1; }}
@@ -429,6 +446,12 @@ def generate_map():
     .report-btn-dl:disabled {{ background: #5f6368; cursor: not-allowed; }}
 
     .custom-info-panel {{ display: none; position: fixed; top: 74px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 99999; flex-direction: column; overflow: hidden; animation: slideDownFade 0.2s ease-out; pointer-events: auto; }}
+
+    .g-export-container {{ flex: 0 0 auto !important; padding: 16px !important; background-color: #282a2d !important; border-top: 1px solid #444746; display: flex; justify-content: center; }}
+    .g-export-btn {{ background-color: #3c4043 !important; color: #e3e3e3 !important; border: none !important; border-radius: 24px !important; height: 48px !important; width: 100% !important; font-size: 14px !important; font-weight: 500 !important; cursor: pointer !important; display: flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important; transition: background-color 0.2s !important; outline: none !important; font-family: 'Prompt', sans-serif !important; }}
+    .g-export-btn:hover {{ background-color: #4a4d51 !important; }}
+    .g-export-btn:active {{ transform: scale(0.97) !important; }}
+    .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
     @media (max-width: 768px) {{ 
         .g-search-container {{ width: calc(100vw - 146px) !important; max-width: none !important; }} 
@@ -476,10 +499,9 @@ def generate_map():
     .g-search-item:last-child {{ border-bottom: none; }}
     .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
 
-    @media (max-width: 768px) {{ .g-zoom-container {{ display: none !important; }} }}
     .custom-right-controls {{ display: flex; flex-direction: column; gap: 12px; align-items: center; margin-right: 16px; margin-bottom: 24px; z-index: 500 !important; position: relative; }}
     .g-zoom-container {{ width: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }}
-    .g-zoom-btn {{ width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #5f6368; background: transparent; cursor: pointer; user-select: none; transition: background-color 0.2s; font-weight: 400; margin: 0; border: none; }}
+    .g-zoom-btn {{ width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #5f6368; background: transparent; cursor: pointer; user-select: none; transition: background-color 0.2s; font-weight: 400; margin: 0; border: none; padding: 0; outline: none; }}
     .g-zoom-btn:hover {{ background-color: #f1f3f4; color: #202124; }}
     .g-zoom-in {{ border-bottom: 1px solid #e8eaed; }}
 
@@ -576,6 +598,10 @@ def generate_map():
     var reportRawData = {report_json_data};
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
+
+    // ล้างคลาสจาก Bootstrap ให้หมด
+    var searchInputEl = document.getElementById('searchInput');
+    if (searchInputEl) {{ searchInputEl.className = 'g-search-input'; }}
 
     function showCustomAlert(msg) {{
         document.getElementById('customAlertMsg').innerText = msg;
@@ -706,6 +732,27 @@ def generate_map():
     var filterBtn = document.getElementById('standaloneFilterBtn');
     var filterWrapper = document.getElementById('customFilterWrapper');
 
+    if (filterBtn && filterWrapper) {{
+        filterBtn.addEventListener('click', function(e) {{ 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            filterWrapper.classList.toggle('show'); 
+        }});
+        
+        document.addEventListener('click', function(e) {{ 
+            if (filterWrapper.classList.contains('show')) {{ 
+                if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                    filterWrapper.classList.remove('show'); 
+                }} 
+            }} 
+        }});
+        
+        L.DomEvent.disableClickPropagation(filterBtn);
+        L.DomEvent.disableClickPropagation(filterWrapper);
+        filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+        filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+    }}
+
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
@@ -748,50 +795,33 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    // --- ระบบ Tracker อัจฉริยะ (รอแผนที่โหลดเสร็จ ค่อยเปิด UI) ---
-    var coreUIReady = setInterval(function() {{
+    // --- Tracker อัจฉริยะแบบรอไม่มีที่สิ้นสุดจนกว่าโหลดจะเสร็จ ---
+    var mapInitInterval = setInterval(function() {{
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
         
-        var targetForm = null;
-        document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
-            if (f.querySelector('.leaflet-control-layers-group')) {{ targetForm = f; }}
-        }});
+        var targetForm = document.querySelector('.leaflet-control-layers form');
 
         if (globalMap && targetForm && filterWrapper) {{
-            clearInterval(coreUIReady); 
+            clearInterval(mapInitInterval); 
             
-            // 1. ผูก Event กล่อง Filter
-            if (filterBtn && filterWrapper) {{
-                filterBtn.addEventListener('click', function(e) {{ 
-                    e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); 
-                }});
-                document.addEventListener('click', function(e) {{ 
-                    if (filterWrapper.classList.contains('show') && !filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
-                        filterWrapper.classList.remove('show'); 
-                    }} 
-                }});
-                L.DomEvent.disableClickPropagation(filterBtn);
-                L.DomEvent.disableClickPropagation(filterWrapper);
-                filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-                filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-            }}
-
             filterWrapper.addEventListener('mouseenter', function () {{ globalMap.scrollWheelZoom.disable(); }});
             filterWrapper.addEventListener('mouseleave', function () {{ globalMap.scrollWheelZoom.enable(); }});
+            
             filterWrapper.appendChild(targetForm);
             
-            // 2. จัดการข้อมูลสถานะ
             var controlList = filterWrapper.querySelector('.leaflet-control-layers-overlays');
             if (controlList) {{
                 var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
                 groups.forEach(function(group) {{
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
+                    
                     itemLabels.sort(function(a, b) {{
                         var snA = a.querySelector('.status-text');
                         var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
+                        
                         function getWeight(s) {{
                             if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
                             if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
@@ -801,7 +831,8 @@ def generate_map():
                             if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
                             return 10;
                         }}
-                        var weightA = getWeight(sA); var weightB = getWeight(sB);
+                        var weightA = getWeight(sA);
+                        var weightB = getWeight(sB);
                         if (weightA !== weightB) return weightA - weightB;
                         if (sA.length !== sB.length) return sA.length - sB.length;
                         return sA.localeCompare(sB);
@@ -856,7 +887,6 @@ def generate_map():
                 }});
             }});
 
-            // สร้างปุ่ม Export CSV
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
                 exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
@@ -880,10 +910,10 @@ def generate_map():
                     document.body.appendChild(link); link.click(); document.body.removeChild(link);
                 }};
             }}
-
-            // 3. จัดการ Popup และ Events ของแผนที่
+            
             globalMap.on('click dragstart popupopen', function() {{
-                if (filterWrapper) filterWrapper.classList.remove('show');
+                var fw = document.getElementById('customFilterWrapper');
+                if (fw) fw.classList.remove('show');
             }});
 
             globalMap.on('popupopen', function(e) {{
@@ -908,7 +938,7 @@ def generate_map():
             
             globalMap.on('click', function() {{ hideCustomPanel(); }});
 
-            // 4. สร้างปุ่ม Location และ Zoom
+            // สร้างปุ่ม Location และ Zoom ล่างขวา
             var CustomControls = L.Control.extend({{
                 options: {{ position: 'bottomright' }},
                 onAdd: function (map) {{
@@ -938,7 +968,7 @@ def generate_map():
                 if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
             }};
 
-            // 5. Setup ปุ่มสลับ Map Layers
+            // Setup ปุ่มสลับ Map Layers มุมซ้ายล่าง
             var mapConfigs = [
                 {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
                 {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -970,10 +1000,12 @@ def generate_map():
                     radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
                 }}
+                
                 panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
                     if(i === idx) item.classList.add('active'); 
                     else item.classList.remove('active'); 
                 }});
+                
                 document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
                 document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
             }}
@@ -982,11 +1014,11 @@ def generate_map():
                 e.stopPropagation(); 
                 switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
             }};
-            switchMapLayer(0);
-        }}
-    }}, 100);
 
-    // --- Search Logic ---
+            setTimeout(function() {{ switchMapLayer(0); }}, 800);
+        }}
+    }}, 200); 
+
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
