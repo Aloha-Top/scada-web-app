@@ -176,7 +176,6 @@ def generate_map():
         parent_counts[raw_parent] += 1
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
-        # --- Report Data Extraction ---
         raw_date_val = str(row.get(date_col_report, '')).strip() if date_col_report else ""
         
         if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
@@ -328,19 +327,19 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับแก้ไข Scrolling สมบูรณ์ 100% (ล๊อกความขัดแย้งของ CSS) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    
-    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
-    .leaflet-control-zoom {{ display: none !important; }}
+    .leaflet-top {{ z-index: 999 !important; }}
+    .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+    
+    .leaflet-control-zoom {{ display: none !important; }}
 
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
@@ -350,41 +349,19 @@ def generate_map():
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
 
-    /* --- ระบบ Scroll สำหรับกล่อง Filter (ให้เลื่อนได้อิสระ 100%) --- */
-    .custom-filter-wrapper {{ 
-        display: none; flex-direction: column; position: fixed; 
-        top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); 
-        right: 16px; width: 340px; 
-        max-height: calc(100dvh - 100px) !important; 
-        background-color: #282a2d; border-radius: 16px; 
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; 
-        
-        /* สั่งให้กล่องหลักกลายเป็นตัว Scroll */
-        overflow-y: auto !important; 
-        overflow-x: hidden !important; 
-        
-        z-index: 999998 !important; pointer-events: auto; padding: 8px 0; 
-        scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
-    }}
-    .custom-filter-wrapper.show {{ display: flex !important; }}
-
-    .custom-filter-wrapper::-webkit-scrollbar,
+    .custom-filter-wrapper .leaflet-control-layers-list,
+    .g-search-results,
+    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
     .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper::-webkit-scrollbar-track,
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
     .g-search-results::-webkit-scrollbar-track,
     .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper::-webkit-scrollbar-thumb,
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
     .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
-    .custom-filter-wrapper:hover::-webkit-scrollbar-thumb,
-    .g-search-results:hover::-webkit-scrollbar-thumb,
-    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
-    .custom-filter-wrapper::-webkit-scrollbar-thumb:hover,
-    .g-search-results::-webkit-scrollbar-thumb:hover,
-    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    /* ล็อกความสวยงามกล่องค้นหา ห้ามสีขาวเด็ดขาด */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto !important; background-color: #282a2d !important; border-radius: 24px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; padding: 0 14px !important; height: 48px !important; border: 1px solid #444746 !important; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8 !important; }}
@@ -394,7 +371,6 @@ def generate_map():
     .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
     .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
-    /* ปุ่มหลักบนแผนที่ */
     .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
     .top-action-btn:hover {{ background-color: #3c4043; transform: translateY(-2px); }}
     .top-action-btn:active {{ transform: scale(0.92); }}
@@ -404,36 +380,27 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    /* ปลดล็อกโครงสร้างภายในของฟอร์ม Folium ไม่ให้กั๊กความสูง (แก้ปัญหา Scrolling โดนตัด) */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
+    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper.show {{ display: flex !important; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }}
     .custom-filter-wrapper .leaflet-control-layers-list {{ overflow: visible !important; max-height: none !important; height: auto !important; padding: 0 0 12px 0 !important; margin: 0 !important; }}
     .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; overflow: visible !important; }}
-    
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: flex !important; flex-direction: column !important; width: 100% !important; margin-bottom: 8px !important; clear: both !important; align-items: stretch !important; }}
     
     .custom-filter-wrapper label.leaflet-control-layers-group-label,
-    .custom-filter-wrapper label {{ 
-        display: flex !important; 
-        flex-direction: row !important; 
-        align-items: flex-start !important; 
-        width: 100% !important; 
-        padding: 6px 16px !important; 
-        margin: 0 !important; 
-        cursor: pointer !important; 
-        float: none !important;
-        clear: both !important;
-        box-sizing: border-box !important;
-    }}
+    .custom-filter-wrapper label {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; padding: 6px 16px !important; margin: 0 !important; cursor: pointer !important; float: none !important; clear: both !important; box-sizing: border-box !important; }}
     .custom-filter-wrapper label:hover {{ background-color: #35363a !important; }}
     .custom-filter-wrapper label > span {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; white-space: normal !important; }}
     .custom-filter-wrapper input[type="checkbox"] {{ flex-shrink: 0 !important; -webkit-appearance: none !important; -moz-appearance: none !important; appearance: none !important; width: 18px !important; height: 18px !important; border: 2px solid #8e918f !important; border-radius: 3px !important; margin: 2px 14px 0 0 !important; position: relative !important; cursor: pointer; outline: none; transition: all 0.2s ease; background-color: transparent !important; box-shadow: none !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
-    .custom-alert-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
-    .custom-alert-overlay.show {{ display: flex; opacity: 1; }}
-    .custom-alert-box {{ background: #282a2d; width: 90%; max-width: 320px; border-radius: 16px; padding: 24px 20px 20px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; text-align: center; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }}
+    /* แก้ให้ Modal รายงานเด้งตรงกลาง 100% */
+    .custom-alert-overlay, .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
+    .custom-alert-overlay.show, .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
+    
+    .custom-alert-box {{ background: #282a2d; width: 90%; max-width: 320px; border-radius: 16px; padding: 24px 20px 20px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; text-align: center; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); margin: auto; position: relative; }}
     .custom-alert-overlay.show .custom-alert-box {{ transform: scale(1); }}
     .custom-alert-icon {{ width: 50px; height: 50px; background: rgba(211, 61, 42, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto; border: 2px solid rgba(211, 61, 42, 0.4); }}
     .custom-alert-icon svg {{ width: 24px; height: 24px; fill: #d33d2a; }}
@@ -442,9 +409,7 @@ def generate_map():
     .custom-alert-btn {{ background: #1a73e8; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }}
     .custom-alert-btn:hover {{ background: #1557b0; }}
 
-    .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
-    .report-modal-overlay.show {{ display: flex; opacity: 1; }}
-    .report-modal {{ background: #282a2d; width: 90%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; transform: translateY(20px); transition: transform 0.3s ease; }}
+    .report-modal {{ background: #282a2d; width: 90%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; transform: translateY(20px); transition: transform 0.3s ease; position: relative; margin: auto; }}
     .report-modal-overlay.show .report-modal {{ transform: translateY(0); }}
     .report-modal h3 {{ color: #e3e3e3; margin: 0 0 20px 0; font-size: 18px; font-weight: 600; text-align: center; }}
     
@@ -475,15 +440,7 @@ def generate_map():
     @media (max-width: 768px) {{ 
         .g-search-container {{ width: calc(100vw - 146px) !important; max-width: none !important; }} 
         .custom-filter-wrapper {{ top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px) !important; right: 16px !important; left: 16px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
-        .custom-info-panel {{ 
-            top: auto !important; bottom: 0 !important; left: 0 !important; 
-            width: 100vw !important; max-width: 100vw !important; 
-            max-height: 55vh !important; 
-            border-radius: 20px 20px 0 0 !important; 
-            animation: slideUpFade 0.3s ease-out; 
-            border-bottom: none !important;
-            padding-bottom: env(safe-area-inset-bottom, 0px);
-        }} 
+        .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 55vh !important; border-radius: 20px 20px 0 0 !important; animation: slideUpFade 0.3s ease-out; border-bottom: none !important; padding-bottom: env(safe-area-inset-bottom, 0px); }} 
         .popup-body {{ max-height: calc(55vh - 125px - env(safe-area-inset-bottom, 0px)) !important; }} 
         .date-flex-container {{ flex-direction: column; }}
     }}
@@ -554,10 +511,13 @@ def generate_map():
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
     <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
+    
+    <!-- กรอบหลักของ Filter -->
     <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
 
+    <!-- กล่องข้อมูล -->
     <div id="customInfoPanel" class="custom-info-panel">
-        <div class="panel-close-btn" id="closeInfoPanelBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+        <div class="panel-close-btn" id="closeInfoPanelBtn" onclick="hideCustomPanel();"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
         <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
 
@@ -597,16 +557,17 @@ def generate_map():
         </div>
     </div>
 
+    <!-- กล่องค้นหา -->
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
             <div class="g-search-icon"><svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:20px; height:20px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
             <input type="text" id="searchInput" class="g-search-input" placeholder="ค้นหา Site ID, รหัสสั่งการ, หรือ สถานที่..." autocomplete="off">
-            <div class="g-search-clear" id="searchClear">×</div>
+            <div class="g-search-clear" id="searchClear" onclick="this.previousElementSibling.value=''; this.style.display='none'; document.getElementById('searchResults').style.display='none'; hideCustomPanel();">×</div>
         </div>
         <div id="searchResults" class="g-search-results"></div>
     </div>
 
-    <!-- ปุ่มสลับแผนที่ -->
+    <!-- ปุ่มสลับแผนที่ซ้ายล่าง -->
     <div class="g-layer-container" id="gLayerContainer">
         <div class="g-layer-main-btn" id="gLayerMainBtn"><div class="g-layer-label" id="gLayerMainLabel">...</div></div>
         <div class="g-layer-panel" id="gLayerPanel"></div>
@@ -619,9 +580,19 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
-    // เคลียร์คลาสแปลกปลอมที่ Render/Bootstrap แอบใส่มา
-    var searchInputEl = document.getElementById('searchInput');
-    if (searchInputEl) {{ searchInputEl.className = 'g-search-input'; }}
+    // ระบบกดปุ่ม ESC ครอบจักรวาล
+    document.addEventListener('keydown', function(e) {{
+        if (e.key === 'Escape' || e.keyCode === 27) {{
+            var fw = document.getElementById('customFilterWrapper');
+            if (fw && fw.classList.contains('show')) fw.classList.remove('show');
+            
+            hideCustomPanel();
+            closeReportModal();
+            
+            var res = document.getElementById('searchResults');
+            if (res) res.style.display = 'none';
+        }}
+    }});
 
     function showCustomAlert(msg) {{
         document.getElementById('customAlertMsg').innerText = msg;
@@ -749,9 +720,6 @@ def generate_map():
         closeReportModal();
     }}
 
-    var filterBtn = document.getElementById('standaloneFilterBtn');
-    var filterWrapper = document.getElementById('customFilterWrapper');
-
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
@@ -794,18 +762,20 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    // --- ระบบ Tracker อัจฉริยะ (รอจนกว่า Leaflet จะโหลดเสร็จจริงๆ 100% ถึงจะดึง UI ไปครอบ) ---
+    // --- Tracker อัจฉริยะ ล่า 100% Load ---
     var mapInitInterval = setInterval(function() {{
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
         
         var targetForm = document.querySelector('.leaflet-control-layers form');
 
-        if (globalMap && targetForm && filterWrapper) {{
+        if (globalMap && targetForm && document.getElementById('customFilterWrapper')) {{
             clearInterval(mapInitInterval); 
+            var filterWrapper = document.getElementById('customFilterWrapper');
+            var filterBtn = document.getElementById('standaloneFilterBtn');
             
             // 1. ผูก Event กล่อง Filter
-            if (filterBtn && filterWrapper) {{
+            if (filterBtn) {{
                 filterBtn.addEventListener('click', function(e) {{ 
                     e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); 
                 }});
@@ -816,6 +786,8 @@ def generate_map():
                 }});
                 L.DomEvent.disableClickPropagation(filterBtn);
                 L.DomEvent.disableClickPropagation(filterWrapper);
+                
+                // ถอด Event กัน Scroll ออก เพื่อให้ไถในกล่องดำได้
                 filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
                 filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
             }}
@@ -899,7 +871,6 @@ def generate_map():
                 }});
             }});
 
-            // สร้างปุ่ม Export CSV
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
                 exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
@@ -924,7 +895,6 @@ def generate_map():
                 }};
             }}
             
-            // 3. จัดการ Popup และ Events ของแผนที่
             globalMap.on('click dragstart popupopen', function() {{
                 if (filterWrapper) filterWrapper.classList.remove('show');
             }});
@@ -951,7 +921,7 @@ def generate_map():
             
             globalMap.on('click', function() {{ hideCustomPanel(); }});
 
-            // 4. สร้างปุ่ม Location และ Zoom ล่างขวา
+            // 4. สร้างปุ่ม Location และ Zoom
             var CustomControls = L.Control.extend({{
                 options: {{ position: 'bottomright' }},
                 onAdd: function (map) {{
@@ -1097,7 +1067,6 @@ def generate_map():
     inp.addEventListener('focus', handleSearchFocus); 
     inp.addEventListener('click', handleSearchFocus); 
     inp.addEventListener('blur', function() {{ box.classList.remove('focus'); setTimeout(function(){{ res.style.display = 'none'; }}, 200); }});
-    clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
     </script>
     """
     m.get_root().html.add_child(folium.Element(custom_ui_html))
@@ -1272,6 +1241,16 @@ def index():
             }, 3000);
 
             setInterval(checkUpdate, 15000);
+            
+            // ส่งคำสั่งจับปุ่ม ESC ให้ iframe ลูก
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' || e.keyCode === 27) {
+                    var ifr = document.getElementById('layer' + activeLayer);
+                    if (ifr && ifr.contentWindow) {
+                        ifr.contentWindow.document.dispatchEvent(new KeyboardEvent('keydown', {'key': 'Escape', 'keyCode': 27}));
+                    }
+                }
+            });
         </script>
     </body>
     </html>
