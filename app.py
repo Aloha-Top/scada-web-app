@@ -27,9 +27,7 @@ def get_meta():
 
 def get_status_config(status_text):
     status_upper = str(status_text).strip().upper()
-    
-    if status_upper.startswith('TELEMETRY'):
-        return "Telemetry Failure", "gold", "wrench"
+    if status_upper.startswith('TELEMETRY'): return "Telemetry Failure", "gold", "wrench"
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
         if 'ระบบสื่อสาร' in status_upper: color = "purple"
@@ -60,8 +58,7 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-    else:
-        return "สถานะอื่นๆ", "gray", "info-circle"
+    else: return "สถานะอื่นๆ", "gray", "info-circle"
 
 def get_actual_col_name(df_columns, keywords, exclude=None):
     for col in df_columns:
@@ -119,6 +116,7 @@ def generate_map():
         if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
         return status_hash_map[text]
 
+    # บังคับซ่อนปุ่ม Zoom เดิมของ Leaflet อย่างเด็ดขาด
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
     folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
@@ -331,15 +329,16 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว ---
+    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว ล็อก CSS ไม่ให้หลุด ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    .leaflet-top {{ z-index: 999 !important; }}
-    .leaflet-bottom {{ z-index: 998 !important; }}
+    
+    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
+    .leaflet-control-zoom {{ display: none !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
@@ -351,7 +350,6 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
-    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
     .custom-filter-wrapper .leaflet-control-layers-list,
     .g-search-results,
@@ -372,9 +370,17 @@ def generate_map():
     .g-search-results::-webkit-scrollbar-thumb:hover,
     .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
+    /* ล็อกความสวยงามกล่องค้นหา */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
-    .g-search-box {{ pointer-events: auto; background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
+    .g-search-box {{ pointer-events: auto !important; background-color: #282a2d !important; border-radius: 24px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; padding: 0 14px !important; height: 48px !important; border: 1px solid #444746 !important; }}
+    .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8 !important; }}
+    .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
+    .g-search-input {{ flex: 1 !important; border: none !important; outline: none !important; background: transparent !important; background-color: transparent !important; font-size: 14px !important; color: #e8eaed !important; margin-left: 10px !important; width: 100% !important; font-family: 'Prompt', sans-serif !important; pointer-events: auto !important; box-shadow: none !important; -webkit-appearance: none !important; }}
+    .g-search-input::placeholder {{ color: #9aa0a6; font-weight: 400; }}
+    .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
+    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
+    /* ปุ่มหลักบนแผนที่ */
     .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
     .top-action-btn:hover {{ background-color: #3c4043; transform: translateY(-2px); }}
     .top-action-btn:active {{ transform: scale(0.92); }}
@@ -465,8 +471,28 @@ def generate_map():
     .popup-table td {{ padding: 8px 0; font-size: 12.5px; line-height: 1.4; word-break: keep-all; overflow-wrap: break-word; text-wrap: balance; }}
     .popup-table td:first-child {{ color: #5f6368; font-weight: 500; width: 45%; vertical-align: top; padding-right: 8px; }}
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
-    
-    .g-search-input {{ flex: 1; border: none !important; outline: none !important; background: transparent !important; background-color: transparent !important; font-size: 14px; color: #e8eaed !important; margin-left: 10px; width: 100%; font-family: 'Prompt', sans-serif; pointer-events: auto; box-shadow: none !important; -webkit-appearance: none; }}
+
+    .g-search-item {{ padding: 12px 16px; display: flex; flex-direction: column; cursor: pointer; border-bottom: 1px solid #35363a; transition: background-color 0.2s, border-left 0.2s; border-left: 3px solid transparent; gap: 6px; }}
+    .g-search-item:last-child {{ border-bottom: none; }}
+    .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
+
+    @media (max-width: 768px) {{ .g-zoom-container {{ display: none !important; }} }}
+    .custom-right-controls {{ display: flex; flex-direction: column; gap: 12px; align-items: center; margin-right: 16px; margin-bottom: 24px; z-index: 500 !important; position: relative; }}
+    .g-zoom-container {{ width: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }}
+    .g-zoom-btn {{ width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #5f6368; background: transparent; cursor: pointer; user-select: none; transition: background-color 0.2s; font-weight: 400; margin: 0; border: none; }}
+    .g-zoom-btn:hover {{ background-color: #f1f3f4; color: #202124; }}
+    .g-zoom-in {{ border-bottom: 1px solid #e8eaed; }}
+
+    .g-locate-btn {{ width: 44px !important; height: 44px !important; background-color: #ffffff !important; color: #1a73e8 !important; border-radius: 50% !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center; justify-content: center; cursor: pointer; transition: background-color 0.2s; text-decoration: none !important; }}
+    @media (min-width: 769px) {{ .g-locate-btn {{ width: 40px !important; height: 40px !important; border-radius: 8px !important; }} }}
+    .g-locate-btn:hover {{ background-color: #f1f3f4 !important; }}
+    .g-locate-btn:active {{ transform: scale(0.95); }}
+    .g-locate-btn svg {{ width: 22px; height: 22px; fill: #1a73e8; transform: rotate(45deg) translate(-1px, 2px); }}
+
+    .my-location-container {{ position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; }}
+    .my-location-cone {{ position: absolute; width: 60px; height: 60px; border-radius: 50%; background: conic-gradient(from 225deg at 50% 50%, rgba(66, 133, 244, 0) 0deg, rgba(66, 133, 244, 0.4) 45deg, rgba(66, 133, 244, 0) 90deg, transparent 90deg); z-index: 1; pointer-events: none; animation: cone-breathe 2.5s infinite ease-in-out; }}
+    @keyframes cone-breathe {{ 0% {{ transform: scale(0.85); opacity: 0.7; }} 50% {{ transform: scale(1.1); opacity: 1; }} 100% {{ transform: scale(0.85); opacity: 0.7; }} }}
+    .my-location-dot {{ position: absolute; background-color: #4285F4; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2; }}
 
     .g-layer-container {{ position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; pointer-events: none; }}
     .g-layer-main-btn {{ pointer-events: auto; width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
@@ -505,7 +531,7 @@ def generate_map():
         </div>
     </div>
 
-    <!-- Modal สำหรับเลือก Report Range (แก้ไขให้แสดง Placeholder บนมือถือ) -->
+    <!-- Modal สำหรับเลือก Report Range -->
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
@@ -538,7 +564,7 @@ def generate_map():
         <div id="searchResults" class="g-search-results"></div>
     </div>
 
-    <!-- กู้คืนปุ่มสลับแผนที่ที่ทำหายไป ทำให้ JS ทั้งหมดกลับมาทำงานได้ 100% -->
+    <!-- ปุ่มสลับแผนที่ -->
     <div class="g-layer-container" id="gLayerContainer">
         <div class="g-layer-main-btn" id="gLayerMainBtn"><div class="g-layer-label" id="gLayerMainLabel">...</div></div>
         <div class="g-layer-panel" id="gLayerPanel"></div>
@@ -680,27 +706,6 @@ def generate_map():
     var filterBtn = document.getElementById('standaloneFilterBtn');
     var filterWrapper = document.getElementById('customFilterWrapper');
 
-    if (filterBtn && filterWrapper) {{
-        filterBtn.addEventListener('click', function(e) {{ 
-            e.preventDefault(); 
-            e.stopPropagation(); 
-            filterWrapper.classList.toggle('show'); 
-        }});
-        
-        document.addEventListener('click', function(e) {{ 
-            if (filterWrapper.classList.contains('show')) {{ 
-                if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
-                    filterWrapper.classList.remove('show'); 
-                }} 
-            }} 
-        }});
-        
-        L.DomEvent.disableClickPropagation(filterBtn);
-        L.DomEvent.disableClickPropagation(filterWrapper);
-        filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-        filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-    }}
-
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
@@ -743,37 +748,50 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    var checkMapReady = setInterval(function() {{
-        var targetForm = null;
-        document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
-            if (f.querySelector('.leaflet-control-layers-group')) {{
-                targetForm = f;
-            }}
-        }});
-        
+    // --- ระบบ Tracker อัจฉริยะ (รอแผนที่โหลดเสร็จ ค่อยเปิด UI) ---
+    var coreUIReady = setInterval(function() {{
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
+        
+        var targetForm = null;
+        document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
+            if (f.querySelector('.leaflet-control-layers-group')) {{ targetForm = f; }}
+        }});
 
-        if (targetForm && globalMap && filterWrapper) {{
-            clearInterval(checkMapReady); 
+        if (globalMap && targetForm && filterWrapper) {{
+            clearInterval(coreUIReady); 
             
+            // 1. ผูก Event กล่อง Filter
+            if (filterBtn && filterWrapper) {{
+                filterBtn.addEventListener('click', function(e) {{ 
+                    e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); 
+                }});
+                document.addEventListener('click', function(e) {{ 
+                    if (filterWrapper.classList.contains('show') && !filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                        filterWrapper.classList.remove('show'); 
+                    }} 
+                }});
+                L.DomEvent.disableClickPropagation(filterBtn);
+                L.DomEvent.disableClickPropagation(filterWrapper);
+                filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+                filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+            }}
+
             filterWrapper.addEventListener('mouseenter', function () {{ globalMap.scrollWheelZoom.disable(); }});
             filterWrapper.addEventListener('mouseleave', function () {{ globalMap.scrollWheelZoom.enable(); }});
-            
             filterWrapper.appendChild(targetForm);
             
+            // 2. จัดการข้อมูลสถานะ
             var controlList = filterWrapper.querySelector('.leaflet-control-layers-overlays');
             if (controlList) {{
                 var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
                 groups.forEach(function(group) {{
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
-                    
                     itemLabels.sort(function(a, b) {{
                         var snA = a.querySelector('.status-text');
                         var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
-                        
                         function getWeight(s) {{
                             if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
                             if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
@@ -783,8 +801,7 @@ def generate_map():
                             if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
                             return 10;
                         }}
-                        var weightA = getWeight(sA);
-                        var weightB = getWeight(sB);
+                        var weightA = getWeight(sA); var weightB = getWeight(sB);
                         if (weightA !== weightB) return weightA - weightB;
                         if (sA.length !== sB.length) return sA.length - sB.length;
                         return sA.localeCompare(sB);
@@ -838,17 +855,35 @@ def generate_map():
                     document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
                 }});
             }});
-        }}
-    }}, 100); 
 
-    setTimeout(function() {{
-        var globalMap = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
-        if (globalMap) {{
+            // สร้างปุ่ม Export CSV
+            if(!document.getElementById('exportCsvBtn')) {{
+                var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
+                exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
+                targetForm.appendChild(exportDiv);
 
+                document.getElementById('exportCsvBtn').onclick = function(e) {{
+                    e.preventDefault(); e.stopPropagation();
+                    var activeStatuses = [];
+                    filterWrapper.querySelectorAll('.leaflet-control-layers-selector:checked').forEach(function(inp) {{
+                        var lbl = inp.nextElementSibling || inp.parentElement;
+                        var statusNode = lbl.querySelector('.status-text');
+                        activeStatuses.push(statusNode ? statusNode.getAttribute('data-status') : lbl.textContent.replace(/●/g,'').trim());
+                    }});
+                    var filtered = expData.filter(function(d) {{ return activeStatuses.includes(d._layerName.trim()); }});
+                    if(filtered.length === 0) {{ showCustomAlert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
+                    var headers = Object.keys(filtered[0]).filter(function(k) {{ return k !== '_layerName'; }});
+                    var csv = headers.map(function(h) {{ return '"' + h + '"'; }}).join(',') + '\\r\\n';
+                    filtered.forEach(function(row) {{ csv += headers.map(function(h) {{ return '"' + (row[h] ? row[h].toString().replace(/"/g, '""') : '') + '"'; }}).join(',') + '\\r\\n'; }});
+                    var blob = new Blob(["\\uFEFF" + csv], {{ type: 'text/csv;charset=utf-8;' }});
+                    var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "SCADA_Export_Data.csv";
+                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                }};
+            }}
+
+            // 3. จัดการ Popup และ Events ของแผนที่
             globalMap.on('click dragstart popupopen', function() {{
-                var fw = document.getElementById('customFilterWrapper');
-                if (fw) fw.classList.remove('show');
+                if (filterWrapper) filterWrapper.classList.remove('show');
             }});
 
             globalMap.on('popupopen', function(e) {{
@@ -873,6 +908,7 @@ def generate_map():
             
             globalMap.on('click', function() {{ hideCustomPanel(); }});
 
+            // 4. สร้างปุ่ม Location และ Zoom
             var CustomControls = L.Control.extend({{
                 options: {{ position: 'bottomright' }},
                 onAdd: function (map) {{
@@ -883,8 +919,8 @@ def generate_map():
             }});
             globalMap.addControl(new CustomControls());
 
-            if(document.getElementById('customZoomIn')) document.getElementById('customZoomIn').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomIn(); }};
-            if(document.getElementById('customZoomOut')) document.getElementById('customZoomOut').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomOut(); }};
+            document.getElementById('customZoomIn').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomIn(); }};
+            document.getElementById('customZoomOut').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomOut(); }};
 
             var myLocMarker = null; var userLatLng = null; var pendingFlyToLoc = false;
             globalMap.locate({{watch: true, setView: false, enableHighAccuracy: true}});
@@ -897,65 +933,60 @@ def generate_map():
                 if (pendingFlyToLoc) {{ globalMap.flyTo(userLatLng, 16); pendingFlyToLoc = false; }}
             }});
             
-            if(document.getElementById('locTargetBtn')) {{
-                document.getElementById('locTargetBtn').onclick = function(e) {{
-                    e.preventDefault(); e.stopPropagation();
-                    if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
-                }};
+            document.getElementById('locTargetBtn').onclick = function(e) {{
+                e.preventDefault(); e.stopPropagation();
+                if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
+            }};
+
+            // 5. Setup ปุ่มสลับ Map Layers
+            var mapConfigs = [
+                {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
+                {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
+                {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
+                {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
+                {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
+            ];
+
+            var currentMapIndex = 0; 
+            var panel = document.getElementById('gLayerPanel');
+            mapConfigs.forEach(function(conf, idx) {{
+                var div = document.createElement('div'); div.className = 'g-layer-item';
+                div.innerHTML = '<div class="g-layer-thumb" style="background-image: url(' + conf.thumb + ')"></div><div class="g-layer-name">' + conf.name + '</div>';
+                div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
+                panel.appendChild(div);
+            }});
+
+            function getRadioByKeyword(kw) {{
+                var labels = document.querySelectorAll('.leaflet-control-layers-base label');
+                for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
+                return null;
             }}
+
+            function switchMapLayer(idx) {{
+                currentMapIndex = idx; 
+                var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
+                if (radio && !radio.checked) {{
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
+                }}
+                panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
+                    if(i === idx) item.classList.add('active'); 
+                    else item.classList.remove('active'); 
+                }});
+                document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
+                document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
+            }}
+
+            document.getElementById('gLayerMainBtn').onclick = function(e) {{ 
+                e.stopPropagation(); 
+                switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
+            }};
+            switchMapLayer(0);
         }}
-    }}, 1200);
+    }}, 100);
 
-    document.getElementById('closeInfoPanelBtn').onclick = function(e) {{ e.stopPropagation(); hideCustomPanel(); }};
-
-    var mapConfigs = [
-        {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
-        {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
-        {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
-        {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
-        {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
-    ];
-
-    var currentMapIndex = 0; 
-    var panel = document.getElementById('gLayerPanel');
-    mapConfigs.forEach(function(conf, idx) {{
-        var div = document.createElement('div'); div.className = 'g-layer-item';
-        div.innerHTML = '<div class="g-layer-thumb" style="background-image: url(' + conf.thumb + ')"></div><div class="g-layer-name">' + conf.name + '</div>';
-        div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
-        panel.appendChild(div);
-    }});
-
-    function getRadioByKeyword(kw) {{
-        var labels = document.querySelectorAll('.leaflet-control-layers-base label');
-        for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
-        return null;
-    }}
-
-    function switchMapLayer(idx) {{
-        currentMapIndex = idx; 
-        var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
-        if (radio && !radio.checked) {{
-            radio.checked = true;
-            radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
-        }}
-        
-        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
-            if(i === idx) item.classList.add('active'); 
-            else item.classList.remove('active'); 
-        }});
-        
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
-    }}
-
-    document.getElementById('gLayerMainBtn').onclick = function(e) {{ 
-        e.stopPropagation(); 
-        switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
-    }};
-
-    setTimeout(function() {{ switchMapLayer(0); }}, 800);
-
+    // --- Search Logic ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
@@ -1044,7 +1075,6 @@ def background_task():
         print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
-        # --- UI โชว์ Error อัตโนมัติ (แก้แอปค้างหน้าโหลด) ---
         error_html = f"""
         <div style='display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;background:#282a2d;color:white;font-family:sans-serif;'>
             <h2 style='color:#d33d2a;'>เกิดข้อผิดพลาดในการโหลดข้อมูลแผนที่</h2>
@@ -1170,11 +1200,8 @@ def index():
                         var newMap = getMapInstance(nextIframe);
                         var oldMap = getMapInstance(activeIframe);
                         
-                        // ถ้าระบบส่ง Error Page มาให้ (ไม่มีตัวแปร Map) ให้โชว์เลย จะได้ไม่ค้าง
                         var hasErrorPage = false;
-                        try {
-                            hasErrorPage = nextIframe.contentWindow.document.body.innerHTML.includes('เกิดข้อผิดพลาด');
-                        } catch(e) {}
+                        try { hasErrorPage = nextIframe.contentWindow.document.body.innerHTML.includes('เกิดข้อผิดพลาด'); } catch(e) {}
 
                         if (newMap || hasErrorPage) {
                             clearInterval(checkReady);
