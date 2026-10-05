@@ -4,10 +4,10 @@ import folium
 import json
 import hashlib
 import html
-import re
 import time
 import threading
 import os
+import re
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
@@ -27,11 +27,13 @@ def get_meta():
 
 def get_status_config(status_text):
     status_upper = str(status_text).strip().upper()
-    if status_upper.startswith('TELEMETRY'): return "Telemetry Failure", "gold", "wrench"
+    
+    if status_upper.startswith('TELEMETRY'):
+        return "Telemetry Failure", "gold", "wrench"
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
         if 'ระบบสื่อสาร' in status_upper: color = "purple"
-        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple"
+        elif 'ผอส.' in status_upper and 'ผบอ.' not in status_upper: color = "purple" 
         else: color = "orange"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper and 'ผอส.' in status_upper: icon = "user"
@@ -58,11 +60,8 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-    else: return "สถานะอื่นๆ", "gray", "info-circle"
-
-def get_hash(text, status_hash_map):
-    if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-    return status_hash_map[text]
+    else:
+        return "สถานะอื่นๆ", "gray", "info-circle"
 
 def get_actual_col_name(df_columns, keywords, exclude=None):
     for col in df_columns:
@@ -114,6 +113,9 @@ def generate_map():
     except Exception as e: raise e
 
     status_hash_map = {}
+    def get_hash(text):
+        if text not in status_hash_map: status_hash_map[text] = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
+        return status_hash_map[text]
 
     m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
 
@@ -153,21 +155,18 @@ def generate_map():
         lat_col = get_actual_col_name(df.columns, ["lat", "long"])
         lat_lng_str = str(row[lat_col]) if lat_col and pd.notna(row[lat_col]) else ''
         if not lat_lng_str or ',' not in lat_lng_str: continue
-        try:
-            parts = lat_lng_str.split(',')
-            lat, lon = float(parts[0].strip()), float(parts[1].strip())
+        try: lat, lon = float(lat_lng_str.split(',')[0].strip()), float(lat_lng_str.split(',')[1].strip())
         except ValueError: continue
 
         coord_key = (round(lat, 5), round(lon, 5)) 
         if coord_key in seen_coords:
             seen_coords[coord_key] += 1
-            cnt = seen_coords[coord_key]
             offsets = [(0.00005, 0.00005), (-0.00005, -0.00005), (0.00005, -0.00005), (-0.00005, 0.00005), (0.00008, 0.0), (0.0, 0.00008), (-0.00008, 0.0), (0.0, -0.00008)]
-            lat += offsets[(cnt - 1) % len(offsets)][0]; lon += offsets[(cnt - 1) % len(offsets)][1]
+            lat += offsets[(seen_coords[coord_key] - 1) % len(offsets)][0]; lon += offsets[(seen_coords[coord_key] - 1) % len(offsets)][1]
         else: seen_coords[coord_key] = 0
 
-        base_status = str(row[state_scada_col]).strip() if state_scada_col and pd.notna(row[state_scada_col]) else 'Unknown'
-        check_status = str(row[state_after_col]).strip() if state_after_col and pd.notna(row[state_after_col]) else ''
+        base_status = str(row[status_col]).strip() if status_col and pd.notna(row[status_col]) else 'Unknown'
+        check_status = str(row[status_check_col]).strip() if status_check_col and pd.notna(row[status_check_col]) else ''
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
@@ -175,12 +174,12 @@ def generate_map():
 
         status_counts[active_status] = status_counts.get(active_status, 0) + 1
         parent_counts[raw_parent] += 1
-
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
-        # --- เตรียมข้อมูลสำหรับ Report ---
         raw_date_val = str(row[date_col_report]).strip() if date_col_report and pd.notna(row[date_col_report]) else ""
+    
         if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
+            
             details = []
             for d_col in target_detail_cols:
                 val = str(row[d_col]).strip()
@@ -191,7 +190,7 @@ def generate_map():
                     if clean_val and clean_val not in details:
                         details.append(clean_val)
             
-            detail_str = " ".join(details) if details else "-"
+            detail_str = "\n".join(details) if details else "-"
             
             resp_parts = []
             if check_status and check_status.lower() not in ['nan', 'none']:
@@ -206,7 +205,6 @@ def generate_map():
             
             if has_bo and "ผบอ.กบษ.ฉ.2" not in resp_parts:
                 resp_parts.append("ผบอ.กบษ.ฉ.2")
-                
             if has_po and "ผอส.กสฟ.ฉ.2" not in resp_parts:
                 resp_parts.append("ผอส.กสฟ.ฉ.2")
                 
@@ -217,8 +215,8 @@ def generate_map():
             final_resp = []
             for r in resp_parts:
                 if r not in final_resp: final_resp.append(r)
-                
             responsible = " และ ".join(final_resp) if final_resp else "-"
+            
             final_status = base_status if base_status.lower() not in ['nan', 'none'] else "-"
             iso_date = parse_thai_date(raw_date_val)
             
@@ -233,7 +231,6 @@ def generate_map():
             })
 
     grouped_layers = {f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[k][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{k}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[k][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[k]})</span></span>": [] for k in raw_parent_keys.keys() if parent_counts[k] > 0}
-
     mc_groups, search_data, export_data_list = {}, [], []
 
     for node in processed_nodes:
@@ -242,7 +239,7 @@ def generate_map():
         
         c_hex, label = raw_parent_keys[raw_parent]
         p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{c_hex}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
-        safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status, status_hash_map), "p_" + get_hash(raw_parent, status_hash_map), html.escape(active_status)
+        safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
 
         if active_status not in mc_groups:
             layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({status_counts[active_status]})</span></span>"
@@ -251,12 +248,12 @@ def generate_map():
             mc_groups[active_status] = mc
             grouped_layers[p_html].append((active_status, mc))
         
-        target_group = mc_groups[active_status]
-        table_rows = ""
+        target_group, table_rows = mc_groups[active_status], ""
         
         site_id_col = get_actual_col_name(df.columns, ["site id"])
         site_id = str(row[site_id_col]) if site_id_col else 'Unknown'
-        safe_site_id = "id_" + get_hash(site_id + str(lat), status_hash_map)
+        safe_site_id = "id_" + get_hash(site_id + str(lat))
+
         cmd_code_col = get_actual_col_name(df.columns, ["รหัสสั่งการ"]) or get_actual_col_name(df.columns, ["รหัสอุปกรณ์"])
         cmd_code = str(row[cmd_code_col]) if cmd_code_col and pd.notna(row[cmd_code_col]) else ''
         loc_col = get_actual_col_name(df.columns, ["สถานที่"])
@@ -268,21 +265,20 @@ def generate_map():
             actual_col = get_actual_col_name(df.columns, keywords, exclude=excludes) or (get_actual_col_name(df.columns, ["รหัสอุปกรณ์"]) if "รหัสสั่งการ" in keywords else None)
             val = row[actual_col] if actual_col and pd.notna(row[actual_col]) else 'ไม่มีค่า'
             if str(val).strip() == '' or str(val).lower() == 'nan' or str(val) == 'None': val = 'ไม่มีค่า'
+            
             if "วันที่" in display_name and val != 'ไม่มีค่า':
                 try:
                     dt = pd.to_datetime(val)
                     thai_months = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
                     val = f"{dt.day} {thai_months[dt.month]} {str(dt.year)[-2:]}"
                 except: pass
+                
             val_str = str(val)
             display_val = val_str 
             table_rows += f"<tr><td>{display_name}</td><td>{display_val}</td></tr>"
             export_row[display_name] = val_str
 
         export_data_list.append(export_row)
-        
-        google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
-        apple_maps_url = f"http://maps.apple.com/?daddr={lat},{lon}"
         
         popup_html = f"""
         <div class="custom-popup-card" data-safe-id="{safe_site_id}">
@@ -291,13 +287,14 @@ def generate_map():
                 <div class="popup-title"><h3>{site_id}</h3><span>{active_status_display}</span></div>
             </div>
             <div class="popup-actions">
-                <a href="{google_maps_url}" target="_blank" class="btn-map btn-google">{google_svg} Google Maps</a>
-                <a href="{apple_maps_url}" target="_blank" class="btn-map btn-apple">{apple_svg} Apple Maps</a>
+                <a href="https://www.google.com/maps/dir/?api=1&destination={lat},{lon}" target="_blank" class="btn-map btn-google">{google_svg} Google Maps</a>
+                <a href="http://maps.apple.com/?daddr={lat},{lon}" target="_blank" class="btn-map btn-apple">{apple_svg} Apple Maps</a>
             </div>
             <div class="popup-body"><table class="popup-table">{table_rows}</table></div>
         </div>
         """
         search_data.append({"id": site_id, "code": cmd_code, "name": location_name, "lat": lat, "lon": lon, "popup": popup_html, "safe_id": safe_site_id, "status": active_status_display, "color": h_color})
+
         pin_html = f"""<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}" style="position: relative; width: 30px; height: 42px; display: flex; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"><div class="pin-shape" style="position: absolute; top: 0; left: 0; width: 30px; height: 30px; background-color: {h_color}; border: 2px solid white; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 2px 2px 6px rgba(0,0,0,0.4); transition: all 0.3s ease;"></div><i class="fa fa-{icon_name}" style="position: relative; color: white; font-size: 14px; margin-top: 6px; z-index: 1; transition: all 0.3s ease;"></i></div>"""
         folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, autoPan=False), tooltip=f"{site_id} ({location_name})", icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42))).add_to(target_group)
 
@@ -318,7 +315,7 @@ def generate_map():
             items_list.sort(key=custom_sort)
             sorted_mcs = []
             for active_status, mc in items_list:
-                m.add_child(mc) 
+                m.add_child(mc)
                 sorted_mcs.append(mc)
             active_grouped_layers[p_html] = sorted_mcs
 
@@ -330,6 +327,7 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
+    # --- ส่วน UI ฉบับแก้ไขสมบูรณ์แล้ว ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
@@ -338,8 +336,10 @@ def generate_map():
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
     .leaflet-top {{ z-index: 999 !important; }}
     .leaflet-bottom {{ z-index: 998 !important; }}
-    .leaflet-top.leaflet-left .leaflet-control-layers, .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
+    .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
+    .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
     .selected-pin-glow i {{ text-shadow: 0 0 5px rgba(255,255,255,0.8); }}
@@ -347,13 +347,28 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
+    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
-    .custom-filter-wrapper .leaflet-control-layers-list, .g-search-results, .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar, .g-search-results::-webkit-scrollbar, .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track, .g-search-results::-webkit-scrollbar-track, .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb, .g-search-results::-webkit-scrollbar-thumb, .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
+    .custom-filter-wrapper .leaflet-control-layers-list,
+    .g-search-results,
+    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
+    .g-search-results::-webkit-scrollbar,
+    .popup-body::-webkit-scrollbar {{ width: 6px; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
+    .g-search-results::-webkit-scrollbar-track,
+    .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
+    .g-search-results::-webkit-scrollbar-thumb,
+    .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
+    .custom-filter-wrapper .leaflet-control-layers-list:hover::-webkit-scrollbar-thumb,
+    .g-search-results:hover::-webkit-scrollbar-thumb,
+    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb:hover,
+    .g-search-results::-webkit-scrollbar-thumb:hover,
+    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    .g-search-container {{ position: fixed; z-index: 100005; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
+    .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto; background: #282a2d; border-radius: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; padding: 0 14px; height: 48px; border: 1px solid #444746; }}
 
     .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
@@ -365,7 +380,9 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998; pointer-events: auto; padding-top: 8px; }}
+    .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
+
+    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998 !important; pointer-events: auto; padding-top: 8px; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
 
     .custom-alert-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
@@ -385,18 +402,14 @@ def generate_map():
     .report-modal-overlay.show .report-modal {{ transform: translateY(0); }}
     .report-modal h3 {{ color: #e3e3e3; margin: 0 0 20px 0; font-size: 18px; font-weight: 600; text-align: center; }}
     
-    /* Trick สำหรับ Placeholder ให้โชว์เสมอบนมือถือ */
-    .date-input-group {{ display: flex; flex-direction: column; gap: 4px; flex: 1; position: relative; }}
+    .date-input-group {{ display: flex; flex-direction: column; gap: 4px; flex: 1; }}
     .date-input-group label {{ color: #babbbe; font-size: 13px; font-weight: 400; }}
-    .date-input {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #5f6368; background: #202124; color: #e3e3e3; font-size: 14px; outline: none; font-family: 'Prompt', sans-serif; color-scheme: dark; transition: 0.2s; -webkit-appearance: none; appearance: none; position: relative; z-index: 2; }}
+    .date-input {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #5f6368; background: #202124; color: #e3e3e3; font-size: 14px; outline: none; font-family: 'Prompt', sans-serif; color-scheme: dark; transition: 0.2s; -webkit-appearance: none; }}
+    .date-input::placeholder {{ color: #9aa0a6; font-weight: 400; opacity: 1; }}
     .date-input:focus {{ border-color: #8ab4f8; box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.2); }}
-    .date-placeholder-layer {{ position: absolute; left: 14px; top: 34px; color: #9aa0a6; font-size: 14px; pointer-events: none; transition: opacity 0.2s; z-index: 1; }}
-    .date-input.has-val + .date-placeholder-layer {{ opacity: 0; }}
-    .date-input::-webkit-datetime-edit {{ color: transparent; }}
-    .date-input.has-val::-webkit-datetime-edit {{ color: #e3e3e3; }}
-
     .date-flex-container {{ display: flex; gap: 12px; margin-bottom: 8px; }}
     .report-note {{ font-size: 11.5px; color: #9aa0a6; margin-bottom: 20px; text-align: center; }}
+    
     .report-btn-group {{ display: flex; gap: 12px; }}
     .report-btn {{ flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; display: flex; justify-content: center; align-items: center; gap: 8px; }}
     .report-btn-cancel {{ background: transparent; color: #8ab4f8; border: 1px solid #8ab4f8; }}
@@ -410,7 +423,15 @@ def generate_map():
     @media (max-width: 768px) {{ 
         .g-search-container {{ width: calc(100vw - 146px) !important; max-width: none !important; }} 
         .custom-filter-wrapper {{ top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px) !important; right: 16px !important; left: 16px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
-        .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 55vh !important; border-radius: 20px 20px 0 0 !important; animation: slideUpFade 0.3s ease-out; border-bottom: none !important; padding-bottom: env(safe-area-inset-bottom, 0px); }} 
+        .custom-info-panel {{ 
+            top: auto !important; bottom: 0 !important; left: 0 !important; 
+            width: 100vw !important; max-width: 100vw !important; 
+            max-height: 55vh !important; 
+            border-radius: 20px 20px 0 0 !important; 
+            animation: slideUpFade 0.3s ease-out; 
+            border-bottom: none !important;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }} 
         .popup-body {{ max-height: calc(55vh - 125px - env(safe-area-inset-bottom, 0px)) !important; }} 
         .date-flex-container {{ flex-direction: column; }}
     }}
@@ -440,75 +461,18 @@ def generate_map():
     .popup-table td {{ padding: 8px 0; font-size: 12.5px; line-height: 1.4; word-break: keep-all; overflow-wrap: break-word; text-wrap: balance; }}
     .popup-table td:first-child {{ color: #5f6368; font-weight: 500; width: 45%; vertical-align: top; padding-right: 8px; }}
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
-
-    .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-    .custom-filter-wrapper .leaflet-control-layers-list {{ flex: 1 1 auto !important; max-height: calc(100dvh - 160px) !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 0 0 12px 0 !important; margin: 0 !important; overscroll-behavior: contain !important; -webkit-overflow-scrolling: touch !important; }}
-    .custom-filter-wrapper .leaflet-control-layers-separator {{ display: none !important; }}
-    .custom-filter-wrapper .leaflet-control-layers-group {{ display: block !important; width: 100%; margin-bottom: 8px; }}
-    .custom-filter-wrapper .leaflet-control-layers-group-label {{ display: block !important; width: 100%; cursor: pointer; }}
-    .custom-filter-wrapper .leaflet-control-layers-group-name {{ display: block !important; width: 100%; transition: background-color 0.2s; }}
-    .custom-filter-wrapper .leaflet-control-layers-group-name:hover {{ background-color: #35363a !important; }}
-    .custom-filter-wrapper label {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; padding: 6px 16px !important; margin: 0 !important; cursor: pointer; transition: background-color 0.15s; pointer-events: auto; }}
-    .custom-filter-wrapper label:hover {{ background-color: #35363a !important; }}
-    .custom-filter-wrapper label > span {{ display: flex !important; flex-direction: row !important; align-items: flex-start !important; width: 100% !important; white-space: normal !important; }}
-    .custom-filter-wrapper input[type="checkbox"] {{ flex-shrink: 0 !important; -webkit-appearance: none !important; -moz-appearance: none !important; appearance: none !important; width: 18px !important; height: 18px !important; border: 2px solid #8e918f !important; border-radius: 3px !important; margin: 2px 14px 0 0 !important; position: relative !important; cursor: pointer; outline: none; transition: all 0.2s ease; background-color: transparent !important; }}
-    .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
-    .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
-
-    .g-export-container {{ flex: 0 0 auto !important; padding: 16px !important; background-color: #282a2d !important; border-top: 1px solid #444746; display: flex; justify-content: center; }}
-    .g-export-btn {{ background-color: #3c4043 !important; color: #e3e3e3 !important; border: none !important; border-radius: 24px !important; height: 48px !important; width: 100% !important; font-size: 14px !important; font-weight: 500 !important; cursor: pointer !important; display: flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important; transition: background-color 0.2s !important; outline: none !important; font-family: 'Prompt', sans-serif !important; }}
-    .g-export-btn:hover {{ background-color: #4a4d51 !important; }}
-    .g-export-btn:active {{ transform: scale(0.97) !important; }}
-    .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
-
-    .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
-    .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8; }}
-    .g-search-icon {{ display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #9aa0a6; }}
-    .g-search-input {{ flex: 1; border: none; outline: none; background: transparent; font-size: 14px; color: #e8eaed; margin-left: 10px; width: 100%; font-family: 'Prompt', sans-serif; pointer-events: auto; }}
-    .g-search-input::placeholder {{ color: #9aa0a6; font-weight: 400; }}
-    .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
-    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
-
-    .g-search-item {{ padding: 12px 16px; display: flex; flex-direction: column; cursor: pointer; border-bottom: 1px solid #35363a; transition: background-color 0.2s, border-left 0.2s; border-left: 3px solid transparent; gap: 6px; }}
-    .g-search-item:last-child {{ border-bottom: none; }}
-    .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
-
-    @media (max-width: 768px) {{ .g-zoom-container {{ display: none !important; }} }}
-    .custom-right-controls {{ display: flex; flex-direction: column; gap: 12px; align-items: center; margin-right: 16px; margin-bottom: 24px; z-index: 500 !important; position: relative; }}
-    .g-zoom-container {{ width: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }}
-    .g-zoom-btn {{ width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #5f6368; background: transparent; cursor: pointer; user-select: none; transition: background-color 0.2s; font-weight: 400; margin: 0; border: none; }}
-    .g-zoom-btn:hover {{ background-color: #f1f3f4; color: #202124; }}
-    .g-zoom-in {{ border-bottom: 1px solid #e8eaed; }}
-
-    .g-locate-btn {{ width: 44px !important; height: 44px !important; background-color: #ffffff !important; color: #1a73e8 !important; border-radius: 50% !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center; justify-content: center; cursor: pointer; transition: background-color 0.2s; text-decoration: none !important; }}
-    @media (min-width: 769px) {{ .g-locate-btn {{ width: 40px !important; height: 40px !important; border-radius: 8px !important; }} }}
-    .g-locate-btn:hover {{ background-color: #f1f3f4 !important; }}
-    .g-locate-btn:active {{ transform: scale(0.95); }}
-    .g-locate-btn svg {{ width: 22px; height: 22px; fill: #1a73e8; transform: rotate(45deg) translate(-1px, 2px); }}
-
-    .my-location-container {{ position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; }}
-    .my-location-cone {{ position: absolute; width: 60px; height: 60px; border-radius: 50%; background: conic-gradient(from 225deg at 50% 50%, rgba(66, 133, 244, 0) 0deg, rgba(66, 133, 244, 0.4) 45deg, rgba(66, 133, 244, 0) 90deg, transparent 90deg); z-index: 1; pointer-events: none; animation: cone-breathe 2.5s infinite ease-in-out; }}
-    @keyframes cone-breathe {{ 0% {{ transform: scale(0.85); opacity: 0.7; }} 50% {{ transform: scale(1.1); opacity: 1; }} 100% {{ transform: scale(0.85); opacity: 0.7; }} }}
-    .my-location-dot {{ position: absolute; background-color: #4285F4; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2; }}
-
-    .g-layer-container {{ position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; pointer-events: none; }}
-    .g-layer-main-btn {{ pointer-events: auto; width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
-    .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
-    .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
-    .g-layer-panel {{ pointer-events: auto; background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
-    .g-layer-container:hover .g-layer-panel {{ max-width: 500px; padding: 0 20px; opacity: 1; }}
-    .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 6px; padding: 4px; border-radius: 10px; transition: background-color 0.2s; }}
-    .g-layer-item:hover {{ background-color: rgba(255,255,255,0.1); }}
-    .g-layer-thumb {{ width: 44px; height: 44px; border-radius: 10px; border: 2px solid transparent; background-size: cover; background-position: center; box-shadow: 0 2px 6px rgba(0,0,0,0.2); transition: all 0.2s; }}
-    .g-layer-item.active .g-layer-thumb {{ border-color: #8ab4f8; box-shadow: 0 0 0 2px rgba(138,180,248,0.4); transform: scale(1.05); }}
-    .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
+    <!-- ปุ่ม Filter และ Report -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
-    <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ">
-        <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+    <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
+    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
+
+    <div id="customInfoPanel" class="custom-info-panel">
+        <div class="panel-close-btn" id="closeInfoPanelBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+        <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
 
     <!-- Modal แจ้งเตือนแบบ Custom -->
@@ -523,28 +487,21 @@ def generate_map():
         </div>
     </div>
 
-    <!-- Modal สำหรับเลือก Report Range แก้ไข UI Date Picker สำหรับมือถือ -->
+    <!-- Modal สำหรับเลือก Report Range -->
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
-            
             <div class="date-flex-container">
                 <div class="date-input-group">
                     <label>จากวันที่ :</label>
-                    <input type="date" id="reportStartDate" class="date-input" onchange="this.classList.toggle('has-val', this.value !== '')">
-                    <div class="date-placeholder-layer">วว/ดด/ปปปป (ค.ศ.)</div>
+                    <input type="text" id="reportStartDate" class="date-input" placeholder="วว/ดด/ปปปป (ค.ศ.)" onfocus="(this.type='date')" onblur="if(!this.value) this.type='text'">
                 </div>
                 <div class="date-input-group">
                     <label>ถึงวันที่ :</label>
-                    <input type="date" id="reportEndDate" class="date-input" onchange="this.classList.toggle('has-val', this.value !== '')">
-                    <div class="date-placeholder-layer">วว/ดด/ปปปป (ค.ศ.)</div>
+                    <input type="text" id="reportEndDate" class="date-input" placeholder="วว/ดด/ปปปป (ค.ศ.)" onfocus="(this.type='date')" onblur="if(!this.value) this.type='text'">
                 </div>
             </div>
-            
-            <div class="report-note">
-                *หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด
-            </div>
-
+            <div class="report-note">*หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด</div>
             <div class="report-btn-group">
                 <button class="report-btn report-btn-cancel" onclick="closeReportModal()">ยกเลิก</button>
                 <button id="execReportBtn" class="report-btn report-btn-dl" onclick="generateExcelReport()">
@@ -554,11 +511,6 @@ def generate_map():
         </div>
     </div>
 
-    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
-    <div id="customInfoPanel" class="custom-info-panel">
-        <div class="panel-close-btn" id="closeInfoPanelBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
-        <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
-    </div>
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
             <div class="g-search-icon"><svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:20px; height:20px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
@@ -567,14 +519,9 @@ def generate_map():
         </div>
         <div id="searchResults" class="g-search-results"></div>
     </div>
-    <div class="g-layer-container" id="gLayerContainer">
-        <div class="g-layer-main-btn" id="gLayerMainBtn"><div class="g-layer-label" id="gLayerMainLabel">...</div></div>
-        <div class="g-layer-panel" id="gLayerPanel"></div>
-    </div>
 
     <script>
     var statusHashMap = {status_hash_json};
-    var expData = {export_json};
     var sData = {search_json};
     var reportRawData = {report_json_data};
     var currentHoveredSelector = null;
@@ -593,8 +540,8 @@ def generate_map():
             e.preventDefault(); e.stopPropagation();
             var sd = document.getElementById('reportStartDate');
             var ed = document.getElementById('reportEndDate');
-            sd.value = ''; sd.classList.remove('has-val');
-            ed.value = ''; ed.classList.remove('has-val');
+            sd.value = ''; sd.type = 'text';
+            ed.value = ''; ed.type = 'text';
             reportModal.classList.add('show');
         }});
     }}
@@ -753,14 +700,16 @@ def generate_map():
                     targetPins.forEach(function(el) {{ el.classList.add('selected-pin-glow'); if(el.parentElement) el.parentElement.style.zIndex = 100000; }});
                     clearInterval(tryHighlight);
                 }}
-                attempts++; if (attempts > 15) clearInterval(tryHighlight);
+                attempts++;
+                if (attempts > 15) clearInterval(tryHighlight);
             }}, 100);
         }}
     }}
 
     function clearHighlight() {{ 
         document.querySelectorAll('.selected-pin-glow').forEach(function(el) {{ el.classList.remove('selected-pin-glow'); }}); 
-        window.currentSelectedSafeId = null; document.body.classList.remove('filter-hover-active');
+        window.currentSelectedSafeId = null; 
+        document.body.classList.remove('filter-hover-active');
     }}
 
     function reapplyHighlight() {{
@@ -773,7 +722,9 @@ def generate_map():
     var checkMapReady = setInterval(function() {{
         var targetForm = null;
         document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
-            if (f.querySelector('.leaflet-control-layers-group')) {{ targetForm = f; }}
+            if (f.querySelector('.leaflet-control-layers-group')) {{
+                targetForm = f;
+            }}
         }});
         
         var globalMap = null;
@@ -794,7 +745,8 @@ def generate_map():
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
                     
                     itemLabels.sort(function(a, b) {{
-                        var snA = a.querySelector('.status-text'); var snB = b.querySelector('.status-text');
+                        var snA = a.querySelector('.status-text');
+                        var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
                         
@@ -807,7 +759,8 @@ def generate_map():
                             if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
                             return 10;
                         }}
-                        var weightA = getWeight(sA); var weightB = getWeight(sB);
+                        var weightA = getWeight(sA);
+                        var weightB = getWeight(sB);
                         if (weightA !== weightB) return weightA - weightB;
                         if (sA.length !== sB.length) return sA.length - sB.length;
                         return sA.localeCompare(sB);
@@ -861,147 +814,8 @@ def generate_map():
                     document.querySelectorAll('.highlight-active').forEach(function(el) {{ el.classList.remove('highlight-active'); if(el.parentElement) el.parentElement.style.zIndex = ''; }});
                 }});
             }});
-
-            if(!document.getElementById('exportCsvBtn')) {{
-                var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
-                exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
-                targetForm.appendChild(exportDiv);
-
-                document.getElementById('exportCsvBtn').onclick = function(e) {{
-                    e.preventDefault(); e.stopPropagation();
-                    var activeStatuses = [];
-                    filterWrapper.querySelectorAll('.leaflet-control-layers-selector:checked').forEach(function(inp) {{
-                        var lbl = inp.nextElementSibling || inp.parentElement;
-                        var statusNode = lbl.querySelector('.status-text');
-                        activeStatuses.push(statusNode ? statusNode.getAttribute('data-status') : lbl.textContent.replace(/●/g,'').trim());
-                    }});
-                    var filtered = expData.filter(function(d) {{ return activeStatuses.includes(d._layerName.trim()); }});
-                    if(filtered.length === 0) {{ showCustomAlert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
-                    var headers = Object.keys(filtered[0]).filter(function(k) {{ return k !== '_layerName'; }});
-                    var csv = headers.map(function(h) {{ return '"' + h + '"'; }}).join(',') + '\\r\\n';
-                    filtered.forEach(function(row) {{ csv += headers.map(function(h) {{ return '"' + (row[h] ? row[h].toString().replace(/"/g, '""') : '') + '"'; }}).join(',') + '\\r\\n'; }});
-                    var blob = new Blob(["\\uFEFF" + csv], {{ type: 'text/csv;charset=utf-8;' }});
-                    var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "SCADA_Export_Data.csv";
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-                }};
-            }}
         }}
     }}, 100); 
-
-    setTimeout(function() {{
-        var globalMap = null;
-        for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
-        if (globalMap) {{
-
-            globalMap.on('click dragstart popupopen', function() {{
-                var fw = document.getElementById('customFilterWrapper');
-                if (fw) fw.classList.remove('show');
-            }});
-
-            globalMap.on('popupopen', function(e) {{
-                var content = e.popup.getContent();
-                var htmlStr = typeof content === 'string' ? content : content.innerHTML;
-                document.getElementById('customInfoContent').innerHTML = htmlStr;
-                document.getElementById('customInfoPanel').style.display = 'flex';
-                var tempDiv = document.createElement('div'); tempDiv.innerHTML = htmlStr;
-                var card = tempDiv.querySelector('.custom-popup-card');
-                if(card) {{ highlightPin(card.getAttribute('data-safe-id')); }}
-
-                var targetZoom = 18;
-                var isMobile = window.innerWidth <= 768;
-                var offsetX = isMobile ? 0 : -180;
-                var offsetY = isMobile ? 120 : 0; 
-                var targetLatlng = e.popup.getLatLng();
-                var targetPoint = globalMap.project(targetLatlng, targetZoom);
-                targetPoint.x += offsetX; targetPoint.y += offsetY;
-                var newCenter = globalMap.unproject(targetPoint, targetZoom);
-                globalMap.flyTo(newCenter, targetZoom, {{animate: true, duration: 0.8}});
-            }});
-            
-            globalMap.on('click', function() {{ hideCustomPanel(); }});
-
-            var CustomControls = L.Control.extend({{
-                options: {{ position: 'bottomright' }},
-                onAdd: function (map) {{
-                    var container = L.DomUtil.create('div', 'custom-right-controls');
-                    container.innerHTML = `<a href="#" id="locTargetBtn" class="g-locate-btn" title="ตำแหน่งของฉัน"><svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg></a><div class="g-zoom-container"><button id="customZoomIn" class="g-zoom-btn g-zoom-in" title="ซูมเข้า">+</button><button id="customZoomOut" class="g-zoom-btn" title="ซูมออก">−</button></div>`;
-                    L.DomEvent.disableClickPropagation(container); return container;
-                }}
-            }});
-            globalMap.addControl(new CustomControls());
-
-            if(document.getElementById('customZoomIn')) document.getElementById('customZoomIn').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomIn(); }};
-            if(document.getElementById('customZoomOut')) document.getElementById('customZoomOut').onclick = function(e) {{ e.stopPropagation(); globalMap.zoomOut(); }};
-
-            var myLocMarker = null; var userLatLng = null; var pendingFlyToLoc = false;
-            globalMap.locate({{watch: true, setView: false, enableHighAccuracy: true}});
-            
-            globalMap.on('locationfound', function(e) {{
-                userLatLng = e.latlng;
-                if (!myLocMarker) {{
-                    myLocMarker = L.marker(e.latlng, {{ icon: L.divIcon({{ className: '', html: '<div class="my-location-container"><div class="my-location-cone"></div><div class="my-location-dot"></div></div>', iconSize: [60,60], iconAnchor: [30,30] }}), zIndexOffset: 9999 }}).addTo(globalMap);
-                }} else {{ myLocMarker.setLatLng(e.latlng); }}
-                if (pendingFlyToLoc) {{ globalMap.flyTo(userLatLng, 16); pendingFlyToLoc = false; }}
-            }});
-            
-            if(document.getElementById('locTargetBtn')) {{
-                document.getElementById('locTargetBtn').onclick = function(e) {{
-                    e.preventDefault(); e.stopPropagation();
-                    if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
-                }};
-            }}
-        }}
-    }}, 1200);
-
-    document.getElementById('closeInfoPanelBtn').onclick = function(e) {{ e.stopPropagation(); hideCustomPanel(); }};
-
-    var mapConfigs = [
-        {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
-        {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
-        {{ id: "satellite", name: "ดาวเทียม", keyword: "Google Satellite", thumb: "https://mt1.google.com/vt/lyrs=s&x=130&y=119&z=8" }},
-        {{ id: "hybrid", name: "ดาวเทียม+ถนน", keyword: "Google Hybrid", thumb: "https://mt1.google.com/vt/lyrs=y&x=130&y=119&z=8" }},
-        {{ id: "esri", name: "Esri", keyword: "Esri World Imagery", thumb: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/8/119/130" }}
-    ];
-
-    var currentMapIndex = 0; 
-    var panel = document.getElementById('gLayerPanel');
-    mapConfigs.forEach(function(conf, idx) {{
-        var div = document.createElement('div'); div.className = 'g-layer-item';
-        div.innerHTML = '<div class="g-layer-thumb" style="background-image: url(' + conf.thumb + ')"></div><div class="g-layer-name">' + conf.name + '</div>';
-        div.onclick = function(e) {{ e.stopPropagation(); switchMapLayer(idx); }};
-        panel.appendChild(div);
-    }});
-
-    function getRadioByKeyword(kw) {{
-        var labels = document.querySelectorAll('.leaflet-control-layers-base label');
-        for(var i=0; i<labels.length; i++) {{ if(labels[i].innerHTML.includes(kw)) return labels[i].querySelector('input[type="radio"]'); }}
-        return null;
-    }}
-
-    function switchMapLayer(idx) {{
-        currentMapIndex = idx; 
-        var radio = getRadioByKeyword(mapConfigs[idx].keyword); 
-        if (radio && !radio.checked) {{
-            radio.checked = true;
-            radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
-        }}
-        
-        panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
-            if(i === idx) item.classList.add('active'); 
-            else item.classList.remove('active'); 
-        }});
-        
-        document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
-        document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
-    }}
-
-    document.getElementById('gLayerMainBtn').onclick = function(e) {{ 
-        e.stopPropagation(); 
-        switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
-    }};
-
-    setTimeout(function() {{ switchMapLayer(0); }}, 800);
 
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
@@ -1074,6 +888,7 @@ def generate_map():
     clr.addEventListener('click', function() {{ inp.value = ''; res.innerHTML = ''; res.style.display = 'none'; this.style.display = 'none'; hideCustomPanel(); inp.focus(); }});
     </script>
     """
+    m.get_root().html.add_child(folium.Element(custom_ui_html))
     return m.get_root().render()
 
 def background_task():
@@ -1235,5 +1050,5 @@ def index():
     return html_wrapper
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
