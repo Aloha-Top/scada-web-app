@@ -176,6 +176,7 @@ def generate_map():
         parent_counts[raw_parent] += 1
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
+        # --- Report Data Extraction ---
         raw_date_val = str(row.get(date_col_report, '')).strip() if date_col_report else ""
         
         if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
@@ -327,21 +328,19 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับป้องกัน Bootstrap และจัดเรียงใหม่ทั้งหมด ---
+    # --- ส่วน UI ฉบับแก้ไข Scrolling สมบูรณ์ 100% (ล๊อกความขัดแย้งของ CSS) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    .leaflet-top {{ z-index: 999 !important; }}
-    .leaflet-bottom {{ z-index: 998 !important; }}
+    
+    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
+    .leaflet-control-zoom {{ display: none !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
-    
-    /* ซ่อนปุ่ม Zoom เดิมของ Leaflet อย่างเด็ดขาด */
-    .leaflet-control-zoom {{ display: none !important; }}
 
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
@@ -350,20 +349,40 @@ def generate_map():
     body.filter-hover-active .map-pin-inner, body.filter-hover-active .map-cluster-inner {{ opacity: 0.2; filter: grayscale(100%); }}
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
-    body.filter-hover-active .selected-pin-glow {{ opacity: 1 !important; filter: none !important; }}
 
-    .custom-filter-wrapper .leaflet-control-layers-list,
-    .g-search-results,
-    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
+    /* --- ระบบ Scroll สำหรับกล่อง Filter (ให้เลื่อนได้อิสระ 100%) --- */
+    .custom-filter-wrapper {{ 
+        display: none; flex-direction: column; position: fixed; 
+        top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); 
+        right: 16px; width: 340px; 
+        max-height: calc(100dvh - 100px) !important; 
+        background-color: #282a2d; border-radius: 16px; 
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; 
+        
+        /* สั่งให้กล่องหลักกลายเป็นตัว Scroll */
+        overflow-y: auto !important; 
+        overflow-x: hidden !important; 
+        
+        z-index: 999998 !important; pointer-events: auto; padding: 8px 0; 
+        scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
+    }}
+    .custom-filter-wrapper.show {{ display: flex !important; }}
+
+    .custom-filter-wrapper::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
     .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
+    .custom-filter-wrapper::-webkit-scrollbar-track,
     .g-search-results::-webkit-scrollbar-track,
     .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
+    .custom-filter-wrapper::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
     .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
+    .custom-filter-wrapper:hover::-webkit-scrollbar-thumb,
+    .g-search-results:hover::-webkit-scrollbar-thumb,
+    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
+    .custom-filter-wrapper::-webkit-scrollbar-thumb:hover,
+    .g-search-results::-webkit-scrollbar-thumb:hover,
+    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
     /* ล็อกความสวยงามกล่องค้นหา ห้ามสีขาวเด็ดขาด */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
@@ -385,12 +404,12 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    /* --- ล็อก CSS Filter Box ให้เรียงแนวตั้ง ห้ามแตกแถว --- */
+    /* ปลดล็อกโครงสร้างภายในของฟอร์ม Folium ไม่ให้กั๊กความสูง (แก้ปัญหา Scrolling โดนตัด) */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
-    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow: hidden; z-index: 999998 !important; pointer-events: auto; padding-top: 8px; }}
-    .custom-filter-wrapper.show {{ display: flex !important; }}
-    .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: 100% !important; min-height: 0 !important; }}
-    .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; }}
+    .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }}
+    .custom-filter-wrapper .leaflet-control-layers-list {{ overflow: visible !important; max-height: none !important; height: auto !important; padding: 0 0 12px 0 !important; margin: 0 !important; }}
+    .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; overflow: visible !important; }}
+    
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: flex !important; flex-direction: column !important; width: 100% !important; margin-bottom: 8px !important; clear: both !important; align-items: stretch !important; }}
     
     .custom-filter-wrapper label.leaflet-control-layers-group-label,
@@ -499,6 +518,7 @@ def generate_map():
     .g-search-item:last-child {{ border-bottom: none; }}
     .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
 
+    @media (max-width: 768px) {{ .g-zoom-container {{ display: none !important; }} }}
     .custom-right-controls {{ display: flex; flex-direction: column; gap: 12px; align-items: center; margin-right: 16px; margin-bottom: 24px; z-index: 500 !important; position: relative; }}
     .g-zoom-container {{ width: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }}
     .g-zoom-btn {{ width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #5f6368; background: transparent; cursor: pointer; user-select: none; transition: background-color 0.2s; font-weight: 400; margin: 0; border: none; padding: 0; outline: none; }}
@@ -599,7 +619,7 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
-    // ล้างคลาสจาก Bootstrap ให้หมด
+    // เคลียร์คลาสแปลกปลอมที่ Render/Bootstrap แอบใส่มา
     var searchInputEl = document.getElementById('searchInput');
     if (searchInputEl) {{ searchInputEl.className = 'g-search-input'; }}
 
@@ -732,27 +752,6 @@ def generate_map():
     var filterBtn = document.getElementById('standaloneFilterBtn');
     var filterWrapper = document.getElementById('customFilterWrapper');
 
-    if (filterBtn && filterWrapper) {{
-        filterBtn.addEventListener('click', function(e) {{ 
-            e.preventDefault(); 
-            e.stopPropagation(); 
-            filterWrapper.classList.toggle('show'); 
-        }});
-        
-        document.addEventListener('click', function(e) {{ 
-            if (filterWrapper.classList.contains('show')) {{ 
-                if (!filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
-                    filterWrapper.classList.remove('show'); 
-                }} 
-            }} 
-        }});
-        
-        L.DomEvent.disableClickPropagation(filterBtn);
-        L.DomEvent.disableClickPropagation(filterWrapper);
-        filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-        filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
-    }}
-
     function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
@@ -795,7 +794,7 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    // --- Tracker อัจฉริยะแบบรอไม่มีที่สิ้นสุดจนกว่าโหลดจะเสร็จ ---
+    // --- ระบบ Tracker อัจฉริยะ (รอจนกว่า Leaflet จะโหลดเสร็จจริงๆ 100% ถึงจะดึง UI ไปครอบ) ---
     var mapInitInterval = setInterval(function() {{
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
@@ -805,23 +804,37 @@ def generate_map():
         if (globalMap && targetForm && filterWrapper) {{
             clearInterval(mapInitInterval); 
             
+            // 1. ผูก Event กล่อง Filter
+            if (filterBtn && filterWrapper) {{
+                filterBtn.addEventListener('click', function(e) {{ 
+                    e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); 
+                }});
+                document.addEventListener('click', function(e) {{ 
+                    if (filterWrapper.classList.contains('show') && !filterWrapper.contains(e.target) && !filterBtn.contains(e.target)) {{ 
+                        filterWrapper.classList.remove('show'); 
+                    }} 
+                }});
+                L.DomEvent.disableClickPropagation(filterBtn);
+                L.DomEvent.disableClickPropagation(filterWrapper);
+                filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+                filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
+            }}
+
             filterWrapper.addEventListener('mouseenter', function () {{ globalMap.scrollWheelZoom.disable(); }});
             filterWrapper.addEventListener('mouseleave', function () {{ globalMap.scrollWheelZoom.enable(); }});
-            
             filterWrapper.appendChild(targetForm);
             
+            // 2. จัดการข้อมูลสถานะ
             var controlList = filterWrapper.querySelector('.leaflet-control-layers-overlays');
             if (controlList) {{
                 var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
                 groups.forEach(function(group) {{
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
-                    
                     itemLabels.sort(function(a, b) {{
                         var snA = a.querySelector('.status-text');
                         var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
-                        
                         function getWeight(s) {{
                             if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].includes(s)) return 1;
                             if (s.includes("รอ ผบอ. เข้าแก้ไข") && !s.includes("ผอส")) return 2;
@@ -831,8 +844,7 @@ def generate_map():
                             if (s.includes("ระบบสื่อสาร") && s.includes("เคยแก้ไข")) return 6;
                             return 10;
                         }}
-                        var weightA = getWeight(sA);
-                        var weightB = getWeight(sB);
+                        var weightA = getWeight(sA); var weightB = getWeight(sB);
                         if (weightA !== weightB) return weightA - weightB;
                         if (sA.length !== sB.length) return sA.length - sB.length;
                         return sA.localeCompare(sB);
@@ -887,6 +899,7 @@ def generate_map():
                 }});
             }});
 
+            // สร้างปุ่ม Export CSV
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
                 exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออกข้อมูล (CSV)</button>';
@@ -911,9 +924,9 @@ def generate_map():
                 }};
             }}
             
+            // 3. จัดการ Popup และ Events ของแผนที่
             globalMap.on('click dragstart popupopen', function() {{
-                var fw = document.getElementById('customFilterWrapper');
-                if (fw) fw.classList.remove('show');
+                if (filterWrapper) filterWrapper.classList.remove('show');
             }});
 
             globalMap.on('popupopen', function(e) {{
@@ -938,7 +951,7 @@ def generate_map():
             
             globalMap.on('click', function() {{ hideCustomPanel(); }});
 
-            // สร้างปุ่ม Location และ Zoom ล่างขวา
+            // 4. สร้างปุ่ม Location และ Zoom ล่างขวา
             var CustomControls = L.Control.extend({{
                 options: {{ position: 'bottomright' }},
                 onAdd: function (map) {{
@@ -968,7 +981,7 @@ def generate_map():
                 if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
             }};
 
-            // Setup ปุ่มสลับ Map Layers มุมซ้ายล่าง
+            // 5. Setup ปุ่มสลับ Map Layers มุมซ้ายล่าง
             var mapConfigs = [
                 {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
                 {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -1000,12 +1013,10 @@ def generate_map():
                     radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     radio.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
                 }}
-                
                 panel.querySelectorAll('.g-layer-item').forEach(function(item, i) {{ 
                     if(i === idx) item.classList.add('active'); 
                     else item.classList.remove('active'); 
                 }});
-                
                 document.getElementById('gLayerMainBtn').style.backgroundImage = 'url(' + mapConfigs[idx].thumb + ')';
                 document.getElementById('gLayerMainLabel').innerText = mapConfigs[idx].name;
             }}
@@ -1014,8 +1025,7 @@ def generate_map():
                 e.stopPropagation(); 
                 switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
             }};
-
-            setTimeout(function() {{ switchMapLayer(0); }}, 800);
+            switchMapLayer(0);
         }}
     }}, 200); 
 
