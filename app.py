@@ -27,9 +27,7 @@ def get_meta():
 
 def get_status_config(status_text):
     status_upper = str(status_text).strip().upper()
-    
-    if status_upper.startswith('TELEMETRY'):
-        return "Telemetry Failure", "gold", "wrench"
+    if status_upper.startswith('TELEMETRY'): return "Telemetry Failure", "gold", "wrench"
     elif status_upper.startswith('CONNECTING'):
         raw_parent = "Connecting"
         if 'ระบบสื่อสาร' in status_upper: color = "purple"
@@ -60,13 +58,12 @@ def get_status_config(status_text):
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
         return raw_parent, color, icon
-    else:
-        return "สถานะอื่นๆ", "gray", "info-circle"
+    else: return "สถานะอื่นๆ", "gray", "info-circle"
 
 def get_actual_col_name(df_columns, keywords, exclude=None):
     for col in df_columns:
-        if all(kw.lower() in col.lower() for kw in keywords):
-            if exclude and any(ex.lower() in col.lower() for ex in exclude): continue
+        if all(kw.lower() in str(col).lower() for kw in keywords):
+            if exclude and any(ex.lower() in str(col).lower() for ex in exclude): continue
             return col
     return None
 
@@ -109,8 +106,10 @@ def generate_map():
     sheet_id = "10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q"
     csv_export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
     
-    try: df = pd.read_csv(csv_export_url)
-    except Exception as e: raise e
+    try: 
+        df = pd.read_csv(csv_export_url)
+    except Exception as e: 
+        raise RuntimeError(f"ไม่สามารถเชื่อมต่อหรือดึงข้อมูลจาก Google Sheets ได้: {e}")
 
     status_hash_map = {}
     def get_hash(text):
@@ -133,6 +132,8 @@ def generate_map():
     seen_coords = {}
 
     report_data_list = []
+    
+    # ระบบค้นหาคอลัมน์เพื่อดึงข้อมูล หากันพลาดด้วย get() ป้องกันการค้าง 100%
     cmd_col_report = get_actual_col_name(df.columns, ["รหัสสั่งการ"]) or get_actual_col_name(df.columns, ["รหัสอุปกรณ์"]) or get_actual_col_name(df.columns, ["Equipment_ID"])
     site_col_report = get_actual_col_name(df.columns, ["site id"])
     loc_col_report = get_actual_col_name(df.columns, ["สถานที่"])
@@ -153,7 +154,7 @@ def generate_map():
 
     for index, row in df.iterrows():
         lat_col = get_actual_col_name(df.columns, ["lat", "long"])
-        lat_lng_str = str(row[lat_col]) if lat_col and pd.notna(row[lat_col]) else ''
+        lat_lng_str = str(row.get(lat_col, '')) if lat_col else ''
         if not lat_lng_str or ',' not in lat_lng_str: continue
         try: lat, lon = float(lat_lng_str.split(',')[0].strip()), float(lat_lng_str.split(',')[1].strip())
         except ValueError: continue
@@ -165,8 +166,8 @@ def generate_map():
             lat += offsets[(seen_coords[coord_key] - 1) % len(offsets)][0]; lon += offsets[(seen_coords[coord_key] - 1) % len(offsets)][1]
         else: seen_coords[coord_key] = 0
 
-        base_status = str(row[status_col]).strip() if status_col and pd.notna(row[status_col]) else 'Unknown'
-        check_status = str(row[status_check_col]).strip() if status_check_col and pd.notna(row[status_check_col]) else ''
+        base_status = str(row.get(state_scada_col, '')).strip() if state_scada_col else 'Unknown'
+        check_status = str(row.get(state_after_col, '')).strip() if state_after_col else ''
         
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
@@ -176,13 +177,14 @@ def generate_map():
         parent_counts[raw_parent] += 1
         processed_nodes.append({'row': row, 'lat': lat, 'lon': lon, 'active_status': active_status, 'active_status_display': active_status_display, 'raw_parent': raw_parent, 'color': color, 'icon_name': icon_name})
 
-        raw_date_val = str(row[date_col_report]).strip() if date_col_report and pd.notna(row[date_col_report]) else ""
-    
+        # --- Report Data Extraction ---
+        raw_date_val = str(row.get(date_col_report, '')).strip() if date_col_report else ""
+        
         if raw_date_val and raw_date_val.lower() not in ['nan', 'none', '-']:
             
             details = []
             for d_col in target_detail_cols:
-                val = str(row[d_col]).strip()
+                val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
                     clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
@@ -197,10 +199,10 @@ def generate_map():
                 if "ผบอ" in check_status: resp_parts.append("ผบอ.กบษ.ฉ.2")
                 if "ผอส" in check_status: resp_parts.append("ผอส.กสฟ.ฉ.2")
                     
-            val_bo = str(row[wait_bo_col]).strip() if wait_bo_col and pd.notna(row[wait_bo_col]) else ""
+            val_bo = str(row.get(wait_bo_col, '')).strip() if wait_bo_col else ""
             has_bo = val_bo and val_bo.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า', 'false', '0']
             
-            val_po = str(row[wait_po_col]).strip() if wait_po_col and pd.notna(row[wait_po_col]) else ""
+            val_po = str(row.get(wait_po_col, '')).strip() if wait_po_col else ""
             has_po = val_po and val_po.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า', 'false', '0']
             
             if has_bo and "ผบอ.กบษ.ฉ.2" not in resp_parts:
@@ -222,9 +224,9 @@ def generate_map():
             
             report_data_list.append({
                 "iso_date": iso_date,
-                "cmd": str(row[cmd_col_report]) if cmd_col_report and pd.notna(row[cmd_col_report]) else "-",
-                "site": str(row[site_col_report]) if site_col_report and pd.notna(row[site_col_report]) else "-",
-                "loc": str(row[loc_col_report]) if loc_col_report and pd.notna(row[loc_col_report]) else "-",
+                "cmd": str(row.get(cmd_col_report, '-')) if cmd_col_report else "-",
+                "site": str(row.get(site_col_report, '-')) if site_col_report else "-",
+                "loc": str(row.get(loc_col_report, '-')) if loc_col_report else "-",
                 "detail": detail_str,
                 "resp": responsible,
                 "status": final_status
@@ -251,20 +253,20 @@ def generate_map():
         target_group, table_rows = mc_groups[active_status], ""
         
         site_id_col = get_actual_col_name(df.columns, ["site id"])
-        site_id = str(row[site_id_col]) if site_id_col else 'Unknown'
+        site_id = str(row.get(site_id_col, '')) if site_id_col else 'Unknown'
         safe_site_id = "id_" + get_hash(site_id + str(lat))
 
         cmd_code_col = get_actual_col_name(df.columns, ["รหัสสั่งการ"]) or get_actual_col_name(df.columns, ["รหัสอุปกรณ์"])
-        cmd_code = str(row[cmd_code_col]) if cmd_code_col and pd.notna(row[cmd_code_col]) else ''
+        cmd_code = str(row.get(cmd_code_col, '')) if cmd_code_col else ''
         loc_col = get_actual_col_name(df.columns, ["สถานที่"])
-        location_name = str(row[loc_col]) if loc_col and pd.notna(row[loc_col]) else ''
+        location_name = str(row.get(loc_col, '')) if loc_col else ''
 
         export_row = {"_layerName": active_status, "Site ID": site_id} 
         
         for display_name, keywords, excludes in display_fields:
             actual_col = get_actual_col_name(df.columns, keywords, exclude=excludes) or (get_actual_col_name(df.columns, ["รหัสอุปกรณ์"]) if "รหัสสั่งการ" in keywords else None)
-            val = row[actual_col] if actual_col and pd.notna(row[actual_col]) else 'ไม่มีค่า'
-            if str(val).strip() == '' or str(val).lower() == 'nan' or str(val) == 'None': val = 'ไม่มีค่า'
+            val = row.get(actual_col, 'ไม่มีค่า') if actual_col else 'ไม่มีค่า'
+            if str(val).strip() == '' or str(val).lower() == 'nan' or str(val) == 'none': val = 'ไม่มีค่า'
             
             if "วันที่" in display_name and val != 'ไม่มีค่า':
                 try:
@@ -463,7 +465,6 @@ def generate_map():
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
     </style>
 
-    <!-- ปุ่ม Filter และ Report -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
@@ -475,7 +476,6 @@ def generate_map():
         <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
 
-    <!-- Modal แจ้งเตือนแบบ Custom -->
     <div id="customAlertOverlay" class="custom-alert-overlay">
         <div class="custom-alert-box">
             <div class="custom-alert-icon">
@@ -487,7 +487,6 @@ def generate_map():
         </div>
     </div>
 
-    <!-- Modal สำหรับเลือก Report Range -->
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
@@ -722,9 +721,7 @@ def generate_map():
     var checkMapReady = setInterval(function() {{
         var targetForm = null;
         document.querySelectorAll('.leaflet-control-layers form').forEach(function(f) {{
-            if (f.querySelector('.leaflet-control-layers-group')) {{
-                targetForm = f;
-            }}
+            if (f.querySelector('.leaflet-control-layers-group')) {{ targetForm = f; }}
         }});
         
         var globalMap = null;
@@ -905,6 +902,21 @@ def background_task():
         print(f"อัปเดตแผนที่เสร็จสมบูรณ์! (เวอร์ชัน {new_version})")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการรันเบื้องหลัง: {e}")
+        # --- UI โชว์ Error อัตโนมัติ (แก้แอปค้างหน้าโหลด) ---
+        error_html = f"""
+        <div style='display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;background:#282a2d;color:white;font-family:sans-serif;'>
+            <h2 style='color:#d33d2a;'>เกิดข้อผิดพลาดในการโหลดข้อมูลแผนที่</h2>
+            <p style='color:#9aa0a6;max-width:80%;text-align:center;'>{str(e)}</p>
+            <p style='color:#8ab4f8;font-size:14px;margin-top:20px;cursor:pointer;' onclick='location.reload()'>↻ รีเฟรชหน้าเว็บใหม่อีกครั้ง</p>
+        </div>
+        """
+        tmp_html = CACHE_HTML_FILE + '.tmp'
+        with open(tmp_html, 'w', encoding='utf-8') as f: f.write(error_html)
+        os.replace(tmp_html, CACHE_HTML_FILE)
+        new_version = int(time.time())
+        tmp_meta = CACHE_META_FILE + '.tmp'
+        with open(tmp_meta, 'w') as f: json.dump({'version': new_version, 'last_update': time.time()}, f)
+        os.replace(tmp_meta, CACHE_META_FILE)
     finally:
         if os.path.exists(LOCK_FILE):
             try: os.remove(LOCK_FILE)
@@ -1015,10 +1027,13 @@ def index():
                     var checkReady = setInterval(function() {
                         var newMap = getMapInstance(nextIframe);
                         var oldMap = getMapInstance(activeIframe);
+                        
+                        // ถ้าระบบส่ง Error Page มาให้ (ไม่มีตัวแปร Map) ให้โชว์เลย จะได้ไม่ค้าง
+                        var hasErrorPage = nextIframe.contentWindow.document.body.innerHTML.includes('เกิดข้อผิดพลาด');
 
-                        if (newMap) {
+                        if (newMap || hasErrorPage) {
                             clearInterval(checkReady);
-                            if (oldMap) { newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false}); }
+                            if (oldMap && newMap) { newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {animate: false}); }
                             
                             nextIframe.className = 'map-layer layer-active';
                             activeIframe.className = 'map-layer layer-hidden';
