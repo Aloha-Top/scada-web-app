@@ -184,7 +184,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -380,7 +380,6 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    /* แก้ปัญหา Scrolling Filter */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
@@ -397,7 +396,6 @@ def generate_map():
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
-    /* แก้ให้ Modal เด้งตรงกลางจอ 100% */
     .custom-alert-overlay, .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
     .custom-alert-overlay.show, .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
     
@@ -958,7 +956,7 @@ def generate_map():
         }}
     }}, 200); 
 
-    // --- ระบบค้นหา (ทำงานทันทีในเครื่อง เร็วและไม่ใช้เน็ต) ---
+    // --- ระบบค้นหาอัจฉริยะ (ค้นหาในเครื่องแบบละเว้นช่องว่าง/สระบางตัว/ผิด 1 ตัว) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
@@ -972,14 +970,39 @@ def generate_map():
         triggerSearch(); 
     }}
 
+    // ฟังก์ชันช่วยจับคู่คำค้นหาแบบ Fuzzy (ยืดหยุ่น)
+    function isFuzzyMatch(query, target) {{
+        query = (query || '').toLowerCase().replace(/\s+/g, '');
+        target = (target || '').toLowerCase().replace(/\s+/g, '');
+        if (query.length === 0) return false;
+        
+        // ตรงกัน 100%
+        if (target.includes(query)) return true;
+
+        // ถอดสระและวรรณยุกต์ไทยออกทั้งหมดแล้วเทียบกัน (แก้ปัญหาพิมพ์สระเกิน/ผิด)
+        var toneRegex = /[่้๊๋ัิีึืุู]/g;
+        var cleanQuery = query.replace(toneRegex, '');
+        var cleanTarget = target.replace(toneRegex, '');
+        if (cleanQuery.length >= 3 && cleanTarget.includes(cleanQuery)) return true;
+
+        // ถ้ายาวกว่า 3 ตัวอักษร ยอมให้พิมพ์ผิด/พิมพ์เกินได้ 1 ตัวอักษร
+        if (query.length > 3) {{
+            for (var i = 0; i < query.length; i++) {{
+                var modifiedQuery = query.substring(0, i) + query.substring(i + 1);
+                if (modifiedQuery.length >= 3 && target.includes(modifiedQuery)) return true;
+            }}
+        }}
+        return false;
+    }}
+
     function triggerSearch() {{
-        var val = inp.value.toLowerCase().trim();
-        clr.style.display = val.length > 0 ? 'block' : 'none';
+        var rawVal = inp.value.trim();
+        clr.style.display = rawVal.length > 0 ? 'block' : 'none';
         res.innerHTML = '';
-        if (val.length < 1) {{ res.style.display = 'none'; return; }}
+        if (rawVal.length < 1) {{ res.style.display = 'none'; return; }}
         
         var matches = sData.filter(function(i) {{ 
-            return i.id.toLowerCase().includes(val) || i.code.toLowerCase().includes(val) || i.name.toLowerCase().includes(val); 
+            return isFuzzyMatch(rawVal, i.id) || isFuzzyMatch(rawVal, i.code) || isFuzzyMatch(rawVal, i.name);
         }}).slice(0, 8);
         
         if (matches.length > 0) {{
