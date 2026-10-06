@@ -184,7 +184,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -959,7 +959,7 @@ def generate_map():
         }}
     }}, 200); 
 
-    // --- ระบบค้นหาอัจฉริยะ (ให้คะแนนความแม่นยำ ป้องกันการแทนที่ผิดพลาด) ---
+    // --- ระบบค้นหาอัจฉริยะ (ให้คะแนนความแม่นยำ + เรียงลำดับจากน้อยไปมาก) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
@@ -1014,15 +1014,17 @@ def generate_map():
             }}
 
             if (score > 0) {{
-                // ใส่ nameMatch เพื่อเอาไว้เรียงลำดับรอง (เผื่อคะแนนเท่ากัน ให้ ID ขึ้นก่อน Name)
-                scoredMatches.push({{ item: i, score: score, nameMatch: tName.includes(query) }});
+                scoredMatches.push({{ item: i, score: score }});
             }}
         }});
 
-        // เรียงลำดับคะแนนจากมากไปน้อย (ถ้าคะแนนเท่ากัน ให้ ID/Code ขึ้นก่อน Name)
+        // --- เรียงลำดับจากมากไปน้อย (ความแม่นยำ) ถ้าคะแนนเท่ากัน ให้เรียง ID จากน้อยไปมาก A-Z, 0-9 ---
         scoredMatches.sort(function(a, b) {{ 
             if (b.score !== a.score) return b.score - a.score;
-            return a.nameMatch ? 1 : -1; 
+            var idA = String(a.item.id || '').toLowerCase();
+            var idB = String(b.item.id || '').toLowerCase();
+            // ใช้ Natural Sort (เรียงตัวเลขผสมตัวอักษรอย่างฉลาด)
+            return idA.localeCompare(idB, undefined, {{numeric: true, sensitivity: 'base'}});
         }});
         
         var matches = scoredMatches.slice(0, 8).map(function(m) {{ return m.item; }});
