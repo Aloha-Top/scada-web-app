@@ -8,9 +8,17 @@ import time
 import threading
 import os
 import re
+import urllib.request
+import urllib.parse
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
+
+# ==========================================
+# ใส่รหัส Google Maps API Key ของคุณที่นี่
+# (เพื่อเปิดใช้งานระบบค้นหาสถานที่อัจฉริยะของ Google)
+GOOGLE_MAPS_API_KEY = "ใส่_API_KEY_ของคุณที่นี่"
+# ==========================================
 
 # --- ระบบ Cache แบบ File-Based (เสถียรบน Render) ---
 CACHE_HTML_FILE = '/tmp/scada_cache.html'
@@ -184,7 +192,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -327,7 +335,6 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
-    # --- ส่วน UI ฉบับแก้ไข Scrolling สมบูรณ์ 100% (ล๊อกความขัดแย้งของ CSS) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
@@ -335,14 +342,15 @@ def generate_map():
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
     
-    /* Animation โหลดไอคอนค้นหาแผนที่ */
     @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
 
-    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
-    .leaflet-control-zoom {{ display: none !important; }}
+    .leaflet-top {{ z-index: 999 !important; }}
+    .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+    
+    .leaflet-control-zoom {{ display: none !important; }}
 
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
@@ -352,37 +360,19 @@ def generate_map():
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
 
-    /* --- ระบบ Scroll สำหรับกล่อง Filter (ให้เลื่อนได้อิสระ 100%) --- */
-    .custom-filter-wrapper {{ 
-        display: none; flex-direction: column; position: fixed; 
-        top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); 
-        right: 16px; width: 340px; 
-        max-height: calc(100dvh - 100px) !important; 
-        background-color: #282a2d; border-radius: 16px; 
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; 
-        overflow-y: auto !important; overflow-x: hidden !important; 
-        z-index: 999998 !important; pointer-events: auto; padding: 8px 0; 
-        scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
-    }}
-    .custom-filter-wrapper.show {{ display: flex !important; }}
-
-    .custom-filter-wrapper::-webkit-scrollbar,
+    .custom-filter-wrapper .leaflet-control-layers-list,
+    .g-search-results,
+    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
     .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper::-webkit-scrollbar-track,
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
     .g-search-results::-webkit-scrollbar-track,
     .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper::-webkit-scrollbar-thumb,
+    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
     .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
-    .custom-filter-wrapper:hover::-webkit-scrollbar-thumb,
-    .g-search-results:hover::-webkit-scrollbar-thumb,
-    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
-    .custom-filter-wrapper::-webkit-scrollbar-thumb:hover,
-    .g-search-results::-webkit-scrollbar-thumb:hover,
-    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
-    /* ล็อกความสวยงามกล่องค้นหา ห้ามสีขาวเด็ดขาด */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto !important; background-color: #282a2d !important; border-radius: 24px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; padding: 0 14px !important; height: 48px !important; border: 1px solid #444746 !important; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8 !important; }}
@@ -392,7 +382,6 @@ def generate_map():
     .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
     .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 0; max-height: 400px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
-    /* ปุ่มหลักบนแผนที่ */
     .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
     .top-action-btn:hover {{ background-color: #3c4043; transform: translateY(-2px); }}
     .top-action-btn:active {{ transform: scale(0.92); }}
@@ -402,12 +391,12 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
-    /* ปลดล็อกโครงสร้างภายในของฟอร์ม Folium ไม่ให้กั๊กความสูง (แก้ปัญหา Scrolling โดนตัด) */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
+    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
+    .custom-filter-wrapper.show {{ display: flex !important; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }}
     .custom-filter-wrapper .leaflet-control-layers-list {{ overflow: visible !important; max-height: none !important; height: auto !important; padding: 0 0 12px 0 !important; margin: 0 !important; }}
     .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; overflow: visible !important; }}
-    
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: flex !important; flex-direction: column !important; width: 100% !important; margin-bottom: 8px !important; clear: both !important; align-items: stretch !important; }}
     
     .custom-filter-wrapper label.leaflet-control-layers-group-label,
@@ -459,6 +448,10 @@ def generate_map():
     .g-export-btn:active {{ transform: scale(0.97) !important; }}
     .g-export-btn svg {{ width: 20px !important; height: 20px !important; fill: currentColor !important; flex-shrink: 0 !important; }}
 
+    .g-search-item {{ padding: 12px 16px; display: flex; flex-direction: column; cursor: pointer; border-bottom: 1px solid #35363a; transition: background-color 0.2s, border-left 0.2s; border-left: 3px solid transparent; gap: 6px; }}
+    .g-search-item:last-child {{ border-bottom: none; }}
+    .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
+
     @media (max-width: 768px) {{ 
         .g-search-container {{ width: calc(100vw - 146px) !important; max-width: none !important; }} 
         .custom-filter-wrapper {{ top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px) !important; right: 16px !important; left: 16px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
@@ -493,10 +486,6 @@ def generate_map():
     .popup-table td:first-child {{ color: #5f6368; font-weight: 500; width: 45%; vertical-align: top; padding-right: 8px; }}
     .popup-table td:last-child {{ color: #202124; font-weight: 500; text-align: right; vertical-align: top; }}
 
-    .g-search-item {{ padding: 12px 16px; display: flex; flex-direction: column; cursor: pointer; border-bottom: 1px solid #35363a; transition: background-color 0.2s, border-left 0.2s; border-left: 3px solid transparent; gap: 6px; }}
-    .g-search-item:last-child {{ border-bottom: none; }}
-    .g-search-item:hover {{ background: #3c4043; border-left-color: #8ab4f8; }}
-
     @media (max-width: 768px) {{ .g-zoom-container {{ display: none !important; }} }}
     .custom-right-controls {{ display: flex; flex-direction: column; gap: 12px; align-items: center; margin-right: 16px; margin-bottom: 24px; z-index: 500 !important; position: relative; }}
     .g-zoom-container {{ width: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }}
@@ -518,7 +507,7 @@ def generate_map():
     .g-layer-container {{ position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; pointer-events: none; }}
     .g-layer-main-btn {{ pointer-events: auto; width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
     .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
-    .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
+    .g-layer-label {{ absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
     .g-layer-panel {{ pointer-events: auto; background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
     .g-layer-container:hover .g-layer-panel {{ max-width: 500px; padding: 0 20px; opacity: 1; }}
     .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 6px; padding: 4px; border-radius: 10px; transition: background-color 0.2s; }}
@@ -528,7 +517,6 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
-    <!-- UI ปุ่มเปิด-ปิด -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
@@ -536,7 +524,6 @@ def generate_map():
         <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
     </div>
 
-    <!-- Modal แจ้งเตือนแบบ Custom -->
     <div id="customAlertOverlay" class="custom-alert-overlay">
         <div class="custom-alert-box">
             <div class="custom-alert-icon">
@@ -548,11 +535,9 @@ def generate_map():
         </div>
     </div>
 
-    <!-- Modal สำหรับเลือก Report Range -->
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
-            
             <div class="date-flex-container">
                 <div class="date-input-group">
                     <label>จากวันที่ :</label>
@@ -563,11 +548,7 @@ def generate_map():
                     <input type="text" id="reportEndDate" class="date-input" placeholder="วว/ดด/ปปปป (ค.ศ.)" onfocus="(this.type='date')" onblur="if(!this.value) this.type='text'">
                 </div>
             </div>
-            
-            <div class="report-note">
-                *หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด
-            </div>
-
+            <div class="report-note">*หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด</div>
             <div class="report-btn-group">
                 <button class="report-btn report-btn-cancel" onclick="closeReportModal()">ยกเลิก</button>
                 <button id="execReportBtn" class="report-btn report-btn-dl" onclick="generateExcelReport()">
@@ -577,16 +558,13 @@ def generate_map():
         </div>
     </div>
 
-    <!-- กรอบหลักของ Filter -->
     <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
     
-    <!-- กล่องข้อมูล Info Panel -->
     <div id="customInfoPanel" class="custom-info-panel">
         <div class="panel-close-btn" id="closeInfoPanelBtn" onclick="hideCustomPanel();"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
         <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
     </div>
     
-    <!-- กล่องค้นหา -->
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
             <div class="g-search-icon"><svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:20px; height:20px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
@@ -596,7 +574,6 @@ def generate_map():
         <div id="searchResults" class="g-search-results"></div>
     </div>
     
-    <!-- ปุ่มสลับแผนที่ซ้ายล่าง -->
     <div class="g-layer-container" id="gLayerContainer">
         <div class="g-layer-main-btn" id="gLayerMainBtn"><div class="g-layer-label" id="gLayerMainLabel">...</div></div>
         <div class="g-layer-panel" id="gLayerPanel"></div>
@@ -609,15 +586,12 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
-    // ระบบกดปุ่ม ESC ปิดทุกอย่างครอบจักรวาล
     document.addEventListener('keydown', function(e) {{
         if (e.key === 'Escape' || e.keyCode === 27) {{
             var fw = document.getElementById('customFilterWrapper');
             if (fw && fw.classList.contains('show')) fw.classList.remove('show');
-            
             hideCustomPanel();
             closeReportModal();
-            
             var res = document.getElementById('searchResults');
             if (res) res.style.display = 'none';
         }}
@@ -647,32 +621,21 @@ def generate_map():
     async function generateExcelReport() {{
         var btn = document.getElementById('execReportBtn');
         btn.disabled = true; btn.innerHTML = 'กำลังสร้าง...';
-        
         var startInput = document.getElementById('reportStartDate').value;
         var endInput = document.getElementById('reportEndDate').value;
-        
         var filteredData = reportRawData.filter(d => {{
             if (!startInput && !endInput) return true; 
             if (!d.iso_date || d.iso_date === "") return false; 
-            
             var parts = d.iso_date.split('-');
             var dDate = new Date(parts[0], parts[1] - 1, parts[2]); 
-            
             var sDate = startInput ? new Date(startInput) : new Date(1970, 0, 1);
             var eDate = endInput ? new Date(endInput) : new Date(2100, 0, 1);
-            
             sDate.setHours(0,0,0,0);
             eDate.setHours(23,59,59,999);
-
             return dDate >= sDate && dDate <= eDate;
         }});
         
-        if (filteredData.length === 0) {{ 
-            showCustomAlert("ไม่พบข้อมูลรายงานในช่วงวันที่ ที่คุณเลือกครับ"); 
-            btn.disabled = false; 
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel'; 
-            return; 
-        }}
+        if (filteredData.length === 0) {{ showCustomAlert("ไม่พบข้อมูลรายงานในช่วงวันที่ ที่คุณเลือกครับ"); btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel'; return; }}
 
         filteredData.sort(function(a, b) {{
             var sA = a.status.toUpperCase(); var sB = b.status.toUpperCase();
@@ -683,7 +646,6 @@ def generate_map():
 
         var workbook = new ExcelJS.Workbook();
         var ws = workbook.addWorksheet('Report');
-
         ws.mergeCells('A1:G1');
         var titleCell = ws.getCell('A1');
         titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine";
@@ -712,39 +674,22 @@ def generate_map():
 
             var currentRow = i + 3;
             var nextStatus = (i < filteredData.length - 1) ? filteredData[i+1].status : null;
-            
             if (nextStatus !== currentStatus || i === filteredData.length - 1) {{
-                if (currentRow > startMergeRow) {{
-                    ws.mergeCells(`G${{startMergeRow}}:G${{currentRow}}`);
-                }}
+                if (currentRow > startMergeRow) {{ ws.mergeCells(`G${{startMergeRow}}:G${{currentRow}}`); }}
                 startMergeRow = currentRow + 1;
                 currentStatus = nextStatus;
             }}
         }});
 
-        ws.getColumn(1).width = 6;
-        ws.getColumn(2).width = 18;
-        ws.getColumn(3).width = 18;
-        ws.getColumn(4).width = 25;
-        ws.getColumn(5).width = 60;
-        ws.getColumn(6).width = 30;
-        ws.getColumn(7).width = 20;
+        ws.getColumn(1).width = 6; ws.getColumn(2).width = 18; ws.getColumn(3).width = 18; ws.getColumn(4).width = 25; ws.getColumn(5).width = 60; ws.getColumn(6).width = 30; ws.getColumn(7).width = 20;
 
         var buffer = await workbook.xlsx.writeBuffer();
         var blob = new Blob([buffer], {{ type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }});
-        var link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        
+        var link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         var safeFilenameDate = "All_Dates";
-        if (startInput || endInput) {{
-            var sName = startInput ? startInput : "Start";
-            var eName = endInput ? endInput : "End";
-            safeFilenameDate = sName + "_to_" + eName;
-        }}
+        if (startInput || endInput) {{ safeFilenameDate = (startInput ? startInput : "Start") + "_to_" + (endInput ? endInput : "End"); }}
         link.download = 'SCADA_Report_' + safeFilenameDate + '.xlsx';
-        
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
-
         btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel';
         closeReportModal();
     }}
@@ -772,8 +717,7 @@ def generate_map():
                     targetPins.forEach(function(el) {{ el.classList.add('selected-pin-glow'); if(el.parentElement) el.parentElement.style.zIndex = 100000; }});
                     clearInterval(tryHighlight);
                 }}
-                attempts++;
-                if (attempts > 15) clearInterval(tryHighlight);
+                attempts++; if (attempts > 15) clearInterval(tryHighlight);
             }}, 100);
         }}
     }}
@@ -791,7 +735,6 @@ def generate_map():
         if(window.currentSelectedSafeId) {{ highlightPin(window.currentSelectedSafeId); }}
     }}
 
-    // --- Tracker อัจฉริยะ ล่า 100% Load ---
     var mapInitInterval = setInterval(function() {{
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
@@ -803,7 +746,6 @@ def generate_map():
             var filterWrapper = document.getElementById('customFilterWrapper');
             var filterBtn = document.getElementById('standaloneFilterBtn');
             
-            // 1. ผูก Event กล่อง Filter
             if (filterBtn) {{
                 filterBtn.addEventListener('click', function(e) {{ 
                     e.preventDefault(); e.stopPropagation(); filterWrapper.classList.toggle('show'); 
@@ -815,8 +757,6 @@ def generate_map():
                 }});
                 L.DomEvent.disableClickPropagation(filterBtn);
                 L.DomEvent.disableClickPropagation(filterWrapper);
-                
-                // ถอด Event กัน Scroll ออก เพื่อให้ไถในกล่องดำได้
                 filterWrapper.addEventListener('wheel', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
                 filterWrapper.addEventListener('touchmove', function(e) {{ e.stopPropagation(); }}, {{passive: false}});
             }}
@@ -825,15 +765,13 @@ def generate_map():
             filterWrapper.addEventListener('mouseleave', function () {{ globalMap.scrollWheelZoom.enable(); }});
             filterWrapper.appendChild(targetForm);
             
-            // 2. จัดการข้อมูลสถานะ
             var controlList = filterWrapper.querySelector('.leaflet-control-layers-overlays');
             if (controlList) {{
                 var groups = Array.from(controlList.querySelectorAll('.leaflet-control-layers-group'));
                 groups.forEach(function(group) {{
                     var itemLabels = Array.from(group.querySelectorAll('label:not(.leaflet-control-layers-group-label)'));
                     itemLabels.sort(function(a, b) {{
-                        var snA = a.querySelector('.status-text');
-                        var snB = b.querySelector('.status-text');
+                        var snA = a.querySelector('.status-text'); var snB = b.querySelector('.status-text');
                         var sA = snA ? snA.getAttribute('data-status').toUpperCase() : a.textContent.trim().toUpperCase();
                         var sB = snB ? snB.getAttribute('data-status').toUpperCase() : b.textContent.trim().toUpperCase();
                         function getWeight(s) {{
@@ -854,9 +792,7 @@ def generate_map():
                 }});
             }}
 
-            filterWrapper.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ 
-                cb.addEventListener('change', reapplyHighlight); 
-            }});
+            filterWrapper.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{ cb.addEventListener('change', reapplyHighlight); }});
 
             filterWrapper.querySelectorAll('label').forEach(function(lbl) {{
                 lbl.addEventListener('mouseenter', function() {{
@@ -926,9 +862,7 @@ def generate_map():
                         var blob = new Blob(["\\uFEFF" + csv], {{ type: 'text/csv;charset=utf-8;' }});
                         var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "SCADA_Export_Data.csv";
                         document.body.appendChild(link); link.click(); document.body.removeChild(link);
-                    }} else {{
-                        showCustomAlert('ไม่พบข้อมูลสำหรับส่งออก');
-                    }}
+                    }} else {{ showCustomAlert('ไม่พบข้อมูลสำหรับส่งออก'); }}
                 }};
             }}
             
@@ -958,7 +892,6 @@ def generate_map():
             
             globalMap.on('click', function() {{ hideCustomPanel(); }});
 
-            // 4. สร้างปุ่ม Location และ Zoom
             var CustomControls = L.Control.extend({{
                 options: {{ position: 'bottomright' }},
                 onAdd: function (map) {{
@@ -988,7 +921,6 @@ def generate_map():
                 if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
             }};
 
-            // 5. Setup ปุ่มสลับ Map Layers
             var mapConfigs = [
                 {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
                 {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -1029,14 +961,13 @@ def generate_map():
             }}
 
             document.getElementById('gLayerMainBtn').onclick = function(e) {{ 
-                e.stopPropagation(); 
-                switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
+                e.stopPropagation(); switchMapLayer((currentMapIndex + 1) % mapConfigs.length); 
             }};
             switchMapLayer(0);
         }}
     }}, 200); 
 
-    // --- ระบบค้นหา (รวม SCADA + สถานที่ Google Maps) ---
+    // --- ระบบค้นหา 2 เครื่องยนต์ (SCADA ของเรา + Google Maps API) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
@@ -1056,10 +987,8 @@ def generate_map():
         clr.style.display = val.length > 0 ? 'block' : 'none';
         
         if (val.length < 1) {{ 
-            res.innerHTML = ''; 
-            res.style.display = 'none'; 
-            clearTimeout(searchTimeout);
-            return; 
+            res.innerHTML = ''; res.style.display = 'none'; 
+            clearTimeout(searchTimeout); return; 
         }}
 
         res.style.display = 'block';
@@ -1069,10 +998,9 @@ def generate_map():
         searchTimeout = setTimeout(async function() {{
             res.innerHTML = ''; 
             
+            // 1. ค้นหาข้อมูล Local SCADA (โชว์ก่อนเสมอ)
             var localMatches = sData.filter(function(i) {{ 
-                return i.id.toLowerCase().includes(val) || 
-                       i.code.toLowerCase().includes(val) || 
-                       i.name.toLowerCase().includes(val); 
+                return i.id.toLowerCase().includes(val) || i.code.toLowerCase().includes(val) || i.name.toLowerCase().includes(val); 
             }}).slice(0, 6);
             
             if (localMatches.length > 0) {{
@@ -1100,10 +1028,8 @@ def generate_map():
                         for (var key in window) {{ 
                             if (key.startsWith('map_')) {{ 
                                 var map = window[key];
-                                var targetZoom = 18;
-                                var isMobile = window.innerWidth <= 768;
-                                var offsetX = isMobile ? 0 : -180;
-                                var offsetY = isMobile ? 120 : 0;
+                                var targetZoom = 18; var isMobile = window.innerWidth <= 768;
+                                var offsetX = isMobile ? 0 : -180; var offsetY = isMobile ? 120 : 0;
                                 var targetPoint = map.project([m.lat, m.lon], targetZoom);
                                 targetPoint.x += offsetX; targetPoint.y += offsetY;
                                 var newCenter = map.unproject(targetPoint, targetZoom);
@@ -1120,29 +1046,45 @@ def generate_map():
                 }});
             }}
 
+            // 2. ค้นหาสถานที่ทั่วไปบนโลก (ดึงผ่าน Flask Backend API เพื่อความปลอดภัยและหลีกเลี่ยง CORS)
             try {{
-                let geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(val)}}&countrycodes=th&limit=4`);
-                let geoData = await geoResponse.json();
+                let geoResponse = await fetch(`/api/search-place?q=${{encodeURIComponent(val)}}`);
+                let geoResult = await geoResponse.json();
 
-                if (geoData && geoData.length > 0) {{
+                let placesData = [];
+                let isGoogle = false;
+
+                if (geoResult.fallback) {{
+                    // Fallback: ถ้ายังไม่มี Google API Key จะใช้ของฟรี (OSM) แทนไปก่อน ไม่ให้ระบบล่ม
+                    let osmResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(val)}}&countrycodes=th&limit=4`);
+                    let osmData = await osmResponse.json();
+                    if (osmData && osmData.length > 0) {{
+                        placesData = osmData.map(p => {{
+                            let parts = p.display_name.split(',');
+                            return {{ name: parts[0], address: parts.slice(1).join(',').trim(), lat: parseFloat(p.lat), lon: parseFloat(p.lon) }};
+                        }});
+                    }}
+                }} else {{
+                    isGoogle = true;
+                    placesData = geoResult.results || [];
+                }}
+
+                if (placesData.length > 0) {{
                     var geoHeader = document.createElement('div');
                     var borderTop = localMatches.length > 0 ? 'border-top: 1px solid #444746;' : '';
-                    geoHeader.innerHTML = `<div style="padding: 8px 16px; font-size: 11px; color: #babbbe; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid #35363a; ${{borderTop}}">🌍 สถานที่ทั่วไปบนแผนที่</div>`;
+                    var titleText = isGoogle ? '🌍 สถานที่ทั่วไป (Google Maps)' : '🌍 สถานที่ทั่วไป (ระบบฟรี OSM)';
+                    geoHeader.innerHTML = `<div style="padding: 8px 16px; font-size: 11px; color: #babbbe; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid #35363a; ${{borderTop}}">${{titleText}}</div>`;
                     res.appendChild(geoHeader);
 
-                    geoData.forEach(function(place) {{
+                    placesData.forEach(function(place) {{
                         var div = document.createElement('div'); div.className = 'g-search-item';
-                        var nameParts = place.display_name.split(',');
-                        var mainName = nameParts[0];
-                        var subName = nameParts.slice(1).join(',').trim();
-
                         div.innerHTML = `<div style="display: flex; align-items: center; width: 100%; gap: 12px;">
                                             <div style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="#babbbe"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
                                             </div>
                                             <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
-                                                <span style="color: #e3e3e3; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{mainName}}</span>
-                                                <span style="color: #9aa0a6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{subName}}</span>
+                                                <span style="color: #e3e3e3; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{place.name}}</span>
+                                                <span style="color: #9aa0a6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{place.address}}</span>
                                             </div>
                                          </div>`;
                         
@@ -1159,14 +1101,11 @@ def generate_map():
                         res.appendChild(div);
                     }});
                 }}
-            }} catch(e) {{
-                console.log("Geocoding Error:", e);
-            }}
+            }} catch(e) {{ console.log("Geocoding Error:", e); }}
 
             if (res.innerHTML === '') {{
                 res.innerHTML = '<div style="padding:16px; color:#9aa0a6; text-align:center; font-size:13.5px;">ไม่พบข้อมูล SCADA หรือสถานที่ที่ค้นหา</div>';
             }}
-
         }}, 400);
     }}
 
@@ -1223,6 +1162,39 @@ def trigger_update_if_needed():
                 open(LOCK_FILE, 'w').close()
                 threading.Thread(target=background_task).start()
             except: pass
+
+# ==========================================
+# Route ใหม่เพื่อเรียกใช้ Google Maps API
+# ==========================================
+@app.route('/api/search-place')
+def search_place():
+    q = request.args.get('q', '')
+    if not q:
+        return jsonify([])
+    
+    # ถ้ายังไม่ได้ใส่ API Key ให้บอก Javascript ไปใช้ระบบฟรีแทน (Fallback)
+    if GOOGLE_MAPS_API_KEY == "ใส่_API_KEY_ของคุณที่นี่" or not GOOGLE_MAPS_API_KEY.strip():
+        return jsonify({"fallback": True})
+        
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query=" + urllib.parse.quote(q) + "&region=th&language=th&key=" + GOOGLE_MAPS_API_KEY
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            results = []
+            if data.get('status') == 'OK':
+                # ส่งกลับเฉพาะสถานที่ 4 อันดับแรก
+                for item in data.get('results', [])[:4]:
+                    results.append({
+                        'name': item.get('name'),
+                        'address': item.get('formatted_address'),
+                        'lat': item['geometry']['location']['lat'],
+                        'lon': item['geometry']['location']['lng']
+                    })
+            return jsonify({"fallback": False, "results": results})
+    except Exception as e:
+        print("Google API Error:", e)
+        return jsonify({"fallback": True})
 
 @app.route('/map-data')
 def map_data():
