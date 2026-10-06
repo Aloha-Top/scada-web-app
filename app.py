@@ -184,7 +184,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -333,6 +333,9 @@ def generate_map():
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
+    
+    @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+
     .leaflet-top {{ z-index: 999 !important; }}
     .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
@@ -956,7 +959,7 @@ def generate_map():
         }}
     }}, 200); 
 
-    // --- ระบบค้นหาอัจฉริยะ (ค้นหาในเครื่องแบบละเว้นช่องว่าง/สระบางตัว/ผิด 1 ตัว) ---
+    // --- ระบบค้นหาอัจฉริยะ (ให้คะแนนความแม่นยำ ป้องกันการแทนที่ผิดพลาด) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
@@ -970,40 +973,59 @@ def generate_map():
         triggerSearch(); 
     }}
 
-    // ฟังก์ชันช่วยจับคู่คำค้นหาแบบ Fuzzy (ยืดหยุ่น)
-    function isFuzzyMatch(query, target) {{
-        query = (query || '').toLowerCase().replace(/\s+/g, '');
-        target = (target || '').toLowerCase().replace(/\s+/g, '');
-        if (query.length === 0) return false;
-        
-        // ตรงกัน 100%
-        if (target.includes(query)) return true;
-
-        // ถอดสระและวรรณยุกต์ไทยออกทั้งหมดแล้วเทียบกัน (แก้ปัญหาพิมพ์สระเกิน/ผิด)
-        var toneRegex = /[่้๊๋ัิีึืุู]/g;
-        var cleanQuery = query.replace(toneRegex, '');
-        var cleanTarget = target.replace(toneRegex, '');
-        if (cleanQuery.length >= 3 && cleanTarget.includes(cleanQuery)) return true;
-
-        // ถ้ายาวกว่า 3 ตัวอักษร ยอมให้พิมพ์ผิด/พิมพ์เกินได้ 1 ตัวอักษร
-        if (query.length > 3) {{
-            for (var i = 0; i < query.length; i++) {{
-                var modifiedQuery = query.substring(0, i) + query.substring(i + 1);
-                if (modifiedQuery.length >= 3 && target.includes(modifiedQuery)) return true;
-            }}
-        }}
-        return false;
-    }}
-
     function triggerSearch() {{
         var rawVal = inp.value.trim();
         clr.style.display = rawVal.length > 0 ? 'block' : 'none';
         res.innerHTML = '';
         if (rawVal.length < 1) {{ res.style.display = 'none'; return; }}
         
-        var matches = sData.filter(function(i) {{ 
-            return isFuzzyMatch(rawVal, i.id) || isFuzzyMatch(rawVal, i.code) || isFuzzyMatch(rawVal, i.name);
-        }}).slice(0, 8);
+        var query = rawVal.toLowerCase().replace(/\s+/g, '');
+        var toneRegex = /[่้๊๋ัิีึืุู]/g;
+        var cleanQuery = query.replace(toneRegex, '');
+        
+        var scoredMatches = [];
+        
+        sData.forEach(function(i) {{
+            var tId = (i.id || '').toLowerCase().replace(/\s+/g, '');
+            var tCode = (i.code || '').toLowerCase().replace(/\s+/g, '');
+            var tName = (i.name || '').toLowerCase().replace(/\s+/g, '');
+            
+            var cId = tId.replace(toneRegex, '');
+            var cCode = tCode.replace(toneRegex, '');
+            var cName = tName.replace(toneRegex, '');
+
+            var score = 0;
+            
+            // 1. ตรงเป๊ะๆ (Exact Match)
+            if (tId === query || tCode === query) score = 100;
+            // 2. มีคำนี้อยู่เป๊ะๆ (Contains Exact)
+            else if (tId.includes(query) || tCode.includes(query) || tName.includes(query)) score = 80;
+            // 3. มีคำนี้อยู่แต่ตัดวรรณยุกต์ (Contains Ignore Tones)
+            else if (cleanQuery.length >= 3 && (cId.includes(cleanQuery) || cCode.includes(cleanQuery) || cName.includes(cleanQuery))) score = 60;
+            // 4. พิมพ์ผิด/เกิน 1 ตัว (Fuzzy Match - ทำงานเมื่อพิมพ์เกิน 3 ตัวอักษร)
+            else if (query.length >= 4) {{
+                for (var j = 0; j < query.length; j++) {{
+                    var mq = query.substring(0, j) + query.substring(j + 1);
+                    if (mq.length >= 3 && (tId.includes(mq) || tCode.includes(mq) || tName.includes(mq))) {{
+                        score = 40;
+                        break;
+                    }}
+                }}
+            }}
+
+            if (score > 0) {{
+                // ใส่ nameMatch เพื่อเอาไว้เรียงลำดับรอง (เผื่อคะแนนเท่ากัน ให้ ID ขึ้นก่อน Name)
+                scoredMatches.push({{ item: i, score: score, nameMatch: tName.includes(query) }});
+            }}
+        }});
+
+        // เรียงลำดับคะแนนจากมากไปน้อย (ถ้าคะแนนเท่ากัน ให้ ID/Code ขึ้นก่อน Name)
+        scoredMatches.sort(function(a, b) {{ 
+            if (b.score !== a.score) return b.score - a.score;
+            return a.nameMatch ? 1 : -1; 
+        }});
+        
+        var matches = scoredMatches.slice(0, 8).map(function(m) {{ return m.item; }});
         
         if (matches.length > 0) {{
             res.style.display = 'block';
