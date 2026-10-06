@@ -383,6 +383,7 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
+    /* แก้ปัญหา Scrolling Filter */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
@@ -399,6 +400,7 @@ def generate_map():
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
+    /* แก้ให้ Modal เด้งตรงกลางจอ 100% */
     .custom-alert-overlay, .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
     .custom-alert-overlay.show, .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
     
@@ -637,7 +639,20 @@ def generate_map():
         }});
 
         var workbook = new ExcelJS.Workbook();
-        var ws = workbook.addWorksheet('Report');
+        
+        // --- ตั้งค่าหน้ากระดาษเป็น A4 แนวนอน พร้อมจัดความกว้างอัตโนมัติ ---
+        var ws = workbook.addWorksheet('Report', {{
+            pageSetup: {{
+                paperSize: 9, // A4
+                orientation: 'landscape', // แนวนอน
+                fitToPage: true, // บีบให้พอดีหน้า
+                fitToWidth: 1, // บังคับให้กว้างไม่เกิน 1 หน้ากระดาษ
+                fitToHeight: 0, // ความยาวปล่อยไหลลงได้เรื่อยๆ
+                printTitlesRow: '1:2', // ล็อกหัวตารางแถวที่ 1-2 ให้พิมพ์ซ้ำทุกหน้า
+                margins: {{ left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }}
+            }}
+        }});
+        
         ws.mergeCells('A1:G1');
         var titleCell = ws.getCell('A1');
         titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine";
@@ -1014,7 +1029,7 @@ def generate_map():
             }}
 
             if (score > 0) {{
-                scoredMatches.push({{ item: i, score: score }});
+                scoredMatches.push({{ item: i, score: score, nameMatch: tName.includes(query) }});
             }}
         }});
 
@@ -1023,7 +1038,6 @@ def generate_map():
             if (b.score !== a.score) return b.score - a.score;
             var idA = String(a.item.id || '').toLowerCase();
             var idB = String(b.item.id || '').toLowerCase();
-            // ใช้ Natural Sort (เรียงตัวเลขผสมตัวอักษรอย่างฉลาด)
             return idA.localeCompare(idB, undefined, {{numeric: true, sensitivity: 'base'}});
         }});
         
