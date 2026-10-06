@@ -184,7 +184,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -327,19 +327,22 @@ def generate_map():
     status_hash_json = json.dumps(status_hash_map, ensure_ascii=False)
     report_json_data = json.dumps(report_data_list, ensure_ascii=False)
 
+    # --- ส่วน UI ฉบับแก้ไข Scrolling สมบูรณ์ 100% (ล๊อกความขัดแย้งของ CSS) ---
     custom_ui_html = f"""
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    .leaflet-top {{ z-index: 999 !important; }}
-    .leaflet-bottom {{ z-index: 998 !important; }}
+    
+    /* Animation โหลดไอคอนค้นหาแผนที่ */
+    @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+
+    /* บังคับซ่อนปุ่มเดิมของ Leaflet */
+    .leaflet-control-zoom {{ display: none !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
     .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
-    
-    .leaflet-control-zoom {{ display: none !important; }}
 
     .selected-pin-glow {{ transform: scale(1.4) !important; z-index: 100000 !important; }}
     .selected-pin-glow .pin-shape {{ box-shadow: 0 0 0 3px #ffffff, 0 0 20px 8px rgba(66, 133, 244, 0.8) !important; border-color: #4285F4 !important; }}
@@ -349,19 +352,37 @@ def generate_map():
     body.filter-hover-active .map-pin-inner.highlight-active, body.filter-hover-active .map-cluster-inner.highlight-active {{ opacity: 1 !important; filter: none !important; transform: scale(1.25); }}
     body.filter-hover-active .map-pin-inner.highlight-active .pin-shape, body.filter-hover-active .map-cluster-inner.highlight-active {{ box-shadow: 0 0 12px 6px rgba(255, 255, 255, 0.9), 0 0 5px rgba(0,0,0,0.5) !important; }}
 
-    .custom-filter-wrapper .leaflet-control-layers-list,
-    .g-search-results,
-    .popup-body {{ scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar,
+    /* --- ระบบ Scroll สำหรับกล่อง Filter (ให้เลื่อนได้อิสระ 100%) --- */
+    .custom-filter-wrapper {{ 
+        display: none; flex-direction: column; position: fixed; 
+        top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); 
+        right: 16px; width: 340px; 
+        max-height: calc(100dvh - 100px) !important; 
+        background-color: #282a2d; border-radius: 16px; 
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; 
+        overflow-y: auto !important; overflow-x: hidden !important; 
+        z-index: 999998 !important; pointer-events: auto; padding: 8px 0; 
+        scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent;
+    }}
+    .custom-filter-wrapper.show {{ display: flex !important; }}
+
+    .custom-filter-wrapper::-webkit-scrollbar,
     .g-search-results::-webkit-scrollbar,
     .popup-body::-webkit-scrollbar {{ width: 6px; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-track,
+    .custom-filter-wrapper::-webkit-scrollbar-track,
     .g-search-results::-webkit-scrollbar-track,
     .popup-body::-webkit-scrollbar-track {{ background: transparent; }}
-    .custom-filter-wrapper .leaflet-control-layers-list::-webkit-scrollbar-thumb,
+    .custom-filter-wrapper::-webkit-scrollbar-thumb,
     .g-search-results::-webkit-scrollbar-thumb,
     .popup-body::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0); border-radius: 10px; }}
+    .custom-filter-wrapper:hover::-webkit-scrollbar-thumb,
+    .g-search-results:hover::-webkit-scrollbar-thumb,
+    .popup-body:hover::-webkit-scrollbar-thumb {{ background-color: rgba(154, 160, 166, 0.4); }}
+    .custom-filter-wrapper::-webkit-scrollbar-thumb:hover,
+    .g-search-results::-webkit-scrollbar-thumb:hover,
+    .popup-body::-webkit-scrollbar-thumb:hover {{ background-color: rgba(138, 180, 248, 0.8); }}
 
+    /* ล็อกความสวยงามกล่องค้นหา ห้ามสีขาวเด็ดขาด */
     .g-search-container {{ position: fixed; z-index: 100005; font-family: 'Prompt', sans-serif; top: max(20px, env(safe-area-inset-top, 20px)); left: 16px; width: 380px; margin: 0; pointer-events: none; }}
     .g-search-box {{ pointer-events: auto !important; background-color: #282a2d !important; border-radius: 24px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; padding: 0 14px !important; height: 48px !important; border: 1px solid #444746 !important; }}
     .g-search-box:hover, .g-search-box.focus {{ border-color: #8ab4f8 !important; }}
@@ -369,8 +390,9 @@ def generate_map():
     input#searchInput.g-search-input {{ flex: 1 !important; border: none !important; outline: none !important; background: transparent !important; background-color: transparent !important; font-size: 14px !important; color: #e8eaed !important; margin-left: 10px !important; width: 100% !important; font-family: 'Prompt', sans-serif !important; pointer-events: auto !important; box-shadow: none !important; -webkit-appearance: none !important; }}
     input#searchInput.g-search-input::placeholder {{ color: #9aa0a6 !important; font-weight: 400 !important; opacity: 1 !important; }}
     .g-search-clear {{ display: none; color: #9aa0a6; font-size: 22px; cursor: pointer; padding: 0 8px; line-height: 1; pointer-events: auto; }}
-    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 8px 0; max-height: 320px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
+    .g-search-results {{ position: absolute; top: 54px; left: 0; width: 100%; background: #282a2d; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; overflow: hidden; padding: 0; max-height: 400px; overflow-y: auto; border: 1px solid #444746; -webkit-overflow-scrolling: touch; pointer-events: auto; }}
 
+    /* ปุ่มหลักบนแผนที่ */
     .top-action-btn {{ position: fixed; top: max(20px, env(safe-area-inset-top, 20px)); width: 48px; height: 48px; background-color: #282a2d; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100000; transition: all 0.2s; border: 1px solid #444746; pointer-events: auto; }}
     .top-action-btn:hover {{ background-color: #3c4043; transform: translateY(-2px); }}
     .top-action-btn:active {{ transform: scale(0.92); }}
@@ -380,12 +402,12 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
+    /* ปลดล็อกโครงสร้างภายในของฟอร์ม Folium ไม่ให้กั๊กความสูง (แก้ปัญหา Scrolling โดนตัด) */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
-    .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
-    .custom-filter-wrapper.show {{ display: flex !important; }}
     .custom-filter-wrapper form {{ display: flex !important; flex-direction: column !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }}
     .custom-filter-wrapper .leaflet-control-layers-list {{ overflow: visible !important; max-height: none !important; height: auto !important; padding: 0 0 12px 0 !important; margin: 0 !important; }}
     .custom-filter-wrapper .leaflet-control-layers-overlays {{ display: flex !important; flex-direction: column !important; width: 100% !important; overflow: visible !important; }}
+    
     .custom-filter-wrapper .leaflet-control-layers-group {{ display: flex !important; flex-direction: column !important; width: 100% !important; margin-bottom: 8px !important; clear: both !important; align-items: stretch !important; }}
     
     .custom-filter-wrapper label.leaflet-control-layers-group-label,
@@ -396,7 +418,7 @@ def generate_map():
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
-    /* แก้ให้ Modal รายงานเด้งตรงกลาง 100% */
+    /* แก้ให้ Modal เด้งตรงกลางจอ 100% */
     .custom-alert-overlay, .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
     .custom-alert-overlay.show, .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
     
@@ -506,19 +528,12 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
-    <!-- ปุ่ม Filter และ Report -->
+    <!-- UI ปุ่มเปิด-ปิด -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
-    <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ"><svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></div>
-    
-    <!-- กรอบหลักของ Filter -->
-    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
-
-    <!-- กล่องข้อมูล -->
-    <div id="customInfoPanel" class="custom-info-panel">
-        <div class="panel-close-btn" id="closeInfoPanelBtn" onclick="hideCustomPanel();"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
-        <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
+    <div id="standaloneFilterBtn" class="top-action-btn standalone-filter-btn" title="ตัวกรองสถานะ">
+        <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
     </div>
 
     <!-- Modal แจ้งเตือนแบบ Custom -->
@@ -537,6 +552,7 @@ def generate_map():
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
+            
             <div class="date-flex-container">
                 <div class="date-input-group">
                     <label>จากวันที่ :</label>
@@ -547,7 +563,11 @@ def generate_map():
                     <input type="text" id="reportEndDate" class="date-input" placeholder="วว/ดด/ปปปป (ค.ศ.)" onfocus="(this.type='date')" onblur="if(!this.value) this.type='text'">
                 </div>
             </div>
-            <div class="report-note">*หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด</div>
+            
+            <div class="report-note">
+                *หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด
+            </div>
+
             <div class="report-btn-group">
                 <button class="report-btn report-btn-cancel" onclick="closeReportModal()">ยกเลิก</button>
                 <button id="execReportBtn" class="report-btn report-btn-dl" onclick="generateExcelReport()">
@@ -557,6 +577,15 @@ def generate_map():
         </div>
     </div>
 
+    <!-- กรอบหลักของ Filter -->
+    <div id="customFilterWrapper" class="custom-filter-wrapper"></div>
+    
+    <!-- กล่องข้อมูล Info Panel -->
+    <div id="customInfoPanel" class="custom-info-panel">
+        <div class="panel-close-btn" id="closeInfoPanelBtn" onclick="hideCustomPanel();"><svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+        <div id="customInfoContent" style="display:flex; flex-direction:column; height:100%; width:100%;"></div>
+    </div>
+    
     <!-- กล่องค้นหา -->
     <div class="g-search-container">
         <div class="g-search-box" id="searchBox">
@@ -566,7 +595,7 @@ def generate_map():
         </div>
         <div id="searchResults" class="g-search-results"></div>
     </div>
-
+    
     <!-- ปุ่มสลับแผนที่ซ้ายล่าง -->
     <div class="g-layer-container" id="gLayerContainer">
         <div class="g-layer-main-btn" id="gLayerMainBtn"><div class="g-layer-label" id="gLayerMainLabel">...</div></div>
@@ -580,7 +609,7 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
-    // ระบบกดปุ่ม ESC ครอบจักรวาล
+    // ระบบกดปุ่ม ESC ปิดทุกอย่างครอบจักรวาล
     document.addEventListener('keydown', function(e) {{
         if (e.key === 'Escape' || e.keyCode === 27) {{
             var fw = document.getElementById('customFilterWrapper');
@@ -884,14 +913,22 @@ def generate_map():
                         var statusNode = lbl.querySelector('.status-text');
                         activeStatuses.push(statusNode ? statusNode.getAttribute('data-status') : lbl.textContent.replace(/●/g,'').trim());
                     }});
-                    var filtered = expData.filter(function(d) {{ return activeStatuses.includes(d._layerName.trim()); }});
-                    if(filtered.length === 0) {{ showCustomAlert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
-                    var headers = Object.keys(filtered[0]).filter(function(k) {{ return k !== '_layerName'; }});
-                    var csv = headers.map(function(h) {{ return '"' + h + '"'; }}).join(',') + '\\r\\n';
-                    filtered.forEach(function(row) {{ csv += headers.map(function(h) {{ return '"' + (row[h] ? row[h].toString().replace(/"/g, '""') : '') + '"'; }}).join(',') + '\\r\\n'; }});
-                    var blob = new Blob(["\\uFEFF" + csv], {{ type: 'text/csv;charset=utf-8;' }});
-                    var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "SCADA_Export_Data.csv";
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    
+                    var expDataArray = [];
+                    try {{ expDataArray = expData; }} catch(ex) {{}}
+                    
+                    if (expDataArray && expDataArray.length > 0) {{
+                        var filtered = expDataArray.filter(function(d) {{ return activeStatuses.includes(d._layerName.trim()); }});
+                        if(filtered.length === 0) {{ showCustomAlert('ไม่พบข้อมูล (กรุณาติ๊กเลือกอย่างน้อย 1 สถานะ)'); return; }}
+                        var headers = Object.keys(filtered[0]).filter(function(k) {{ return k !== '_layerName'; }});
+                        var csv = headers.map(function(h) {{ return '"' + h + '"'; }}).join(',') + '\\r\\n';
+                        filtered.forEach(function(row) {{ csv += headers.map(function(h) {{ return '"' + (row[h] ? row[h].toString().replace(/"/g, '""') : '') + '"'; }}).join(',') + '\\r\\n'; }});
+                        var blob = new Blob(["\\uFEFF" + csv], {{ type: 'text/csv;charset=utf-8;' }});
+                        var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "SCADA_Export_Data.csv";
+                        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    }} else {{
+                        showCustomAlert('ไม่พบข้อมูลสำหรับส่งออก');
+                    }}
                 }};
             }}
             
@@ -951,7 +988,7 @@ def generate_map():
                 if (userLatLng) {{ globalMap.flyTo(userLatLng, 16); }} else {{ pendingFlyToLoc = true; }}
             }};
 
-            // 5. Setup ปุ่มสลับ Map Layers มุมซ้ายล่าง
+            // 5. Setup ปุ่มสลับ Map Layers
             var mapConfigs = [
                 {{ id: "terrain", name: "ภูมิประเทศ", keyword: "Google Terrain", thumb: "https://mt1.google.com/vt/lyrs=p&x=130&y=119&z=8" }},
                 {{ id: "street", name: "แผนที่ถนน", keyword: "Street Map", thumb: "https://mt1.google.com/vt/lyrs=m&x=130&y=119&z=8" }},
@@ -999,10 +1036,12 @@ def generate_map():
         }}
     }}, 200); 
 
+    // --- ระบบค้นหา (รวม SCADA + สถานที่ Google Maps) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
     var clr = document.getElementById('searchClear');
+    var searchTimeout = null;
 
     function handleSearchFocus() {{ 
         box.classList.add('focus'); 
@@ -1015,52 +1054,120 @@ def generate_map():
     function triggerSearch() {{
         var val = inp.value.toLowerCase().trim();
         clr.style.display = val.length > 0 ? 'block' : 'none';
-        res.innerHTML = '';
-        if (val.length < 1) {{ res.style.display = 'none'; return; }}
         
-        var matches = sData.filter(function(i) {{ return i.id.toLowerCase().includes(val) || i.code.toLowerCase().includes(val) || i.name.toLowerCase().includes(val); }}).slice(0, 8);
-        
-        if (matches.length > 0) {{
-            res.style.display = 'block';
-            matches.forEach(function(m) {{
-                var div = document.createElement('div'); div.className = 'g-search-item';
-                div.innerHTML = `<div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
-                                    <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px;">
-                                        <span style="color: #e3e3e3; font-size: 14.5px; font-weight: 600; line-height: 1.2;">${{m.id}}</span>
-                                        ${{m.code ? `<span style="color: #8ab4f8; font-size: 11px; font-weight: 500; background: rgba(138, 180, 248, 0.1); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(138, 180, 248, 0.2); flex-shrink: 0; margin-top: 1px;">${{m.code}}</span>` : ''}}
-                                    </div>
-                                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%;">
-                                        <span style="background-color: ${{m.color}}; color: #fff; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 500; line-height: 1.2; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${{m.status}}</span>
-                                        <span style="color: #babbbe; font-size: 11.5px; display: flex; align-items: flex-start; gap: 4px; line-height: 1.3; flex: 1; min-width: 120px;">
-                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                                            <span style="word-break: break-word;">${{m.name ? m.name : 'ไม่มีชื่อสถานที่'}}</span>
-                                        </span>
-                                    </div>
-                                 </div>`;
-                                 
-                div.onclick = function() {{
-                    for (var key in window) {{ 
-                        if (key.startsWith('map_')) {{ 
-                            var map = window[key];
-                            var targetZoom = 18;
-                            var isMobile = window.innerWidth <= 768;
-                            var offsetX = isMobile ? 0 : -180;
-                            var offsetY = isMobile ? 120 : 0;
-                            var targetPoint = map.project([m.lat, m.lon], targetZoom);
-                            targetPoint.x += offsetX; targetPoint.y += offsetY;
-                            var newCenter = map.unproject(targetPoint, targetZoom);
-                            map.flyTo(newCenter, targetZoom, {{animate: true, duration: 0.8}});
-                            
-                            document.getElementById('customInfoContent').innerHTML = m.popup;
-                            document.getElementById('customInfoPanel').style.display = 'flex';
-                            highlightPin(m.safe_id);
-                        }} 
-                    }}
-                    res.style.display = 'none'; 
-                }};
-                res.appendChild(div);
-            }});
-        }} else {{ res.style.display = 'none'; }}
+        if (val.length < 1) {{ 
+            res.innerHTML = ''; 
+            res.style.display = 'none'; 
+            clearTimeout(searchTimeout);
+            return; 
+        }}
+
+        res.style.display = 'block';
+        res.innerHTML = '<div style="padding:16px; color:#9aa0a6; text-align:center; font-size:13px; display:flex; justify-content:center; align-items:center; gap:8px;"><span style="display:inline-block; width:14px; height:14px; border:2px solid #8ab4f8; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>กำลังค้นหา...</div>';
+
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(async function() {{
+            res.innerHTML = ''; 
+            
+            var localMatches = sData.filter(function(i) {{ 
+                return i.id.toLowerCase().includes(val) || 
+                       i.code.toLowerCase().includes(val) || 
+                       i.name.toLowerCase().includes(val); 
+            }}).slice(0, 6);
+            
+            if (localMatches.length > 0) {{
+                var localHeader = document.createElement('div');
+                localHeader.innerHTML = '<div style="padding: 8px 16px; font-size: 11px; color: #8ab4f8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(138, 180, 248, 0.05); border-bottom: 1px solid #35363a;">📌 อุปกรณ์ SCADA</div>';
+                res.appendChild(localHeader);
+
+                localMatches.forEach(function(m) {{
+                    var div = document.createElement('div'); div.className = 'g-search-item';
+                    div.innerHTML = `<div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px;">
+                                            <span style="color: #e3e3e3; font-size: 14.5px; font-weight: 600; line-height: 1.2;">${{m.id}}</span>
+                                            ${{m.code ? `<span style="color: #8ab4f8; font-size: 11px; font-weight: 500; background: rgba(138, 180, 248, 0.1); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(138, 180, 248, 0.2); flex-shrink: 0; margin-top: 1px;">${{m.code}}</span>` : ''}}
+                                        </div>
+                                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%;">
+                                            <span style="background-color: ${{m.color}}; color: #fff; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 500; line-height: 1.2; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${{m.status}}</span>
+                                            <span style="color: #babbbe; font-size: 11.5px; display: flex; align-items: flex-start; gap: 4px; line-height: 1.3; flex: 1; min-width: 120px;">
+                                                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                                                <span style="word-break: break-word;">${{m.name ? m.name : 'ไม่มีชื่อสถานที่'}}</span>
+                                            </span>
+                                        </div>
+                                     </div>`;
+                                     
+                    div.onclick = function() {{
+                        for (var key in window) {{ 
+                            if (key.startsWith('map_')) {{ 
+                                var map = window[key];
+                                var targetZoom = 18;
+                                var isMobile = window.innerWidth <= 768;
+                                var offsetX = isMobile ? 0 : -180;
+                                var offsetY = isMobile ? 120 : 0;
+                                var targetPoint = map.project([m.lat, m.lon], targetZoom);
+                                targetPoint.x += offsetX; targetPoint.y += offsetY;
+                                var newCenter = map.unproject(targetPoint, targetZoom);
+                                map.flyTo(newCenter, targetZoom, {{animate: true, duration: 0.8}});
+                                
+                                document.getElementById('customInfoContent').innerHTML = m.popup;
+                                document.getElementById('customInfoPanel').style.display = 'flex';
+                                highlightPin(m.safe_id);
+                            }} 
+                        }}
+                        res.style.display = 'none'; 
+                    }};
+                    res.appendChild(div);
+                }});
+            }}
+
+            try {{
+                let geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(val)}}&countrycodes=th&limit=4`);
+                let geoData = await geoResponse.json();
+
+                if (geoData && geoData.length > 0) {{
+                    var geoHeader = document.createElement('div');
+                    var borderTop = localMatches.length > 0 ? 'border-top: 1px solid #444746;' : '';
+                    geoHeader.innerHTML = `<div style="padding: 8px 16px; font-size: 11px; color: #babbbe; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid #35363a; ${{borderTop}}">🌍 สถานที่ทั่วไปบนแผนที่</div>`;
+                    res.appendChild(geoHeader);
+
+                    geoData.forEach(function(place) {{
+                        var div = document.createElement('div'); div.className = 'g-search-item';
+                        var nameParts = place.display_name.split(',');
+                        var mainName = nameParts[0];
+                        var subName = nameParts.slice(1).join(',').trim();
+
+                        div.innerHTML = `<div style="display: flex; align-items: center; width: 100%; gap: 12px;">
+                                            <div style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#babbbe"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                                            </div>
+                                            <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+                                                <span style="color: #e3e3e3; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{mainName}}</span>
+                                                <span style="color: #9aa0a6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{subName}}</span>
+                                            </div>
+                                         </div>`;
+                        
+                        div.onclick = function() {{
+                            for (var key in window) {{ 
+                                if (key.startsWith('map_')) {{ 
+                                    var map = window[key];
+                                    map.flyTo([place.lat, place.lon], 16, {{animate: true, duration: 1.0}});
+                                    hideCustomPanel();
+                                }} 
+                            }}
+                            res.style.display = 'none'; 
+                        }};
+                        res.appendChild(div);
+                    }});
+                }}
+            }} catch(e) {{
+                console.log("Geocoding Error:", e);
+            }}
+
+            if (res.innerHTML === '') {{
+                res.innerHTML = '<div style="padding:16px; color:#9aa0a6; text-align:center; font-size:13.5px;">ไม่พบข้อมูล SCADA หรือสถานที่ที่ค้นหา</div>';
+            }}
+
+        }}, 400);
     }}
 
     inp.addEventListener('keyup', triggerSearch);
