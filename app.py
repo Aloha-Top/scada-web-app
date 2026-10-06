@@ -8,17 +8,9 @@ import time
 import threading
 import os
 import re
-import urllib.request
-import urllib.parse
 from folium.plugins import GroupedLayerControl, MarkerCluster
 
 app = Flask(__name__)
-
-# ==========================================
-# ใส่รหัส Google Maps API Key ของคุณที่นี่
-# (เพื่อเปิดใช้งานระบบค้นหาสถานที่อัจฉริยะของ Google)
-GOOGLE_MAPS_API_KEY = "ใส่_API_KEY_ของคุณที่นี่"
-# ==========================================
 
 # --- ระบบ Cache แบบ File-Based (เสถียรบน Render) ---
 CACHE_HTML_FILE = '/tmp/scada_cache.html'
@@ -192,7 +184,7 @@ def generate_map():
             for d_col in target_detail_cols:
                 val = str(row.get(d_col, '')).strip()
                 if val and val.lower() not in ['nan', 'none', '-', '', 'ไม่มีค่า']:
-                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️\⁉️]', '', val).strip()
+                    clean_val = re.sub(r'[\☑\☒\☐\✔\✘\✓\❌\✅\✖\⚠️\u26A0\uFE0F\❗️\❓\‼️️\⁉️]', '', val).strip()
                     clean_val = re.sub(r'\d{2}\.\d{4,},\s*\d{3}\.\d{4,}', '', clean_val).strip()
                     clean_val = re.sub(r'\s+', ' ', clean_val)
                     if clean_val and clean_val not in details:
@@ -341,9 +333,6 @@ def generate_map():
 
     <style>
     * {{ font-family: 'Prompt', sans-serif; outline: none !important; -webkit-tap-highlight-color: transparent !important; box-sizing: border-box; }}
-    
-    @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-
     .leaflet-top {{ z-index: 999 !important; }}
     .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
@@ -391,6 +380,7 @@ def generate_map():
     .top-action-btn svg {{ fill: none; stroke: #e3e3e3; stroke-width: 2.2; width: 22px; height: 22px; pointer-events: none; }}
     .standalone-report-btn svg {{ stroke: #ffffff; width: 20px; height: 20px; }}
 
+    /* แก้ปัญหา Scrolling Filter */
     .custom-filter-wrapper .leaflet-control-layers-base {{ display: none !important; }}
     .custom-filter-wrapper {{ display: none; flex-direction: column; position: fixed; top: calc(max(20px, env(safe-area-inset-top, 20px)) + 60px); right: 16px; width: 340px; max-height: calc(100dvh - 100px) !important; background-color: #282a2d; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid #444746; overflow-y: auto !important; overflow-x: hidden !important; z-index: 999998 !important; pointer-events: auto; padding: 8px 0 !important; scrollbar-width: thin; scrollbar-color: rgba(154, 160, 166, 0.3) transparent; }}
     .custom-filter-wrapper.show {{ display: flex !important; }}
@@ -507,7 +497,7 @@ def generate_map():
     .g-layer-container {{ position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 16px; z-index: 9999; display: flex; align-items: flex-end; font-family: 'Prompt', sans-serif; pointer-events: none; }}
     .g-layer-main-btn {{ pointer-events: auto; width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.8); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease; }}
     .g-layer-main-btn:hover {{ transform: scale(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }}
-    .g-layer-label {{ absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
+    .g-layer-label {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; text-align: center; padding: 4px 0; font-weight: 500; backdrop-filter: blur(2px); }}
     .g-layer-panel {{ pointer-events: auto; background: rgba(40, 42, 45, 0.95); border-radius: 16px; display: flex; gap: 12px; padding: 0; max-width: 0; overflow: hidden; opacity: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); height: 80px; align-items: center; margin-left: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4); backdrop-filter: blur(8px); }}
     .g-layer-container:hover .g-layer-panel {{ max-width: 500px; padding: 0 20px; opacity: 1; }}
     .g-layer-item {{ display: flex; flex-direction: column; align-items: center; cursor: pointer; gap: 6px; padding: 4px; border-radius: 10px; transition: background-color 0.2s; }}
@@ -583,6 +573,7 @@ def generate_map():
     var statusHashMap = {status_hash_json};
     var sData = {search_json};
     var reportRawData = {report_json_data};
+    var expData = {export_json};
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
@@ -967,12 +958,11 @@ def generate_map():
         }}
     }}, 200); 
 
-    // --- ระบบค้นหา 2 เครื่องยนต์ (SCADA ของเรา + Google Maps API) ---
+    // --- ระบบค้นหา (ทำงานทันทีในเครื่อง เร็วและไม่ใช้เน็ต) ---
     var box = document.getElementById('searchBox');
     var inp = document.getElementById('searchInput');
     var res = document.getElementById('searchResults');
     var clr = document.getElementById('searchClear');
-    var searchTimeout = null;
 
     function handleSearchFocus() {{ 
         box.classList.add('focus'); 
@@ -985,128 +975,54 @@ def generate_map():
     function triggerSearch() {{
         var val = inp.value.toLowerCase().trim();
         clr.style.display = val.length > 0 ? 'block' : 'none';
+        res.innerHTML = '';
+        if (val.length < 1) {{ res.style.display = 'none'; return; }}
         
-        if (val.length < 1) {{ 
-            res.innerHTML = ''; res.style.display = 'none'; 
-            clearTimeout(searchTimeout); return; 
-        }}
-
-        res.style.display = 'block';
-        res.innerHTML = '<div style="padding:16px; color:#9aa0a6; text-align:center; font-size:13px; display:flex; justify-content:center; align-items:center; gap:8px;"><span style="display:inline-block; width:14px; height:14px; border:2px solid #8ab4f8; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>กำลังค้นหา...</div>';
-
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(async function() {{
-            res.innerHTML = ''; 
-            
-            // 1. ค้นหาข้อมูล Local SCADA (โชว์ก่อนเสมอ)
-            var localMatches = sData.filter(function(i) {{ 
-                return i.id.toLowerCase().includes(val) || i.code.toLowerCase().includes(val) || i.name.toLowerCase().includes(val); 
-            }}).slice(0, 6);
-            
-            if (localMatches.length > 0) {{
-                var localHeader = document.createElement('div');
-                localHeader.innerHTML = '<div style="padding: 8px 16px; font-size: 11px; color: #8ab4f8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(138, 180, 248, 0.05); border-bottom: 1px solid #35363a;">📌 อุปกรณ์ SCADA</div>';
-                res.appendChild(localHeader);
-
-                localMatches.forEach(function(m) {{
-                    var div = document.createElement('div'); div.className = 'g-search-item';
-                    div.innerHTML = `<div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px;">
-                                            <span style="color: #e3e3e3; font-size: 14.5px; font-weight: 600; line-height: 1.2;">${{m.id}}</span>
-                                            ${{m.code ? `<span style="color: #8ab4f8; font-size: 11px; font-weight: 500; background: rgba(138, 180, 248, 0.1); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(138, 180, 248, 0.2); flex-shrink: 0; margin-top: 1px;">${{m.code}}</span>` : ''}}
-                                        </div>
-                                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%;">
-                                            <span style="background-color: ${{m.color}}; color: #fff; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 500; line-height: 1.2; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${{m.status}}</span>
-                                            <span style="color: #babbbe; font-size: 11.5px; display: flex; align-items: flex-start; gap: 4px; line-height: 1.3; flex: 1; min-width: 120px;">
-                                                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                                                <span style="word-break: break-word;">${{m.name ? m.name : 'ไม่มีชื่อสถานที่'}}</span>
-                                            </span>
-                                        </div>
-                                     </div>`;
-                                     
-                    div.onclick = function() {{
-                        for (var key in window) {{ 
-                            if (key.startsWith('map_')) {{ 
-                                var map = window[key];
-                                var targetZoom = 18; var isMobile = window.innerWidth <= 768;
-                                var offsetX = isMobile ? 0 : -180; var offsetY = isMobile ? 120 : 0;
-                                var targetPoint = map.project([m.lat, m.lon], targetZoom);
-                                targetPoint.x += offsetX; targetPoint.y += offsetY;
-                                var newCenter = map.unproject(targetPoint, targetZoom);
-                                map.flyTo(newCenter, targetZoom, {{animate: true, duration: 0.8}});
-                                
-                                document.getElementById('customInfoContent').innerHTML = m.popup;
-                                document.getElementById('customInfoPanel').style.display = 'flex';
-                                highlightPin(m.safe_id);
-                            }} 
-                        }}
-                        res.style.display = 'none'; 
-                    }};
-                    res.appendChild(div);
-                }});
-            }}
-
-            // 2. ค้นหาสถานที่ทั่วไปบนโลก (ดึงผ่าน Flask Backend API เพื่อความปลอดภัยและหลีกเลี่ยง CORS)
-            try {{
-                let geoResponse = await fetch(`/api/search-place?q=${{encodeURIComponent(val)}}`);
-                let geoResult = await geoResponse.json();
-
-                let placesData = [];
-                let isGoogle = false;
-
-                if (geoResult.fallback) {{
-                    // Fallback: ถ้ายังไม่มี Google API Key จะใช้ของฟรี (OSM) แทนไปก่อน ไม่ให้ระบบล่ม
-                    let osmResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${{encodeURIComponent(val)}}&countrycodes=th&limit=4`);
-                    let osmData = await osmResponse.json();
-                    if (osmData && osmData.length > 0) {{
-                        placesData = osmData.map(p => {{
-                            let parts = p.display_name.split(',');
-                            return {{ name: parts[0], address: parts.slice(1).join(',').trim(), lat: parseFloat(p.lat), lon: parseFloat(p.lon) }};
-                        }});
+        var matches = sData.filter(function(i) {{ 
+            return i.id.toLowerCase().includes(val) || i.code.toLowerCase().includes(val) || i.name.toLowerCase().includes(val); 
+        }}).slice(0, 8);
+        
+        if (matches.length > 0) {{
+            res.style.display = 'block';
+            matches.forEach(function(m) {{
+                var div = document.createElement('div'); div.className = 'g-search-item';
+                div.innerHTML = `<div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px;">
+                                        <span style="color: #e3e3e3; font-size: 14.5px; font-weight: 600; line-height: 1.2;">${{m.id}}</span>
+                                        ${{m.code ? `<span style="color: #8ab4f8; font-size: 11px; font-weight: 500; background: rgba(138, 180, 248, 0.1); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(138, 180, 248, 0.2); flex-shrink: 0; margin-top: 1px;">${{m.code}}</span>` : ''}}
+                                    </div>
+                                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%;">
+                                        <span style="background-color: ${{m.color}}; color: #fff; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 500; line-height: 1.2; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${{m.status}}</span>
+                                        <span style="color: #babbbe; font-size: 11.5px; display: flex; align-items: flex-start; gap: 4px; line-height: 1.3; flex: 1; min-width: 120px;">
+                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                                            <span style="word-break: break-word;">${{m.name ? m.name : 'ไม่มีชื่อสถานที่'}}</span>
+                                        </span>
+                                    </div>
+                                 </div>`;
+                                 
+                div.onclick = function() {{
+                    for (var key in window) {{ 
+                        if (key.startsWith('map_')) {{ 
+                            var map = window[key];
+                            var targetZoom = 18;
+                            var isMobile = window.innerWidth <= 768;
+                            var offsetX = isMobile ? 0 : -180;
+                            var offsetY = isMobile ? 120 : 0;
+                            var targetPoint = map.project([m.lat, m.lon], targetZoom);
+                            targetPoint.x += offsetX; targetPoint.y += offsetY;
+                            var newCenter = map.unproject(targetPoint, targetZoom);
+                            map.flyTo(newCenter, targetZoom, {{animate: true, duration: 0.8}});
+                            
+                            document.getElementById('customInfoContent').innerHTML = m.popup;
+                            document.getElementById('customInfoPanel').style.display = 'flex';
+                            highlightPin(m.safe_id);
+                        }} 
                     }}
-                }} else {{
-                    isGoogle = true;
-                    placesData = geoResult.results || [];
-                }}
-
-                if (placesData.length > 0) {{
-                    var geoHeader = document.createElement('div');
-                    var borderTop = localMatches.length > 0 ? 'border-top: 1px solid #444746;' : '';
-                    var titleText = isGoogle ? '🌍 สถานที่ทั่วไป (Google Maps)' : '🌍 สถานที่ทั่วไป (ระบบฟรี OSM)';
-                    geoHeader.innerHTML = `<div style="padding: 8px 16px; font-size: 11px; color: #babbbe; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid #35363a; ${{borderTop}}">${{titleText}}</div>`;
-                    res.appendChild(geoHeader);
-
-                    placesData.forEach(function(place) {{
-                        var div = document.createElement('div'); div.className = 'g-search-item';
-                        div.innerHTML = `<div style="display: flex; align-items: center; width: 100%; gap: 12px;">
-                                            <div style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#babbbe"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                                            </div>
-                                            <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
-                                                <span style="color: #e3e3e3; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{place.name}}</span>
-                                                <span style="color: #9aa0a6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{place.address}}</span>
-                                            </div>
-                                         </div>`;
-                        
-                        div.onclick = function() {{
-                            for (var key in window) {{ 
-                                if (key.startsWith('map_')) {{ 
-                                    var map = window[key];
-                                    map.flyTo([place.lat, place.lon], 16, {{animate: true, duration: 1.0}});
-                                    hideCustomPanel();
-                                }} 
-                            }}
-                            res.style.display = 'none'; 
-                        }};
-                        res.appendChild(div);
-                    }});
-                }}
-            }} catch(e) {{ console.log("Geocoding Error:", e); }}
-
-            if (res.innerHTML === '') {{
-                res.innerHTML = '<div style="padding:16px; color:#9aa0a6; text-align:center; font-size:13.5px;">ไม่พบข้อมูล SCADA หรือสถานที่ที่ค้นหา</div>';
-            }}
-        }}, 400);
+                    res.style.display = 'none'; 
+                }};
+                res.appendChild(div);
+            }});
+        }} else {{ res.style.display = 'none'; }}
     }}
 
     inp.addEventListener('keyup', triggerSearch);
@@ -1162,39 +1078,6 @@ def trigger_update_if_needed():
                 open(LOCK_FILE, 'w').close()
                 threading.Thread(target=background_task).start()
             except: pass
-
-# ==========================================
-# Route ใหม่เพื่อเรียกใช้ Google Maps API
-# ==========================================
-@app.route('/api/search-place')
-def search_place():
-    q = request.args.get('q', '')
-    if not q:
-        return jsonify([])
-    
-    # ถ้ายังไม่ได้ใส่ API Key ให้บอก Javascript ไปใช้ระบบฟรีแทน (Fallback)
-    if GOOGLE_MAPS_API_KEY == "ใส่_API_KEY_ของคุณที่นี่" or not GOOGLE_MAPS_API_KEY.strip():
-        return jsonify({"fallback": True})
-        
-    url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query=" + urllib.parse.quote(q) + "&region=th&language=th&key=" + GOOGLE_MAPS_API_KEY
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-            results = []
-            if data.get('status') == 'OK':
-                # ส่งกลับเฉพาะสถานที่ 4 อันดับแรก
-                for item in data.get('results', [])[:4]:
-                    results.append({
-                        'name': item.get('name'),
-                        'address': item.get('formatted_address'),
-                        'lat': item['geometry']['location']['lat'],
-                        'lon': item['geometry']['location']['lng']
-                    })
-            return jsonify({"fallback": False, "results": results})
-    except Exception as e:
-        print("Google API Error:", e)
-        return jsonify({"fallback": True})
 
 @app.route('/map-data')
 def map_data():
