@@ -48,12 +48,12 @@ def get_status_config(status_text):
         return raw_parent, color, icon
     elif status_upper.startswith('ONLINE'):
         raw_parent = "Online"
-        color = "darkgreen" # เปลี่ยนเป็นสีเขียวเข้ม
+        color = "green"
         icon = "history" if 'เคยแก้ไข' in status_upper else "check"
         return raw_parent, color, icon
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
-        color = "brightgreen" # เปลี่ยนเป็นสีเขียวสว่าง
+        color = "lightgreen"
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
@@ -124,8 +124,23 @@ def generate_map():
     folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
-    raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#0A3A0A", "Online"), "Initializing": ("#008000", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
-    hex_color_map = {'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 'darkgreen': '#0A3A0A', 'brightgreen': '#008000', 'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 'beige': '#f5c07f', 'gold': '#ffc107'}
+    # --- อัปเดตสีตามที่คุณผู้ใช้รีเควส ---
+    raw_parent_keys = {
+        "Telemetry Failure": ("#ffc107", "Telemetry Failure"), 
+        "Offline": ("#d33d2a", "Offline"), 
+        "Online": ("#008500", "Online"),             # สีเขียวสด (ตามภาพตัวอย่างใหม่)
+        "Initializing": ("#82c91e", "Initializing"), # สีเขียวอ่อน (ออริจินัลดั้งเดิมก่อนปรับ)
+        "Connecting": ("#f3943b", "Connecting"), 
+        "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")
+    }
+    hex_color_map = {
+        'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 
+        'green': '#008500',       # สี Online ใหม่
+        'lightgreen': '#82c91e',  # สี Initializing ดั้งเดิม
+        'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 
+        'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 
+        'beige': '#f5c07f', 'gold': '#ffc107'
+    }
     display_fields = [("รหัสสั่งการ", ["รหัสสั่งการ"], []), ("สถานที่", ["สถานที่"], []), ("State SCADA", ["state scada"], ["หลัง"]), ("State SCADA (หลังตรวจสอบ)", ["state scada", "หลัง"], []), ("ชนิดอุปกรณ์", ["ชนิดอุปกรณ์"], []), ("รายละเอียดการแก้ไขข้อขัดข้อง", ["รายละเอียด", "การแก้ไข"], ["เข้า"]), ("รายละเอียดการเข้าแก้ไข", ["รายละเอียด", "การเข้าแก้ไข"], []), ("LAT/LONG", ["lat", "long"], []), ("รอ ผอส. เข้าแก้ไข", ["รอ ผอส"], []), ("รอ ผบอ. เข้าแก้ไข", ["รอ ผบอ"], []), ("การไฟฟ้า", ["การไฟฟ้า"], []), ("วันที่เข้าตรวจสอบ", ["วันที่เข้าตรวจสอบ"], [])]
 
     processed_nodes, status_counts, parent_counts = [], {}, {k: 0 for k in raw_parent_keys.keys()}
@@ -399,7 +414,7 @@ def generate_map():
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
-    /* --- จัดลำดับ Z-Index ให้ถูกต้อง (Alert ต้องอยู่เหนือสุดเสมอ) --- */
+    /* --- จัดลำดับ Z-Index ให้ถูกต้อง --- */
     .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 9999990 !important; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
     .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
 
@@ -514,6 +529,7 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
+    <!-- UI ปุ่มเปิด-ปิด -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
