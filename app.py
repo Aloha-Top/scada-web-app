@@ -48,12 +48,12 @@ def get_status_config(status_text):
         return raw_parent, color, icon
     elif status_upper.startswith('ONLINE'):
         raw_parent = "Online"
-        color = "green"
+        color = "darkgreen"  # เปลี่ยนเป็นเขียวเข้ม (Dark Green)
         icon = "history" if 'เคยแก้ไข' in status_upper else "check"
         return raw_parent, color, icon
     elif status_upper.startswith('INITIALIZING'):
         raw_parent = "Initializing"
-        color = "lightgreen"
+        color = "brightgreen"  # เปลี่ยนเป็นเขียวสว่าง (Bright Green)
         if 'เคยแก้ไข' in status_upper: icon = "history"
         elif 'ผบอ.' in status_upper or 'ผอส.' in status_upper: icon = "check"
         else: icon = "wrench"
@@ -124,8 +124,24 @@ def generate_map():
     folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
     folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
 
-    raw_parent_keys = {"Telemetry Failure": ("#ffc107", "Telemetry Failure"), "Offline": ("#d33d2a", "Offline"), "Online": ("#72b026", "Online"), "Initializing": ("#82c91e", "Initializing"), "Connecting": ("#f3943b", "Connecting"), "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")}
-    hex_color_map = {'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 'green': '#72b026', 'lightgreen': '#82c91e', 'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 'beige': '#f5c07f', 'gold': '#ffc107'}
+    # --- อัปเดตโทนสีใหม่ให้ตรงกับภาพ ---
+    raw_parent_keys = {
+        "Telemetry Failure": ("#ffc107", "Telemetry Failure"), 
+        "Offline": ("#d33d2a", "Offline"), 
+        "Online": ("#0A3A0A", "Online"),             # โทนเขียวเข้ม (Dark Green)
+        "Initializing": ("#008000", "Initializing"),  # โทนเขียวสว่าง (Bright Green)
+        "Connecting": ("#f3943b", "Connecting"), 
+        "สถานะอื่นๆ": ("#575757", "สถานะอื่นๆ")
+    }
+    hex_color_map = {
+        'red': '#d33d2a', 'darkred': '#8b0000', 'orange': '#f3943b', 
+        'darkgreen': '#0A3A0A',   # สี Online
+        'brightgreen': '#008000', # สี Initializing
+        'blue': '#38aadd', 'darkblue': '#0067a3', 'purple': '#9b59b6', 
+        'black': '#333333', 'gray': '#575757', 'lightgray': '#a3a3a3', 
+        'beige': '#f5c07f', 'gold': '#ffc107'
+    }
+    
     display_fields = [("รหัสสั่งการ", ["รหัสสั่งการ"], []), ("สถานที่", ["สถานที่"], []), ("State SCADA", ["state scada"], ["หลัง"]), ("State SCADA (หลังตรวจสอบ)", ["state scada", "หลัง"], []), ("ชนิดอุปกรณ์", ["ชนิดอุปกรณ์"], []), ("รายละเอียดการแก้ไขข้อขัดข้อง", ["รายละเอียด", "การแก้ไข"], ["เข้า"]), ("รายละเอียดการเข้าแก้ไข", ["รายละเอียด", "การเข้าแก้ไข"], []), ("LAT/LONG", ["lat", "long"], []), ("รอ ผอส. เข้าแก้ไข", ["รอ ผอส"], []), ("รอ ผบอ. เข้าแก้ไข", ["รอ ผบอ"], []), ("การไฟฟ้า", ["การไฟฟ้า"], []), ("วันที่เข้าตรวจสอบ", ["วันที่เข้าตรวจสอบ"], [])]
 
     processed_nodes, status_counts, parent_counts = [], {}, {k: 0 for k in raw_parent_keys.keys()}
@@ -340,7 +356,9 @@ def generate_map():
     .leaflet-bottom {{ z-index: 998 !important; }}
     .leaflet-top.leaflet-left .leaflet-control-layers {{ display: none !important; }}
     .leaflet-top.leaflet-right .leaflet-control-layers {{ display: none !important; }}
-    .leaflet-popup {{ display: none !important; opacity: 0 !important; pointer-events: none !important; }}
+    
+    /* ซ่อน popup เดิมไม่ให้ Error */
+    .leaflet-popup {{ visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; }}
     
     .leaflet-control-zoom {{ display: none !important; }}
 
@@ -400,18 +418,23 @@ def generate_map():
     .custom-filter-wrapper input[type="checkbox"]:checked {{ background-color: #8ab4f8 !important; border-color: #8ab4f8 !important; }}
     .custom-filter-wrapper input[type="checkbox"]:checked::after {{ content: ''; position: absolute; top: 1px; left: 5px; width: 4px; height: 8px; border: solid #202124; border-width: 0 2px 2px 0; transform: rotate(45deg); }}
 
-    /* แก้ให้ Modal เด้งตรงกลางจอ 100% */
-    .custom-alert-overlay, .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999999; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
-    .custom-alert-overlay.show, .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
-    
-    .custom-alert-box {{ background: #282a2d; width: 90%; max-width: 320px; border-radius: 16px; padding: 24px 20px 20px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; text-align: center; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); margin: auto; position: relative; }}
-    .custom-alert-overlay.show .custom-alert-box {{ transform: scale(1); }}
-    .custom-alert-icon {{ width: 50px; height: 50px; background: rgba(211, 61, 42, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px auto; border: 2px solid rgba(211, 61, 42, 0.4); }}
-    .custom-alert-icon svg {{ width: 24px; height: 24px; fill: #d33d2a; }}
-    .custom-alert-title {{ color: #e3e3e3; font-size: 16px; font-weight: 600; margin-bottom: 8px; }}
-    .custom-alert-msg {{ color: #9aa0a6; font-size: 13.5px; margin-bottom: 24px; line-height: 1.4; }}
-    .custom-alert-btn {{ background: #1a73e8; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }}
-    .custom-alert-btn:hover {{ background: #1557b0; }}
+    /* --- จัดลำดับ Z-Index ใหม่และดีไซน์แจ้งเตือนพรีเมียมขึ้น --- */
+    .report-modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 9999990 !important; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
+    .report-modal-overlay.show {{ display: flex !important; opacity: 1 !important; }}
+
+    .custom-alert-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100dvh; background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); z-index: 10000000 !important; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; pointer-events: auto; }}
+    .custom-alert-overlay.show {{ display: flex !important; opacity: 1 !important; }}
+
+    .custom-alert-box {{ background: #202124; width: 90%; max-width: 340px; border-radius: 20px; padding: 32px 24px 24px 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05); text-align: center; transform: scale(0.95) translateY(10px); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); margin: auto; position: relative; }}
+    .custom-alert-overlay.show .custom-alert-box {{ transform: scale(1) translateY(0); }}
+
+    .custom-alert-icon {{ width: 56px; height: 56px; background: rgba(234, 67, 53, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px auto; border: 4px solid rgba(234, 67, 53, 0.1); }}
+    .custom-alert-icon svg {{ width: 28px; height: 28px; fill: #ea4335; }}
+    .custom-alert-title {{ color: #e8eaed; font-size: 18px; font-weight: 600; margin-bottom: 10px; letter-spacing: 0.3px; }}
+    .custom-alert-msg {{ color: #9aa0a6; font-size: 14px; margin-bottom: 28px; line-height: 1.5; }}
+    .custom-alert-btn {{ background: #1a73e8; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(26, 115, 232, 0.3); }}
+    .custom-alert-btn:hover {{ background: #1557b0; box-shadow: 0 6px 16px rgba(26, 115, 232, 0.4); transform: translateY(-1px); }}
+    .custom-alert-btn:active {{ transform: translateY(1px); box-shadow: 0 2px 8px rgba(26, 115, 232, 0.3); }}
 
     .report-modal {{ background: #282a2d; width: 90%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #444746; transform: translateY(20px); transition: transform 0.3s ease; position: relative; margin: auto; }}
     .report-modal-overlay.show .report-modal {{ transform: translateY(0); }}
@@ -419,9 +442,9 @@ def generate_map():
     
     .date-input-group {{ display: flex; flex-direction: column; gap: 4px; flex: 1; }}
     .date-input-group label {{ color: #babbbe; font-size: 13px; font-weight: 400; }}
-    .date-input {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: none !important; background: transparent !important; background-color: transparent !important; color: #e3e3e3 !important; font-size: 14px; outline: none !important; font-family: 'Prompt', sans-serif; color-scheme: dark; transition: 0.2s; -webkit-appearance: none; box-shadow: inset 0 0 0 1px #5f6368; }}
+    .date-input {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #5f6368 !important; background: #202124 !important; color: #e3e3e3 !important; font-size: 14px; outline: none !important; font-family: 'Prompt', sans-serif; color-scheme: dark; transition: 0.2s; -webkit-appearance: none; }}
     .date-input::placeholder {{ color: #9aa0a6; font-weight: 400; opacity: 1; }}
-    .date-input:focus {{ box-shadow: inset 0 0 0 2px #8ab4f8 !important; }}
+    .date-input:focus {{ border-color: #8ab4f8 !important; box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.2) !important; }}
     .date-flex-container {{ display: flex; gap: 12px; margin-bottom: 8px; }}
     .report-note {{ font-size: 11.5px; color: #9aa0a6; margin-bottom: 20px; text-align: center; }}
     
@@ -510,6 +533,7 @@ def generate_map():
     .g-layer-name {{ font-size: 11px; color: #e8eaed; font-weight: 500; white-space: nowrap; }}
     </style>
 
+    <!-- UI ปุ่มเปิด-ปิด -->
     <div id="standaloneReportBtn" class="top-action-btn standalone-report-btn" title="ดาวน์โหลดรายงาน Excel">
         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
     </div>
@@ -517,20 +541,11 @@ def generate_map():
         <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
     </div>
 
-    <div id="customAlertOverlay" class="custom-alert-overlay">
-        <div class="custom-alert-box">
-            <div class="custom-alert-icon">
-                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-            </div>
-            <div class="custom-alert-title">ไม่พบข้อมูล</div>
-            <div class="custom-alert-msg" id="customAlertMsg">ไม่พบข้อมูลในช่วงวันที่ที่คุณเลือกครับ</div>
-            <button class="custom-alert-btn" onclick="document.getElementById('customAlertOverlay').classList.remove('show');">ตกลง</button>
-        </div>
-    </div>
-
+    <!-- Modal สำหรับเลือก Report Range (ต้องอยู่ก่อน Alert Overlay) -->
     <div id="reportModalOverlay" class="report-modal-overlay">
         <div class="report-modal">
             <h3>ดาวน์โหลดรายงาน</h3>
+            
             <div class="date-flex-container">
                 <div class="date-input-group">
                     <label>จากวันที่ :</label>
@@ -541,13 +556,29 @@ def generate_map():
                     <input type="text" id="reportEndDate" class="date-input" placeholder="วว/ดด/ปปปป (ค.ศ.)" onfocus="(this.type='date')" onblur="if(!this.value) this.type='text'">
                 </div>
             </div>
-            <div class="report-note">*หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด</div>
+            
+            <div class="report-note">
+                *หากไม่ระบุวันที่ ระบบจะดาวน์โหลดข้อมูลทั้งหมด
+            </div>
+
             <div class="report-btn-group">
                 <button class="report-btn report-btn-cancel" onclick="closeReportModal()">ยกเลิก</button>
                 <button id="execReportBtn" class="report-btn report-btn-dl" onclick="generateExcelReport()">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Modal แจ้งเตือนแบบ Custom (อยู่ล่างสุดเพื่อให้อยู่บนสุดของ UI) -->
+    <div id="customAlertOverlay" class="custom-alert-overlay">
+        <div class="custom-alert-box">
+            <div class="custom-alert-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+            </div>
+            <div class="custom-alert-title">แจ้งเตือน</div>
+            <div class="custom-alert-msg" id="customAlertMsg">ไม่พบข้อมูลในช่วงวันที่ที่คุณเลือกครับ</div>
+            <button class="custom-alert-btn" onclick="document.getElementById('customAlertOverlay').classList.remove('show');">ตกลง</button>
         </div>
     </div>
 
@@ -580,12 +611,16 @@ def generate_map():
     var currentHoveredSelector = null;
     window.currentSelectedSafeId = null;
 
+    // --- กดยกเลิก/ปุ่ม ESC ปิดทุก Modal ที่เปิดอยู่ ---
     document.addEventListener('keydown', function(e) {{
         if (e.key === 'Escape' || e.keyCode === 27) {{
             var fw = document.getElementById('customFilterWrapper');
             if (fw && fw.classList.contains('show')) fw.classList.remove('show');
+            
             hideCustomPanel();
             closeReportModal();
+            document.getElementById('customAlertOverlay').classList.remove('show');
+            
             var res = document.getElementById('searchResults');
             if (res) res.style.display = 'none';
         }}
@@ -615,8 +650,23 @@ def generate_map():
     async function generateExcelReport() {{
         var btn = document.getElementById('execReportBtn');
         btn.disabled = true; btn.innerHTML = 'กำลังสร้าง...';
+        
         var startInput = document.getElementById('reportStartDate').value;
         var endInput = document.getElementById('reportEndDate').value;
+        
+        // --- เพิ่มระบบตรวจสอบความถูกต้องของช่วงวันที่ ---
+        if (startInput && endInput) {{
+            var sDateCheck = new Date(startInput);
+            var eDateCheck = new Date(endInput);
+            
+            if (sDateCheck > eDateCheck) {{
+                showCustomAlert("วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุดครับ");
+                btn.disabled = false;
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel';
+                return;
+            }}
+        }}
+
         var filteredData = reportRawData.filter(d => {{
             if (!startInput && !endInput) return true; 
             if (!d.iso_date || d.iso_date === "") return false; 
@@ -629,7 +679,12 @@ def generate_map():
             return dDate >= sDate && dDate <= eDate;
         }});
         
-        if (filteredData.length === 0) {{ showCustomAlert("ไม่พบข้อมูลรายงานในช่วงวันที่ ที่คุณเลือกครับ"); btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel'; return; }}
+        if (filteredData.length === 0) {{ 
+            showCustomAlert("ไม่พบข้อมูลรายงานในช่วงวันที่ ที่คุณเลือกครับ"); 
+            btn.disabled = false; 
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel'; 
+            return; 
+        }}
 
         filteredData.sort(function(a, b) {{
             var sA = a.status.toUpperCase(); var sB = b.status.toUpperCase();
@@ -694,8 +749,13 @@ def generate_map():
         var blob = new Blob([buffer], {{ type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }});
         var link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         var safeFilenameDate = "All_Dates";
-        if (startInput || endInput) {{ safeFilenameDate = (startInput ? startInput : "Start") + "_to_" + (endInput ? endInput : "End"); }}
+        if (startInput || endInput) {{
+            var sName = startInput ? startInput : "Start";
+            var eName = endInput ? endInput : "End";
+            safeFilenameDate = sName + "_to_" + eName;
+        }}
         link.download = 'SCADA_Report_' + safeFilenameDate + '.xlsx';
+        
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> โหลด Excel';
         closeReportModal();
@@ -743,10 +803,18 @@ def generate_map():
     }}
 
     var mapInitInterval = setInterval(function() {{
+        var targetForm = null;
+        var forms = document.querySelectorAll('.leaflet-control-layers form');
+        
+        // หากล่อง Filter ของแท้ (กล่องที่มี Checkbox) เพื่อป้องกันการดึงกล่องแผนที่มาผิด
+        forms.forEach(function(f) {{
+            if (f.querySelectorAll('input[type="checkbox"]').length > 0) {{
+                targetForm = f;
+            }}
+        }});
+        
         var globalMap = null;
         for (var key in window) {{ if (key.startsWith('map_')) {{ globalMap = window[key]; break; }} }}
-        
-        var targetForm = document.querySelector('.leaflet-control-layers form');
 
         if (globalMap && targetForm && document.getElementById('customFilterWrapper')) {{
             clearInterval(mapInitInterval); 
@@ -1011,13 +1079,9 @@ def generate_map():
 
             var score = 0;
             
-            // 1. ตรงเป๊ะๆ (Exact Match)
             if (tId === query || tCode === query) score = 100;
-            // 2. มีคำนี้อยู่เป๊ะๆ (Contains Exact)
             else if (tId.includes(query) || tCode.includes(query) || tName.includes(query)) score = 80;
-            // 3. มีคำนี้อยู่แต่ตัดวรรณยุกต์ (Contains Ignore Tones)
             else if (cleanQuery.length >= 3 && (cId.includes(cleanQuery) || cCode.includes(cleanQuery) || cName.includes(cleanQuery))) score = 60;
-            // 4. พิมพ์ผิด/เกิน 1 ตัว (Fuzzy Match - ทำงานเมื่อพิมพ์เกิน 3 ตัวอักษร)
             else if (query.length >= 4) {{
                 for (var j = 0; j < query.length; j++) {{
                     var mq = query.substring(0, j) + query.substring(j + 1);
@@ -1033,7 +1097,7 @@ def generate_map():
             }}
         }});
 
-        // --- เรียงลำดับจากมากไปน้อย (ความแม่นยำ) ถ้าคะแนนเท่ากัน ให้เรียง ID จากน้อยไปมาก A-Z, 0-9 ---
+        // เรียงลำดับจากน้อยไปมาก
         scoredMatches.sort(function(a, b) {{ 
             if (b.score !== a.score) return b.score - a.score;
             var idA = String(a.item.id || '').toLowerCase();
