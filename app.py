@@ -2534,71 +2534,212 @@ def generate_map():
     }}
     .explorer-search-input:focus {{ border-color: var(--accent-primary); background: var(--bg-surface); }}
 
-    /* === RESPONSIVE MOBILE BREAKPOINTS (แก้ปัญหาดูบนมือถือไม่ครบ 100%) === */
-    @media (max-width: 1180px) {{
-        .dash-kpi-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
-        .dash-grid-2col, .dash-grid-equal {{ grid-template-columns: 1fr; }}
-        .dash-sticky-inner {{ padding-right: 0; }}
-        body.dashboard-mode-active .top-nav-switcher {{ position: static; margin-left: auto; }}
+    /* === RESPONSIVE MULTI-DEVICE BREAKPOINTS (Apple / Google Maps World-Class Layout: Phone, Tablet, Laptop, PC) === */
+    /* 1. Laptop & Medium Desktop (1025px - 1366px) */
+    @media (max-width: 1366px) {{
+        .g-search-container {{
+            width: clamp(240px, 27vw, 340px);
+        }}
+        .dash-kpi-grid {{
+            grid-template-columns: 1.25fr repeat(5, 1fr);
+            gap: 8px;
+        }}
+        .kpi-main-val {{ font-size: 23px; }}
+        .dash-kpi-ava .kpi-main-val {{ font-size: 25px; }}
     }}
 
+    /* 2. Tablet Landscape & Small Laptop (769px - 1180px) */
+    @media (max-width: 1180px) {{
+        .g-search-container {{
+            width: clamp(210px, calc(100vw - 440px), 320px);
+        }}
+        .dash-kpi-grid {{
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }}
+        .dash-grid-2col, .dash-grid-equal {{
+            grid-template-columns: 1fr;
+        }}
+        .dash-sticky-inner {{
+            padding-right: 290px;
+        }}
+        body.dashboard-mode-active .top-nav-switcher {{
+            position: fixed;
+            top: 12px;
+            right: 16px;
+        }}
+    }}
+
+    /* Tablet Portrait (769px - 900px): ซ่อน badge %AVA บนปุ่มสลับหน้าเพื่อประหยัดพื้นที่แถบด้านบน */
+    @media (min-width: 769px) and (max-width: 900px) {{
+        .nav-ava-pill {{ display: none !important; }}
+        .g-search-container {{
+            width: calc(100vw - 360px);
+        }}
+        .dash-sticky-inner {{
+            padding-right: 220px;
+        }}
+    }}
+
+    /* 3. Mobile Phone & Phablet (<= 768px): ใช้เฉพาะ Icon บนแถบสลับหน้า ไม่วางทับปุ่มพิกัดปัจจุบันและประเภทแผนที่ด้านล่าง */
     @media (max-width: 768px) {{
         .g-zoom-container {{ display: none !important; }}
+
+        /* แถบค้นหาด้านซ้ายบน: ขยายเต็มความกว้างอัตโนมัติเมื่อแตะพิมพ์ค้นหา (Google Maps / Apple Maps Style) */
         .g-search-container {{
             top: max(10px, env(safe-area-inset-top, 10px)) !important;
             left: 10px !important;
-            width: calc(100vw - 114px) !important;
+            width: calc(100vw - 238px) !important;
+            transition: width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
         }}
-        .g-search-box {{ height: 42px !important; padding: 0 11px !important; }}
-        input#searchInput.g-search-input {{ font-size: 13px !important; margin-left: 6px !important; }}
+        .g-search-container:focus-within {{
+            width: calc(100vw - 20px) !important;
+            z-index: 100020 !important;
+        }}
+        .g-search-box {{
+            height: 40px !important;
+            padding: 0 10px !important;
+        }}
+        input#searchInput.g-search-input {{
+            font-size: 12.5px !important;
+            margin-left: 6px !important;
+        }}
+
+        /* ปุ่มรายงานและปุ่มตัวกรองมุมขวาบน */
         .top-action-btn {{
             top: max(10px, env(safe-area-inset-top, 10px)) !important;
-            width: 42px !important;
-            height: 42px !important;
+            width: 40px !important;
+            height: 40px !important;
         }}
         .standalone-filter-btn {{ right: 10px !important; }}
-        .standalone-report-btn {{ right: 58px !important; }}
+        .standalone-report-btn {{ right: 54px !important; }}
 
-        /* ในโหมดแผนที่บนมือถือ: วางปุ่มสลับหน้าไว้กึ่งกลางด้านล่างแบบกะทัดรัด ไม่ล้นจอ */
+        /* แถบสลับหน้า แผนที่/แดชบอร์ด + โหมดมืด/สว่าง บนมือถือ: ใช้เฉพาะ Icon (Icon-Only) และวางด้านบน ไม่ให้ทับปุ่มด้านล่าง */
         body:not(.dashboard-mode-active) .top-nav-switcher {{
-            top: auto !important;
-            bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
-            left: 72px !important;
-            right: 10px !important;
-            height: 44px !important;
-            justify-content: space-between !important;
-            padding: 3px 5px !important;
+            position: fixed !important;
+            top: max(10px, env(safe-area-inset-top, 10px)) !important;
+            bottom: auto !important;
+            left: auto !important;
+            right: 98px !important;
+            height: 40px !important;
+            padding: 3px 4px !important;
             gap: 4px !important;
+            z-index: 100008 !important;
         }}
-        /* ในโหมดแดชบอร์ดบนมือถือ: ฝังแถบสลับหน้าไว้ด้านบนสุดใน Header ไม่ลอยทับตารางด้านล่าง */
         body.dashboard-mode-active .top-nav-switcher {{
             position: fixed !important;
-            top: max(8px, env(safe-area-inset-top, 8px)) !important;
-            left: 10px !important;
-            right: 10px !important;
+            top: max(10px, env(safe-area-inset-top, 10px)) !important;
             bottom: auto !important;
-            height: 42px !important;
-            justify-content: space-between !important;
-            padding: 3px 6px !important;
+            left: auto !important;
+            right: 10px !important;
+            height: 40px !important;
+            padding: 3px 4px !important;
+            gap: 4px !important;
             z-index: 100010 !important;
         }}
-        body.dashboard-mode-active .dash-sticky-topbar {{
-            padding: calc(max(8px, env(safe-area-inset-top, 8px)) + 48px) 12px 10px 12px !important;
-            margin-bottom: 10px !important;
-        }}
-        .segmented-control {{ flex: 1; min-width: 0; justify-content: stretch; }}
-        .nav-switch-btn {{
-            flex: 1;
-            justify-content: center;
-            padding: 0 8px !important;
-            font-size: 11.5px !important;
-            height: 30px !important;
-            gap: 4px !important;
-            min-width: 0;
-        }}
-        .nav-ava-pill {{ font-size: 10.5px !important; padding: 1px 5px !important; }}
 
-        .dash-sticky-title {{ font-size: 15px !important; }}
+        /* ซ่อนข้อความในปุ่มสลับหน้าบนมือถือ แสดงเฉพาะไอคอนคมชัดสไตล์ Apple / Google */
+        .top-nav-switcher .nav-switch-btn span,
+        .top-nav-switcher .nav-ava-pill {{
+            display: none !important;
+        }}
+        .segmented-control {{
+            padding: 2px !important;
+            gap: 2px !important;
+        }}
+        .nav-switch-btn {{
+            width: 34px !important;
+            height: 30px !important;
+            padding: 0 !important;
+            justify-content: center !important;
+            border-radius: 999px !important;
+        }}
+        .nav-switch-btn svg {{
+            width: 16px !important;
+            height: 16px !important;
+        }}
+        .apple-theme-switch {{
+            width: 46px !important;
+            height: 26px !important;
+            padding: 2px !important;
+        }}
+        .apple-switch-track-icon {{
+            width: 20px !important;
+            height: 20px !important;
+        }}
+        .apple-switch-track-icon svg {{
+            width: 11.5px !important;
+            height: 11.5px !important;
+        }}
+        .apple-switch-thumb {{
+            width: 20px !important;
+            height: 20px !important;
+        }}
+        body.theme-dark .apple-switch-thumb {{
+            transform: translateX(20px) !important;
+        }}
+        .apple-switch-thumb svg {{
+            width: 11.5px !important;
+            height: 11.5px !important;
+        }}
+
+        /* พื้นที่ด้านล่างแผนที่โล่ง 100%: ปุ่มเลือกประเภทแผนที่ (ซ้ายล่าง) และปุ่มพิกัดปัจจุบัน (ขวาล่าง) กดได้ทันทีไม่โดนทับ */
+        .g-layer-container {{
+            bottom: calc(18px + env(safe-area-inset-bottom, 0px)) !important;
+            left: 10px !important;
+            z-index: 100002 !important;
+        }}
+        .g-layer-main-btn {{
+            width: 48px !important;
+            height: 48px !important;
+            border-radius: 12px !important;
+        }}
+        .g-layer-panel {{
+            height: 68px !important;
+            margin-left: 8px !important;
+            gap: 6px !important;
+        }}
+        .g-layer-panel.show {{
+            max-width: calc(100vw - 128px) !important;
+            padding: 0 10px !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }}
+        .g-layer-item {{
+            flex: 0 0 auto !important;
+            padding: 3px !important;
+        }}
+        .g-layer-thumb {{
+            width: 36px !important;
+            height: 36px !important;
+        }}
+        .custom-right-controls {{
+            margin-right: 10px !important;
+            margin-bottom: calc(18px + env(safe-area-inset-bottom, 0px)) !important;
+            z-index: 100002 !important;
+        }}
+        .g-locate-btn {{
+            width: 44px !important;
+            height: 44px !important;
+            border-radius: 12px !important;
+        }}
+
+        /* Header หน้าแดชบอร์ดบนมือถือ: เว้นที่ด้านขวาให้ปุ่มสลับหน้าแบบ Icon-Only อยู่บรรทัดเดียวกันอย่างสวยงาม */
+        body.dashboard-mode-active .dash-sticky-topbar {{
+            padding: max(10px, env(safe-area-inset-top, 10px)) 142px 10px 12px !important;
+            margin-bottom: 10px !important;
+            min-height: 58px !important;
+            display: flex !important;
+            align-items: center !important;
+        }}
+        .dash-sticky-inner {{
+            padding-right: 0 !important;
+            width: 100% !important;
+        }}
+        .dash-sticky-title {{
+            font-size: 14.5px !important;
+            line-height: 1.3 !important;
+        }}
         .dash-container {{ padding: 0 10px !important; gap: 10px !important; }}
         .dash-toolbar-card {{ padding: 10px 12px !important; }}
         .dash-controls-bar {{ width: 100% !important; }}
@@ -2623,23 +2764,54 @@ def generate_map():
         .dash-table th, .dash-table td {{ padding: 7px 6px !important; font-size: 11.5px !important; }}
         .ava-badge {{ padding: 2px 6px !important; font-size: 11px !important; }}
 
-        .custom-filter-wrapper {{ top: calc(max(10px, env(safe-area-inset-top, 10px)) + 48px) !important; right: 10px !important; left: 10px !important; width: auto !important; max-height: calc(100dvh - 120px) !important; }}
-        .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 60vh !important; border-radius: 18px 18px 0 0 !important; padding-bottom: env(safe-area-inset-bottom, 0px); }}
+        .custom-filter-wrapper {{ top: calc(max(10px, env(safe-area-inset-top, 10px)) + 46px) !important; right: 10px !important; left: 10px !important; width: auto !important; max-height: calc(100dvh - 110px) !important; }}
+        .custom-info-panel {{ top: auto !important; bottom: 0 !important; left: 0 !important; width: 100vw !important; max-width: 100vw !important; max-height: 60vh !important; border-radius: 18px 18px 0 0 !important; padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 100015 !important; }}
         .popup-body {{ max-height: calc(60vh - 120px - env(safe-area-inset-bottom, 0px)) !important; }}
         .date-flex-container {{ flex-direction: column; }}
         .adv-grid-row {{ grid-template-columns: 1fr; }}
         .report-modal {{ padding: 16px; width: calc(100vw - 16px); }}
+    }}
+
+    /* 4. จอโทรศัพท์ขนาดเล็กมาก (<= 390px เช่น iPhone SE / Mini) */
+    @media (max-width: 390px) {{
+        .g-search-container {{
+            width: calc(100vw - 226px) !important;
+        }}
+        .top-action-btn {{
+            width: 38px !important;
+            height: 38px !important;
+        }}
+        .standalone-report-btn {{ right: 50px !important; }}
+        body:not(.dashboard-mode-active) .top-nav-switcher {{
+            right: 92px !important;
+            height: 38px !important;
+        }}
+        .nav-switch-btn {{
+            width: 31px !important;
+            height: 28px !important;
+        }}
+        .apple-theme-switch {{
+            width: 42px !important;
+            height: 24px !important;
+        }}
+        .apple-switch-thumb {{
+            width: 18px !important;
+            height: 18px !important;
+        }}
+        body.theme-dark .apple-switch-thumb {{
+            transform: translateX(18px) !important;
+        }}
     }}
     </style>
 
     <!-- แถบสลับหน้า แผนที่ (Maps) <-> แดชบอร์ด (%AVA) แบบ Segmented Control + สวิตช์โหมดมืด/สว่างสไตล์ Apple -->
     <div class="top-nav-switcher" id="topNavSwitcher">
         <div class="segmented-control" role="tablist" aria-label="สลับมุมมองหลัก">
-            <button type="button" class="nav-switch-btn is-active" id="navBtnMap" onclick="window.switchMainView('map'); return false;">
+            <button type="button" class="nav-switch-btn is-active" id="navBtnMap" title="แผนที่ (Map View)" aria-label="แผนที่" onclick="window.switchMainView('map'); return false;">
                 <svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
                 <span>แผนที่</span>
             </button>
-            <button type="button" class="nav-switch-btn" id="navBtnDash" onclick="window.switchMainView('dashboard'); return false;">
+            <button type="button" class="nav-switch-btn" id="navBtnDash" title="แดชบอร์ด (%AVA Dashboard)" aria-label="แดชบอร์ด %AVA" onclick="window.switchMainView('dashboard'); return false;">
                 <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
                 <span>แดชบอร์ด</span>
                 <span class="nav-ava-pill" id="navAvaBadge">--%</span>
