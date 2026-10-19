@@ -1,4 +1,11 @@
-from flask import Flask, jsonify, request, render_template_string
+try:
+    from flask import Flask, jsonify, request, render_template_string, send_file
+except ImportError:
+    Flask = None
+    jsonify = None
+    request = None
+    render_template_string = None
+    send_file = None
 import sys
 import io
 import sqlite3
@@ -207,7 +214,17 @@ if hasattr(sys.stdout, 'reconfigure'):
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-app = Flask(__name__)
+class _FallbackFlask:
+    def __init__(self, name):
+        self.name = name
+    def route(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
+    def run(self, *args, **kwargs):
+        pass
+
+app = Flask(__name__) if Flask is not None else _FallbackFlask(__name__)
 status_hash_map = {}
 
 # --- 1. ตั้งค่าโปรเจกต์พื้นฐาน (Configuration) ---
@@ -762,10 +779,10 @@ def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str="")
     txt = str(raw_detail or "").strip()
     if not txt or txt == "-":
         return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)"
-    lines = [ln.strip() for ln in re.split(r"[\n\\r]+|,\\s*(?=[❌✅•\\-])", txt) if ln.strip()]
+    lines = [ln.strip() for ln in re.split(r"[\n\r]+|,\s*(?=[❌✅•\-])", txt) if ln.strip()]
     comm_items, frtu_items, action_items = [], [], []
     for ln in lines:
-        clean_ln = re.sub(r"^[•\\-\\s]+", "", ln).strip()
+        clean_ln = re.sub(r"^[•\-\s]+", "", ln).strip()
         if not clean_ln:
             continue
         u = clean_ln.upper()
@@ -3692,6 +3709,87 @@ def generate_map():
         transform: translateY(0) !important;
     }}
 
+    /* Sentence Manager & Editor Panel before Export */
+    .sentence-manager-box {{
+        display: none;
+        margin: 0 0 12px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        box-shadow: var(--shadow-card);
+    }}
+    .sentence-manager-box.show {{
+        display: block;
+    }}
+    .sentence-mgr-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-subtle);
+    }}
+    .sentence-mgr-title {{
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }}
+    .sentence-mgr-list {{
+        max-height: 260px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 4px;
+    }}
+    .sentence-mgr-item {{
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }}
+    .sentence-mgr-item-top {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--accent-primary);
+    }}
+    .sentence-mgr-orig {{
+        font-size: 11px;
+        color: var(--text-secondary);
+        background: var(--bg-surface);
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px dashed var(--border-hairline);
+    }}
+    .sentence-mgr-textarea {{
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--border-hairline);
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 12px;
+        color: var(--text-primary);
+        background: var(--bg-surface);
+        resize: vertical;
+        line-height: 1.4;
+    }}
+    .sentence-mgr-textarea:focus {{
+        border-color: var(--accent-primary);
+    }}
+
     /* AI Executive Summary Preview Box in Modal */
     .ai-summary-preview-box {{
         display: none;
@@ -4312,14 +4410,14 @@ def generate_map():
                 <div class="gemini-grid-row">
                     <div class="gemini-field">
                         <label for="geminiModelSelect">
-                            <span>เลือกโมเดลสรุปรายงาน (Model Selector)</span>
+                            <span>เลือกโมเดล AI (สำหรับจัดการประโยคก่อน Export)</span>
                             <span id="geminiSelectedQuotaText" style="color:var(--accent-primary);font-weight:600;">โควต้าพร้อมใช้งาน</span>
                         </label>
                         <select id="geminiModelSelect" class="gemini-select" onchange="onGeminiModelChange()">
-                            <option value="auto_fallback" selected>🔄 Auto Fallback (เลือกโมเดลที่ว่างอัตโนมัติ)</option>
-                            <option value="gemini-3.5-flash-lite">⚡ gemini-3.5-flash-lite (โมเดลหลัก - 500 RPD)</option>
-                            <option value="gemini-3.1-flash-lite">🛡️ gemini-3.1-flash-lite (โมเดลสำรอง 1 - 500 RPD)</option>
-                            <option value="gemini-3.8-flash">🧠 gemini-3.8-flash (โมเดลสำรอง 2 - วิเคราะห์เชิงลึก 20 RPD)</option>
+                            <option value="gemini-3.5-flash-lite" selected>⚡ Gemini 3.5 Flash Lite (gemini-3.5-flash-lite · โมเดลหลัก 500 RPD)</option>
+                            <option value="auto_fallback">🔄 Auto Fallback (สลับโมเดลสำรองอัตโนมัติเมื่อติดลิมิต)</option>
+                            <option value="gemini-3.1-flash-lite">🛡️ Gemini 3.1 Flash Lite (gemini-3.1-flash-lite · โมเดลสำรอง 1 · 500 RPD)</option>
+                            <option value="gemini-3.8-flash">🧠 Gemini 3.8 Flash (gemini-3.8-flash · โมเดลสำรอง 2 · วิเคราะห์เชิงลึก 20 RPD)</option>
                         </select>
                     </div>
 
@@ -4338,8 +4436,11 @@ def generate_map():
                         <span>ให้ Gemini AI เกลารายละเอียดรายแถว + สร้าง Sheet สรุปภาพรวมแยกหมวดหมู่</span>
                     </label>
                     <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                            ✨ พรีวิวผลสรุป AI
+                        <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                            📝 จัดการประโยครายแถวก่อน Export
+                        </button>
+                        <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="background:var(--bg-active);border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                            ✨ ให้ AI เกลาประโยค & พรีวิวสรุป
                         </button>
                         <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rate_limit_429')" title="จำลอง Error 429 (ล็อก 60 วินาที)">
                             ทดสอบ 429 (60s)
@@ -4355,6 +4456,21 @@ def generate_map():
 
                 <div class="gemini-model-status-bar" id="geminiModelStatusBar"></div>
             </section>
+
+            <!-- หน้าต่างจัดการและแก้ไขประโยครายแถวก่อนกดปุ่ม Export -->
+            <div id="sentenceManagerBox" class="sentence-manager-box">
+                <div class="sentence-mgr-header">
+                    <span class="sentence-mgr-title">
+                        📝 หน้าต่างจัดการประโยครายละเอียดการตรวจสอบ (แก้ไข/ตรวจสอบก่อนกด Export)
+                    </span>
+                    <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">[หมวดหมู่] จัดระเบียบทุกแถว</button>
+                        <button type="button" class="report-mini-btn" onclick="resetCustomRowSentences()" title="คืนค่าข้อความต้นฉบับ">↺ คืนค่าต้นฉบับ</button>
+                        <button type="button" class="report-mini-btn" onclick="document.getElementById('sentenceManagerBox').classList.remove('show')">ซ่อนหน้าต่าง</button>
+                    </div>
+                </div>
+                <div id="sentenceManagerList" class="sentence-mgr-list"></div>
+            </div>
 
             <!-- กล่องพรีวิวผลสรุปภาพรวมจาก Gemini API ก่อนกดดาวน์โหลด -->
             <div id="aiSummaryPreviewBox" class="ai-summary-preview-box">
@@ -4834,6 +4950,7 @@ def generate_map():
         if (container) container.classList.toggle('is-open', isShowing);
         btn.setAttribute('aria-expanded', isShowing ? 'true' : 'false');
         updateAdvExpandBadge();
+        if (typeof renderSentenceManagerList === "function") renderSentenceManagerList();
     }}
 
     function updateAdvExpandBadge() {{
@@ -5272,6 +5389,88 @@ def generate_map():
     var GEMINI_FALLBACK_LIST = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
     var cachedAiSummaryResult = null;
     var cachedAiFilterSignature = "";
+    var customRowSentences = Object.create(null);
+
+    function getRowSentenceKey(row) {{
+        return String(row.seq !== undefined ? row.seq : "") + "_" + String(row.site || "") + "_" + String(row.iso_date || "");
+    }}
+
+    function getEffectiveRowSentence(row) {{
+        var k = getRowSentenceKey(row);
+        if (customRowSentences[k] !== undefined) return customRowSentences[k];
+        if (row.ai_detail) return row.ai_detail;
+        return categorizeRowDetailJS(row.detail);
+    }}
+
+    function renderSentenceManagerList() {{
+        var box = document.getElementById("sentenceManagerBox");
+        var listEl = document.getElementById("sentenceManagerList");
+        if (!box || !listEl || !box.classList.contains("show")) return;
+
+        var filteredResult = getFilteredReportResult();
+        var rows = filteredResult.rows || [];
+        listEl.innerHTML = "";
+
+        if (rows.length === 0) {{
+            listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-secondary);font-size:12px;">ไม่พบรายการตามตัวกรองที่เลือก</div>';
+            return;
+        }}
+
+        var maxShow = Math.min(rows.length, 100);
+        rows.slice(0, maxShow).forEach(function(r, idx) {{
+            var rKey = getRowSentenceKey(r);
+            var currentVal = getEffectiveRowSentence(r);
+            var itemDiv = document.createElement("div");
+            itemDiv.className = "sentence-mgr-item";
+
+            var topDiv = document.createElement("div");
+            topDiv.className = "sentence-mgr-item-top";
+            topDiv.innerHTML = '<span>#' + (idx + 1) + ' · ' + (r.site || '-') + ' (' + (r.loc || '-') + ')</span>' +
+                               '<span style="color:var(--text-secondary);font-weight:500;">สถานะ: ' + (r.status || '-') + '</span>';
+
+            var origDiv = document.createElement("div");
+            origDiv.className = "sentence-mgr-orig";
+            origDiv.textContent = "ต้นฉบับ: " + (r.detail || "-");
+
+            var ta = document.createElement("textarea");
+            ta.className = "sentence-mgr-textarea";
+            ta.value = currentVal;
+            ta.setAttribute("data-row-key", rKey);
+            ta.addEventListener("input", function() {{
+                customRowSentences[this.getAttribute("data-row-key")] = this.value;
+            }});
+
+            itemDiv.appendChild(topDiv);
+            itemDiv.appendChild(origDiv);
+            itemDiv.appendChild(ta);
+            listEl.appendChild(itemDiv);
+        }});
+    }}
+
+    function toggleSentenceManagerBox() {{
+        var box = document.getElementById("sentenceManagerBox");
+        if (!box) return;
+        var isShowing = box.classList.toggle("show");
+        if (isShowing) renderSentenceManagerList();
+    }}
+
+    function applySmartCategorizeToAllRows() {{
+        var filteredResult = getFilteredReportResult();
+        (filteredResult.rows || []).forEach(function(r) {{
+            var k = getRowSentenceKey(r);
+            customRowSentences[k] = categorizeRowDetailJS(r.detail);
+        }});
+        renderSentenceManagerList();
+    }}
+
+    function resetCustomRowSentences() {{
+        var filteredResult = getFilteredReportResult();
+        (filteredResult.rows || []).forEach(function(r) {{
+            var k = getRowSentenceKey(r);
+            customRowSentences[k] = String(r.detail || "-");
+        }});
+        renderSentenceManagerList();
+    }}
 
     function getNextUtcMidnightMs() {{
         var now = new Date();
@@ -5573,10 +5772,10 @@ def generate_map():
     function categorizeRowDetailJS(rawDetail) {{
         var txt = String(rawDetail || "").trim();
         if (!txt || txt === "-") return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)";
-        var lines = txt.split(/[\n\r]+|,\s*(?=[❌✅•\-])/).map(function(s) {{ return s.trim(); }}).filter(Boolean);
+        var lines = txt.split(/[\\n\\r]+|,\\s*(?=[❌✅•\\-])/).map(function(s) {{ return s.trim(); }}).filter(Boolean);
         var comm = [], frtu = [], act = [];
         lines.forEach(function(ln) {{
-            var clean = ln.replace(/^[•\-\s]+/, "").trim();
+            var clean = ln.replace(/^[•\\-\\s]+/, "").trim();
             if (!clean) return;
             var u = clean.toUpperCase();
             if (/สื่อสาร|MODEM|SIM|3G|4G|OPTIC|FIBER|WRL|PING|สัญญาณ|ONLINE|สายอากาศ/.test(u)) comm.push(clean);
@@ -5587,7 +5786,7 @@ def generate_map():
         if (comm.length) out.push("[ระบบสื่อสาร] " + comm.join("; "));
         if (frtu.length) out.push("[อุปกรณ์ FRTU/ชุดควบคุม] " + frtu.join("; "));
         if (act.length) out.push("[ผลการตรวจสอบ/แก้ไข] " + act.join("; "));
-        return out.length ? out.join("\n") : txt;
+        return out.length ? out.join("\\n") : txt;
     }}
 
     function buildDeterministicSummaryJS(rows) {{
@@ -5614,19 +5813,19 @@ def generate_map():
         var otherCnt = Math.max(0, total - onlineCnt - connCnt - offCnt);
 
         var md =
-            "สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด " + total + " รายการ)\n\n" +
-            "1. ภาพรวมสถานะหลังดำเนินการ\n" +
-            "• ตรวจสอบและแก้ไขรวมทั้งสิ้น: " + total + " รายการ\n" +
-            "• อุปกรณ์กลับมา Online ปกติ: " + onlineCnt + " ชุด (" + (total ? (onlineCnt/total*100).toFixed(1) : "0.0") + "%)\n" +
-            "• สถานะ Connecting (รอจูนสัญญาณ/ตรวจสอบร่วม): " + connCnt + " ชุด\n" +
-            "• สถานะ Offline (ยังไม่ออนไลน์): " + offCnt + " ชุด\n\n" +
-            "2. การจำแนกตามหมวดหมู่สาเหตุและอาการชำรุด\n" +
-            "• หมวดระบบสื่อสารและซิมการ์ด (ผอส.กสฟ.ฉ.2): พบเกี่ยวข้อง " + commIssues + " รายการ\n" +
-            "• หมวดอุปกรณ์ชุดควบคุม FRTU (ผบอ.กบษ.ฉ.2): พบเกี่ยวข้อง " + frtuIssues + " รายการ\n" +
-            "• หมวดระบบแหล่งจ่ายไฟและแบตเตอรี่ (AC/DC/Fuse): พบเกี่ยวข้อง " + powerIssues + " รายการ\n\n" +
-            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบดำเนินการต่อ\n" +
-            "• รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข: " + boCnt + " รายการ\n" +
-            "• รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข: " + poCnt + " รายการ\n" +
+            "สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด " + total + " รายการ)\\n\\n" +
+            "1. ภาพรวมสถานะหลังดำเนินการ\\n" +
+            "• ตรวจสอบและแก้ไขรวมทั้งสิ้น: " + total + " รายการ\\n" +
+            "• อุปกรณ์กลับมา Online ปกติ: " + onlineCnt + " ชุด (" + (total ? (onlineCnt/total*100).toFixed(1) : "0.0") + "%)\\n" +
+            "• สถานะ Connecting (รอจูนสัญญาณ/ตรวจสอบร่วม): " + connCnt + " ชุด\\n" +
+            "• สถานะ Offline (ยังไม่ออนไลน์): " + offCnt + " ชุด\\n\\n" +
+            "2. การจำแนกตามหมวดหมู่สาเหตุและอาการชำรุด\\n" +
+            "• หมวดระบบสื่อสารและซิมการ์ด (ผอส.กสฟ.ฉ.2): พบเกี่ยวข้อง " + commIssues + " รายการ\\n" +
+            "• หมวดอุปกรณ์ชุดควบคุม FRTU (ผบอ.กบษ.ฉ.2): พบเกี่ยวข้อง " + frtuIssues + " รายการ\\n" +
+            "• หมวดระบบแหล่งจ่ายไฟและแบตเตอรี่ (AC/DC/Fuse): พบเกี่ยวข้อง " + powerIssues + " รายการ\\n\\n" +
+            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบดำเนินการต่อ\\n" +
+            "• รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข: " + boCnt + " รายการ\\n" +
+            "• รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข: " + poCnt + " รายการ\\n" +
             "• ดำเนินการแก้ไขเสร็จสิ้นเรียบร้อย (-): " + doneCnt + " รายการ";
 
         return {{
@@ -5721,7 +5920,7 @@ def generate_map():
                         break;
                     }}
                     var data = await resp.json();
-                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\n").trim();
+                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\\n").trim();
                     if (textOut) {{
                         incrementLocalModelRpd(logicalModel);
                         return {{ text: textOut, used_model: logicalModel, sdk_model: sdkId }};
@@ -5785,16 +5984,16 @@ def generate_map():
             var ch = chunks[cIdx];
             var linesStr = ch.map(function(r, idx) {{
                 return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะ: " + r.status;
-            }}).join("\n");
+            }}).join("\\n");
 
             var prompt =
-                "คุณคือวิศวกรระบบ SCADA โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นหมวดหมู่ชัดเจน\n" +
-                "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"...\"}}],\"chunk_summary\":\"...\"}}\n\n" +
+                "คุณคือวิศวกรระบบ SCADA โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นหมวดหมู่ชัดเจน\\n" +
+                "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"...\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
                 linesStr;
             try {{
                 var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, apiKey);
                 usedModelName = aiRes.used_model;
-                var mJson = aiRes.text.match(/\{{[\s\S]*\}}/);
+                var mJson = aiRes.text.match(/\\{{[\\s\\S]*\\}}/);
                 if (mJson) {{
                     var parsed = JSON.parse(mJson[0]);
                     (parsed.rows || []).forEach(function(item) {{
@@ -5815,8 +6014,8 @@ def generate_map():
         if (chunkSummaries.length > 0 && !warningMsg) {{
             try {{
                 var synthPrompt =
-                    "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) แยกตามหมวดหมู่ชัดเจน สวยงาม อ่านง่าย จากข้อมูลสรุปย่อยต่อไปนี้:\n- " +
-                    chunkSummaries.join("\n- ");
+                    "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) แยกตามหมวดหมู่ชัดเจน สวยงาม อ่านง่าย จากข้อมูลสรุปย่อยต่อไปนี้:\\n- " +
+                    chunkSummaries.join("\\n- ");
                 var synthRes = await callDirectGeminiRestFromBrowser(synthPrompt, preferredModel, apiKey);
                 if (synthRes.text) finalSummaryMd = synthRes.text;
                 usedModelName = synthRes.used_model;
@@ -5864,11 +6063,23 @@ def generate_map():
         try {{
             var aiRes = await summarizeInspectionRowsWithGeminiJS(filteredResult.rows);
             cachedAiSummaryResult = aiRes;
+            if (aiRes && aiRes.rows) {{
+                aiRes.rows.forEach(function(ar) {{
+                    var k = getRowSentenceKey(ar);
+                    if (ar.ai_detail || ar.detail) {{
+                        customRowSentences[k] = ar.ai_detail || ar.detail;
+                    }}
+                }});
+                var smBox = document.getElementById("sentenceManagerBox");
+                if (smBox && smBox.classList.contains("show")) {{
+                    renderSentenceManagerList();
+                }}
+            }}
             if (previewTitle) {{
                 previewTitle.textContent = "✨ รายงานสรุปภาพรวมแยกหมวดหมู่ (โมเดล: " + (aiRes.used_model || "Auto") + " · " + (aiRes.chunk_count || 1) + " Chunks)";
             }}
             if (previewContent) {{
-                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\n\n") : "";
+                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\\n\\n") : "";
                 previewContent.textContent = note + (aiRes.summary_markdown || "");
             }}
         }} catch (err) {{
@@ -5981,8 +6192,8 @@ def generate_map():
         ws.getRow(1).height = 30;
 
         var headers = includeWorkerCol
-            ? ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
-            : ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
+            ? ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
+            : ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
 
         var headerRow = ws.addRow(headers);
         headerRow.height = 36;
@@ -5997,9 +6208,10 @@ def generate_map():
         var currentStatus = filteredData[0].status;
 
         filteredData.forEach(function(row, i) {{
-            var cleanDetailText = row.ai_detail || row.detail || '-';
+            var rKey = getRowSentenceKey(row);
+        var cleanDetailText = (customRowSentences[rKey] !== undefined) ? customRowSentences[rKey] : (row.ai_detail || row.detail || '-');
             var rowValues = includeWorkerCol
-                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\n') || '-', row.status ]
+                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\\n') || '-', row.status ]
                 : [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, row.status ];
 
             var dataRow = ws.addRow(rowValues);
@@ -6086,7 +6298,7 @@ def generate_map():
 
         var cats = (aiSummaryData && aiSummaryData.categories) ? aiSummaryData.categories : [];
         cats.forEach(function(catObj, cIdx) {{
-            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\n");
+            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\\n");
             var rRow = wsAi.addRow([
                 cIdx + 1,
                 catObj.category || "-",
@@ -6119,7 +6331,7 @@ def generate_map():
         sbCell.font = {{ name: 'TH SarabunPSK', size: 16 }};
         sbCell.alignment = {{ vertical: 'top', horizontal: 'left', wrapText: true }};
         sbCell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
-        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\n').length * 20));
+        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\\n').length * 20));
 
         wsAi.getColumn(1).width = 12;
         wsAi.getColumn(2).width = 36;
@@ -7835,6 +8047,211 @@ def api_gemini_summarize():
             "error": str(exc),
             "session_state": sync_and_get_session_state(),
         }), 429
+
+@app.route('/api/export', methods=['POST'])
+@app.route('/api/export-report', methods=['POST'])
+def api_export_report():
+    """
+    ฟังก์ชันจัดการ Export API ฝั่ง Backend ของ Flask:
+    รับรายการข้อมูล (rows), โมเดล AI ที่เลือก (เช่น gemini-3.5-flash-lite), และตัวเลือกการแสดงคอลัมน์
+    ประมวลผลสรุปประโยคด้วย AI (หากเปิดใช้งาน) และสร้างไฟล์ Excel (.xlsx) ขนาดมาตรฐาน A4 ส่งกลับให้ดาวน์โหลดทันที
+    """
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get("rows") or []
+    preferred_model = payload.get("model") or "gemini-3.5-flash-lite"
+    use_ai = bool(payload.get("use_ai", True))
+    include_worker_col = bool(payload.get("include_worker_col", False))
+    response_format = payload.get("format", "xlsx")
+    custom_api_key = str(payload.get("api_key") or "").strip() or DEFAULT_GEMINI_API_KEY
+
+    if not rows:
+        return jsonify({
+            "success": False,
+            "error": "ไม่พบรายการข้อมูลสำหรับส่งออกรายงาน",
+            "session_state": sync_and_get_session_state(),
+        }), 400
+
+    if use_ai:
+        try:
+            ai_result = summarize_inspection_report_with_gemini(
+                rows=rows,
+                preferred_model=preferred_model,
+                api_key=custom_api_key,
+            )
+        except Exception as exc:
+            base_exec = _build_deterministic_executive_summary(rows)
+            rewritten = [dict(r) for r in rows]
+            for r in rewritten:
+                r["ai_detail"] = _deterministic_categorize_row_detail(r.get("detail", ""), r.get("resp", ""), r.get("status", ""))
+                r["detail"] = r["ai_detail"]
+            ai_result = {
+                "success": False,
+                "warning": str(exc),
+                "used_model": preferred_model,
+                "chunk_count": 1,
+                "rows": rewritten,
+                "summary_markdown": base_exec["summary_markdown"],
+                "categories": base_exec["categories"],
+                "metrics": base_exec["metrics"],
+                "session_state": sync_and_get_session_state(),
+            }
+    else:
+        base_exec = _build_deterministic_executive_summary(rows)
+        rewritten = [dict(r) for r in rows]
+        for r in rewritten:
+            r["ai_detail"] = r.get("ai_detail") or _deterministic_categorize_row_detail(r.get("detail", ""), r.get("resp", ""), r.get("status", ""))
+        ai_result = {
+            "success": True,
+            "warning": "",
+            "used_model": preferred_model,
+            "chunk_count": 1,
+            "rows": rewritten,
+            "summary_markdown": base_exec["summary_markdown"],
+            "categories": base_exec["categories"],
+            "metrics": base_exec["metrics"],
+            "session_state": sync_and_get_session_state(),
+        }
+
+    if response_format == "json":
+        return jsonify(ai_result)
+
+    # สร้างไฟล์ Excel (.xlsx) ขนาดมาตรฐาน A4 แนวนอน ด้วย openpyxl
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Report"
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+
+        thin_side = Side(style='thin', color='000000')
+        cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        header_fill = PatternFill(start_color='F1F3F4', end_color='F1F3F4', fill_type='solid')
+
+        headers = (
+            ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
+            if include_worker_col else
+            ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ']
+        )
+        last_col_letter = get_column_letter(len(headers))
+        ws.merge_cells(f"A1:{last_col_letter}1")
+        ws["A1"] = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine (เรียบเรียงด้วย Gemini AI)"
+        ws["A1"].font = Font(name="TH SarabunPSK", size=20, bold=True)
+        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 30
+
+        ws.append(headers)
+        ws.row_dimensions[2].height = 36
+        for col_idx in range(1, len(headers) + 1):
+            c = ws.cell(row=2, column=col_idx)
+            c.font = Font(name="TH SarabunPSK", size=16, bold=True)
+            c.fill = header_fill
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = cell_border
+
+        final_rows = ai_result.get("rows") or rows
+        for idx, r in enumerate(final_rows, start=1):
+            detail_val = r.get("ai_detail") or r.get("detail") or "-"
+            row_vals = (
+                [idx, r.get("cmd", "-"), r.get("site", "-"), r.get("loc", "-"), detail_val, r.get("resp", "-"), r.get("workers", "-"), r.get("status", "-")]
+                if include_worker_col else
+                [idx, r.get("cmd", "-"), r.get("site", "-"), r.get("loc", "-"), detail_val, r.get("resp", "-"), r.get("status", "-")]
+            )
+            ws.append(row_vals)
+            cur_r = idx + 2
+            for col_idx in range(1, len(row_vals) + 1):
+                c = ws.cell(row=cur_r, column=col_idx)
+                c.font = Font(name="TH SarabunPSK", size=16)
+                c.border = cell_border
+                if col_idx == 5 or (include_worker_col and col_idx == 7):
+                    c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+                else:
+                    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        col_widths = [7, 18, 18, 25, 56, 28, 30, 20] if include_worker_col else [8, 20, 20, 28, 65, 32, 22]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        # Sheet 2: สรุปภาพรวม AI (A4)
+        ws_ai = wb.create_sheet(title="สรุปภาพรวม AI (A4)")
+        ws_ai.page_setup.paperSize = ws_ai.PAPERSIZE_A4
+        ws_ai.page_setup.orientation = ws_ai.ORIENTATION_LANDSCAPE
+        ws_ai.sheet_properties.pageSetUpPr.fitToPage = True
+        ws_ai.page_setup.fitToWidth = 1
+        ws_ai.page_setup.fitToHeight = 0
+
+        ws_ai.merge_cells("A1:D1")
+        ws_ai["A1"] = "รายงานสรุปผลการตรวจเช็คและแก้ไขอุปกรณ์ SCADA แยกตามหมวดหมู่ (Gemini AI Summary)"
+        ws_ai["A1"].font = Font(name="TH SarabunPSK", size=20, bold=True, color="1A73E8")
+        ws_ai["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_ai.row_dimensions[1].height = 32
+
+        ws_ai.merge_cells("A2:D2")
+        ws_ai["A2"] = f"โมเดลที่ใช้ประมวลผล: {ai_result.get('used_model', preferred_model)} | จำนวน Chunks: {ai_result.get('chunk_count', 1)} ชุด | จำนวนรายการ: {len(final_rows)} รายการ"
+        ws_ai["A2"].font = Font(name="TH SarabunPSK", size=15, italic=True)
+        ws_ai["A2"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_ai.row_dimensions[2].height = 24
+
+        cat_headers = ['ลำดับหมวด', 'หมวดหมู่การวิเคราะห์ (Category)', 'รายละเอียดและสถิติที่ตรวจพบ', 'หมายเหตุ / การติดตามผล']
+        ws_ai.append(cat_headers)
+        for col_idx in range(1, 5):
+            c = ws_ai.cell(row=3, column=col_idx)
+            c.font = Font(name="TH SarabunPSK", size=16, bold=True)
+            c.fill = PatternFill(start_color='E8F0FE', end_color='E8F0FE', fill_type='solid')
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = cell_border
+
+        for c_i, cat_obj in enumerate(ai_result.get("categories") or [], start=1):
+            items_txt = "\n".join(f"• {it}" for it in (cat_obj.get("items") or []))
+            note_txt = "อ้างอิงสถานะหลังตรวจสอบ" if c_i == 1 else ("จำแนกจากบันทึกการเข้าแก้ไข" if c_i == 2 else "แยกตามหน่วยงานรับผิดชอบ")
+            ws_ai.append([c_i, cat_obj.get("category", "-"), items_txt, note_txt])
+            r_num = ws_ai.max_row
+            for col_idx in range(1, 5):
+                cell = ws_ai.cell(row=r_num, column=col_idx)
+                cell.font = Font(name="TH SarabunPSK", size=16, bold=(col_idx == 2))
+                cell.alignment = Alignment(horizontal="center" if col_idx == 1 else "left", vertical="top", wrap_text=True)
+                cell.border = cell_border
+
+        ws_ai.append([])
+        ws_ai.append(["บทสรุปผู้บริหารและข้อเสนอแนะจาก Gemini API (Executive Narrative Summary)", "", "", ""])
+        hdr_r = ws_ai.max_row
+        ws_ai.merge_cells(f"A{hdr_r}:D{hdr_r}")
+        ws_ai[f"A{hdr_r}"].font = Font(name="TH SarabunPSK", size=17, bold=True)
+        ws_ai[f"A{hdr_r}"].fill = header_fill
+
+        ws_ai.append([ai_result.get("summary_markdown", "-"), "", "", ""])
+        body_r = ws_ai.max_row
+        ws_ai.merge_cells(f"A{body_r}:D{body_r}")
+        ws_ai[f"A{body_r}"].font = Font(name="TH SarabunPSK", size=16)
+        ws_ai[f"A{body_r}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws_ai.row_dimensions[body_r].height = 180
+
+        for i, w in enumerate([12, 36, 64, 28], start=1):
+            ws_ai.column_dimensions[get_column_letter(i)].width = w
+
+        bio = io.BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+        return send_file(
+            bio,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name="SCADA_Inspection_Report_AI_A4.xlsx",
+        )
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/healthz')
+def healthz():
+    return jsonify({"status": "ok", "time": time.time()})
+
 
 @app.route('/api/version')
 def api_version():
