@@ -306,6 +306,718 @@ KNOWN_WORKER_ALIASES = {
     "คณิน": "นายคณิน วาจนสุนทร",
 }
 
+# ==============================================================================
+# --- โมดูล Google Gemini API (Free Tier), Session State, Fallback & Chunking ---
+# ==============================================================================
+import threading
+import time
+from datetime import datetime, timezone, timedelta
+
+try:
+    from google import genai
+    from google.genai import types as genai_types
+    HAS_GOOGLE_GENAI_SDK = True
+except ImportError:
+    genai = None
+    genai_types = None
+    HAS_GOOGLE_GENAI_SDK = False
+
+# ตั้งค่า API Key เริ่มต้น (อ่านจาก Environment Variable GEMINI_API_KEY หรือ GOOGLE_API_KEY ก่อน หากไม่มีจะใช้คีย์เริ่มต้นที่กำหนด)
+DEFAULT_GEMINI_API_KEY = (
+    os.environ.get("GEMINI_API_KEY")
+    or os.environ.get("GOOGLE_API_KEY")
+    or "AQ.Ab8RN6KytzQLVV-Y29ZrGHHppnSfiSN_Fbg2b1smzb5z82agXA"
+)
+
+# กำหนดรายการโมเดลกลุ่ม Free Tier ตามลำดับความสำคัญ (Primary -> Fallback 1 -> Fallback 2)
+GEMINI_FREE_TIER_MODELS = {
+    "gemini-3.5-flash-lite": {
+        "label": "gemini-3.5-flash-lite (โมเดลหลัก - เน้นความเร็วและโควต้าสูง 500 RPD)",
+        "role": "โมเดลหลัก (Primary)",
+        "rpd_limit": 500,
+        "rpm_limit": 15,
+        "tpm_limit": 250000,
+        "max_chunk_chars": 3800,
+        "max_chunk_rows": 20,
+        # Mapping สำรองไปยัง Model ID จริงใน Google GenAI SDK อัตโนมัติเพื่อป้องกัน Error 404 (Model Not Found)
+        "sdk_candidates": [
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash-lite",
+            "gemini-2.5-flash",
+        ],
+    },
+    "gemini-3.1-flash-lite": {
+        "label": "gemini-3.1-flash-lite (โมเดลสำรอง 1 - โควต้า 500 RPD)",
+        "role": "โมเดลสำรอง 1 (Fallback 1)",
+        "rpd_limit": 500,
+        "rpm_limit": 15,
+        "tpm_limit": 250000,
+        "max_chunk_chars": 3600,
+        "max_chunk_rows": 18,
+        "sdk_candidates": [
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+        ],
+    },
+    "gemini-3.8-flash": {
+        "label": "gemini-3.8-flash (โมเดลสำรอง 2 - เน้นวิเคราะห์เชิงลึก โควต้า 20 RPD)",
+        "role": "โมเดลสำรอง 2 (Fallback 2)",
+        "rpd_limit": 20,
+        "rpm_limit": 10,
+        "tpm_limit": 250000,
+        "max_chunk_chars": 4500,
+        "max_chunk_rows": 25,
+        "sdk_candidates": [
+            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.0-flash",
+        ],
+    },
+}
+
+GEMINI_FALLBACK_ORDER = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+]
+
+ROLLING_WINDOW_COOLDOWN_SECONDS = 60  # ล็อกปุ่มกดสำหรับโมเดลที่ติด 429 เป็นเวลา 60 วินาที (Rolling Window 60s)
+
+_GEMINI_STATE_LOCK = threading.Lock()
+
+
+def get_next_utc_midnight_timestamp(now_ts=None):
+    """คำนวณ Timestamp ของเวลา 00:00 UTC ถัดไป (ตรงกับเวลา 07:00 น. ตามเวลาประเทศไทย UTC+7)"""
+    now_dt = datetime.fromtimestamp(now_ts or time.time(), tz=timezone.utc)
+    next_midnight_utc = (now_dt + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return next_midnight_utc.timestamp()
+
+
+def get_seconds_until_rpd_reset(now_ts=None):
+    """คืนค่าจำนวนวินาทีคงเหลือก่อนถึง 00:00 UTC (07:00 น. เวลาไทย)"""
+    now_val = now_ts or time.time()
+    return max(1, int(get_next_utc_midnight_timestamp(now_val) - now_val))
+
+
+def format_thai_countdown_hms(seconds):
+    """แปลงจำนวนวินาทีเป็นข้อความ ชม. นาที วินาที สำหรับแสดงบน Tooltip"""
+    sec = max(0, int(seconds))
+    hrs = sec // 3600
+    mins = (sec % 3600) // 60
+    rem_s = sec % 60
+    if hrs > 0:
+        return f"{hrs} ชม. {mins} นาที {rem_s} วินาที"
+    if mins > 0:
+        return f"{mins} นาที {rem_s} วินาที"
+    return f"{rem_s} วินาที"
+
+
+def _create_initial_session_state():
+    now_ts = time.time()
+    utc_day_str = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    models_state = {}
+    for m_name, cfg in GEMINI_FREE_TIER_MODELS.items():
+        models_state[m_name] = {
+            "rpd_used": 0,
+            "rpd_limit": cfg["rpd_limit"],
+            "cooldown_until": 0.0,      # Timestamp ปลดล็อก 60s Rolling Window (Rate Limit 429 / TPM)
+            "rpd_locked_until": 0.0,    # Timestamp ปลดล็อก RPD (00:00 UTC / 07:00 น. เวลาไทย)
+            "last_error": "",
+            "last_error_type": "",      # "RATE_LIMIT_429" | "RPD_EXHAUSTED" | "TOKEN_LIMIT" | ""
+            "resolved_sdk_model": cfg["sdk_candidates"][0],
+        }
+    return {
+        "utc_day": utc_day_str,
+        "selected_model": "auto_fallback",
+        "api_key_configured": bool(DEFAULT_GEMINI_API_KEY),
+        "models": models_state,
+        "last_used_model": "",
+        "fallback_history": [],
+    }
+
+
+# โครงสร้าง session_state หลังบ้านสำหรับบันทึกสถานะ Rate Limit (60s Rolling Window) และ RPD ของแต่ละโมเดล
+session_state = _create_initial_session_state()
+
+
+def sync_and_get_session_state(now_ts=None):
+    """ตรวจสอบและรีเซ็ตโควต้ารายวันอัตโนมัติเมื่อข้ามวัน UTC (07:00 น. เวลาไทย) พร้อมปลดล็อก Rolling Window ที่ครบ 60 วินาที"""
+    now_val = now_ts or time.time()
+    utc_day_str = datetime.fromtimestamp(now_val, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    with _GEMINI_STATE_LOCK:
+        if session_state.get("utc_day") != utc_day_str:
+            session_state["utc_day"] = utc_day_str
+            for m_name, m_st in session_state["models"].items():
+                m_st["rpd_used"] = 0
+                m_st["rpd_locked_until"] = 0.0
+                if m_st.get("last_error_type") == "RPD_EXHAUSTED":
+                    m_st["last_error_type"] = ""
+                    m_st["last_error"] = ""
+
+        models_snapshot = {}
+        for m_name, m_st in session_state["models"].items():
+            if m_st["cooldown_until"] > 0 and now_val >= m_st["cooldown_until"]:
+                m_st["cooldown_until"] = 0.0
+                if m_st.get("last_error_type") in ("RATE_LIMIT_429", "TOKEN_LIMIT"):
+                    m_st["last_error_type"] = ""
+                    m_st["last_error"] = ""
+
+            if m_st["rpd_locked_until"] > 0 and now_val >= m_st["rpd_locked_until"]:
+                m_st["rpd_locked_until"] = 0.0
+                m_st["rpd_used"] = 0
+                if m_st.get("last_error_type") == "RPD_EXHAUSTED":
+                    m_st["last_error_type"] = ""
+                    m_st["last_error"] = ""
+
+            cd_rem = max(0, int(round(m_st["cooldown_until"] - now_val)))
+            rpd_rem = max(0, int(round(m_st["rpd_locked_until"] - now_val)))
+            is_rpd_full = (m_st["rpd_used"] >= m_st["rpd_limit"]) or (rpd_rem > 0)
+            if is_rpd_full and rpd_rem == 0:
+                m_st["rpd_locked_until"] = get_next_utc_midnight_timestamp(now_val)
+                rpd_rem = max(1, int(round(m_st["rpd_locked_until"] - now_val)))
+
+            is_blocked = (cd_rem > 0) or is_rpd_full
+            tooltip_text = ""
+            if is_rpd_full:
+                tooltip_text = (
+                    f"⚠️ ติดโควต้ารายวัน (RPD) โมเดล {m_name} ({m_st['rpd_used']}/{m_st['rpd_limit']} RPD) "
+                    f"จะรีเซ็ตเวลา 07:00 น. (อีก {format_thai_countdown_hms(rpd_rem)})"
+                )
+            elif cd_rem > 0:
+                reason_label = "Token Limit (TPM)" if m_st.get("last_error_type") == "TOKEN_LIMIT" else "Rate Limit (429)"
+                tooltip_text = f"⚠️ ติด {reason_label} โมเดล {m_name} ปลดล็อกใน {cd_rem} วินาที"
+
+            models_snapshot[m_name] = {
+                "model": m_name,
+                "label": GEMINI_FREE_TIER_MODELS[m_name]["label"],
+                "role": GEMINI_FREE_TIER_MODELS[m_name]["role"],
+                "rpd_used": m_st["rpd_used"],
+                "rpd_limit": m_st["rpd_limit"],
+                "rpd_remaining": max(0, m_st["rpd_limit"] - m_st["rpd_used"]),
+                "cooldown_until": m_st["cooldown_until"],
+                "cooldown_remaining_sec": cd_rem,
+                "rpd_locked_until": m_st["rpd_locked_until"],
+                "rpd_reset_remaining_sec": rpd_rem,
+                "is_blocked": is_blocked,
+                "block_type": "RPD" if is_rpd_full else ("COOLDOWN_60S" if cd_rem > 0 else "READY"),
+                "tooltip": tooltip_text,
+                "last_error": m_st.get("last_error", ""),
+                "resolved_sdk_model": m_st.get("resolved_sdk_model", m_name),
+            }
+
+        return {
+            "server_time": now_val,
+            "next_rpd_reset_utc_ts": get_next_utc_midnight_timestamp(now_val),
+            "rpd_reset_seconds": get_seconds_until_rpd_reset(now_val),
+            "utc_day": session_state["utc_day"],
+            "has_google_genai_sdk": HAS_GOOGLE_GENAI_SDK,
+            "fallback_order": GEMINI_FALLBACK_ORDER,
+            "models": models_snapshot,
+            "last_used_model": session_state.get("last_used_model", ""),
+        }
+
+
+def mark_model_rate_limited(model_name, error_msg="", is_rpd=False, is_tpm=False):
+    """บันทึกสถานะลง session_state เมื่อโมเดลติด Error 429 (ล็อก 60 วินาที) หรือติด RPD (ล็อกถึง 07:00 น. เวลาไทย)"""
+    now_val = time.time()
+    with _GEMINI_STATE_LOCK:
+        if model_name not in session_state["models"]:
+            return
+        m_st = session_state["models"][model_name]
+        m_st["last_error"] = str(error_msg or "")[:300]
+        if is_rpd or m_st["rpd_used"] >= m_st["rpd_limit"]:
+            m_st["rpd_used"] = m_st["rpd_limit"]
+            m_st["rpd_locked_until"] = get_next_utc_midnight_timestamp(now_val)
+            m_st["last_error_type"] = "RPD_EXHAUSTED"
+        else:
+            m_st["cooldown_until"] = now_val + ROLLING_WINDOW_COOLDOWN_SECONDS
+            m_st["last_error_type"] = "TOKEN_LIMIT" if is_tpm else "RATE_LIMIT_429"
+
+
+def reset_model_limit_state(model_name=None):
+    """รีเซ็ตสถานะล็อกของโมเดลใน session_state"""
+    with _GEMINI_STATE_LOCK:
+        targets = [model_name] if model_name in session_state["models"] else list(session_state["models"].keys())
+        for m in targets:
+            session_state["models"][m]["cooldown_until"] = 0.0
+            session_state["models"][m]["rpd_locked_until"] = 0.0
+            session_state["models"][m]["rpd_used"] = 0
+            session_state["models"][m]["last_error"] = ""
+            session_state["models"][m]["last_error_type"] = ""
+
+
+def increment_model_rpd_usage(model_name, resolved_sdk_name=None):
+    """เพิ่มตัวนับการใช้งานรายวัน (RPD) ของโมเดลหลังเรียกใช้งานสำเร็จ"""
+    now_val = time.time()
+    with _GEMINI_STATE_LOCK:
+        if model_name in session_state["models"]:
+            m_st = session_state["models"][model_name]
+            m_st["rpd_used"] = int(m_st.get("rpd_used", 0)) + 1
+            if resolved_sdk_name:
+                m_st["resolved_sdk_model"] = resolved_sdk_name
+            if m_st["rpd_used"] >= m_st["rpd_limit"]:
+                m_st["rpd_locked_until"] = get_next_utc_midnight_timestamp(now_val)
+                m_st["last_error_type"] = "RPD_EXHAUSTED"
+            session_state["last_used_model"] = model_name
+
+
+def _classify_gemini_exception(exc_str):
+    """จำแนกประเภทข้อผิดพลาดจากข้อความ Exception ของ Gemini API"""
+    low = str(exc_str or "").lower()
+    is_404 = any(k in low for k in ["404", "not_found", "not found", "is not found for api version", "not supported"])
+    is_429 = any(k in low for k in ["429", "resource_exhausted", "too many requests", "rate limit", "quota"])
+    is_rpd = any(k in low for k in ["perday", "per_day", "requests per day", "rpd", "daily limit", "daily quota"])
+    is_tpm = any(k in low for k in ["token", "tpm", "input_token", "context length", "too large", "payload size"])
+    is_auth = any(k in low for k in ["api_key_invalid", "invalid api key", "401", "403", "permission_denied", "unauthenticated"])
+    return {
+        "is_404": is_404,
+        "is_429": is_429,
+        "is_rpd": is_rpd,
+        "is_tpm": is_tpm,
+        "is_auth": is_auth,
+    }
+
+
+def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperature=0.2):
+    """เชื่อมต่อ Gemini API โดยใช้ Google GenAI SDK เวอร์ชันล่าสุด (google-genai) พร้อม REST API สำรอง"""
+    clean_key = str(api_key or DEFAULT_GEMINI_API_KEY).strip()
+    if not clean_key:
+        raise RuntimeError("ไม่พบ Gemini API Key กรุณาตั้งค่า GEMINI_API_KEY หรือกรอกในช่องตั้งค่า UI")
+
+    # 1. เรียกผ่าน Google GenAI SDK ล่าสุด (google-genai) หากติดตั้งไว้ในระบบ
+    if HAS_GOOGLE_GENAI_SDK and genai is not None:
+        client = genai.Client(api_key=clean_key)
+        cfg = (
+            genai_types.GenerateContentConfig(temperature=temperature)
+            if genai_types is not None
+            else {"temperature": temperature}
+        )
+        resp = client.models.generate_content(
+            model=sdk_model_id,
+            contents=prompt_text,
+            config=cfg,
+        )
+        out_text = getattr(resp, "text", None)
+        if out_text:
+            return str(out_text).strip()
+
+    # 2. Fallback เรียกผ่าน Google Generative Language REST API v1beta โดยตรง
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{sdk_model_id}:generateContent?key={clean_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "generationConfig": {"temperature": temperature},
+    }
+    req_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=req_bytes,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    opener = _build_url_opener()
+    try:
+        with opener.open(req, timeout=45) as resp:
+            raw_body = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw_body)
+            candidates = data.get("candidates") or []
+            if candidates:
+                parts = (candidates[0].get("content") or {}).get("parts") or []
+                texts = [str(p.get("text", "")) for p in parts if p.get("text")]
+                if texts:
+                    return "\n".join(texts).strip()
+            raise RuntimeError(f"Empty response from Gemini model {sdk_model_id}")
+    except urllib.error.HTTPError as http_err:
+        err_body = ""
+        try:
+            err_body = http_err.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {http_err.code}: {err_body or http_err.reason}")
+
+
+def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_key=None):
+    """
+    เรียกใช้งาน Gemini API พร้อมระบบ:
+    - ตรวจสอบสถานะ Cooldown (60s Rolling Window) และ RPD (07:00 น. เวลาไทย)
+    - ระบบ Auto-Mapping ไปยัง Model ID จริงใน SDK เพื่อป้องกัน Error 404
+    - ระบบ Auto Fallback สลับไปใช้โมเดลสำรองในรายการเมื่อเกิด Error 429 / RPD โดยไม่ทำให้โปรแกรมล่ม
+    """
+    state_snap = sync_and_get_session_state()
+    models_info = state_snap["models"]
+
+    if preferred_model == "auto_fallback" or preferred_model not in GEMINI_FREE_TIER_MODELS:
+        candidate_logical_models = list(GEMINI_FALLBACK_ORDER)
+    else:
+        # เริ่มจากโมเดลที่ผู้ใช้เลือก หากติด 429 ระหว่างทำงานให้สลับไปโมเดลสำรองใน Fallback List อัตโนมัติ
+        candidate_logical_models = [preferred_model] + [
+            m for m in GEMINI_FALLBACK_ORDER if m != preferred_model
+        ]
+
+    fallback_trace = []
+    last_err_msg = ""
+
+    for logical_model in candidate_logical_models:
+        m_status = models_info.get(logical_model, {})
+        if m_status.get("is_blocked"):
+            fallback_trace.append({
+                "model": logical_model,
+                "status": "skipped_blocked",
+                "reason": m_status.get("tooltip", "Blocked"),
+            })
+            if preferred_model != "auto_fallback" and logical_model == preferred_model:
+                raise RuntimeError(m_status.get("tooltip") or f"โมเดล {logical_model} ติดลิมิตการใช้งาน")
+            continue
+
+        sdk_candidates = GEMINI_FREE_TIER_MODELS[logical_model]["sdk_candidates"]
+
+        for sdk_id in sdk_candidates:
+            try:
+                res_text = _call_single_gemini_candidate(sdk_id, prompt_text, api_key)
+                increment_model_rpd_usage(logical_model, resolved_sdk_name=sdk_id)
+                fallback_trace.append({
+                    "model": logical_model,
+                    "sdk_model": sdk_id,
+                    "status": "success",
+                })
+                return {
+                    "text": res_text,
+                    "used_model": logical_model,
+                    "resolved_sdk_model": sdk_id,
+                    "fallback_trace": fallback_trace,
+                }
+            except Exception as exc:
+                err_str = str(exc)
+                last_err_msg = err_str
+                err_info = _classify_gemini_exception(err_str)
+
+                if err_info["is_404"]:
+                    # หากชื่อโมเดลยังไม่มีใน Endpoint จริง (404) ให้สลับไปยัง sdk_candidate ถัดไปโดยอัตโนมัติ
+                    continue
+
+                if err_info["is_429"] or err_info["is_rpd"]:
+                    mark_model_rate_limited(
+                        logical_model,
+                        error_msg=err_str,
+                        is_rpd=err_info["is_rpd"],
+                        is_tpm=err_info["is_tpm"],
+                    )
+                    fallback_trace.append({
+                        "model": logical_model,
+                        "sdk_model": sdk_id,
+                        "status": "rate_limited_429",
+                        "reason": err_str[:200],
+                    })
+                    break
+
+                if err_info["is_tpm"]:
+                    raise RuntimeError(f"TOKEN_LIMIT_EXCEEDED: {err_str}")
+
+                if err_info["is_auth"]:
+                    raise RuntimeError(f"API_KEY_ERROR: {err_str}")
+
+                fallback_trace.append({
+                    "model": logical_model,
+                    "sdk_model": sdk_id,
+                    "status": "error",
+                    "reason": err_str[:200],
+                })
+                break
+
+    raise RuntimeError(last_err_msg or "ทุกโมเดลในรายการ Fallback ติดขีดจำกัดการใช้งานชั่วคราว")
+
+
+def chunk_inspection_rows(rows, max_chars=3500, max_rows=18):
+    """แบ่งข้อมูลรายการตรวจสอบจาก Google Sheet ออกเป็นส่วนย่อย (Chunks) อัตโนมัติเพื่อป้องกันปัญหา Token Limit (TPM)"""
+    if not rows:
+        return []
+    chunks = []
+    current_chunk = []
+    current_chars = 0
+
+    for r in rows:
+        row_repr = f"{r.get('site','')} | {r.get('cmd','')} | {r.get('loc','')} | {r.get('detail','')} | {r.get('resp','')} | {r.get('status','')}"
+        row_len = len(row_repr)
+        if current_chunk and (len(current_chunk) >= max_rows or (current_chars + row_len) > max_chars):
+            chunks.append(current_chunk)
+            current_chunk = [r]
+            current_chars = row_len
+        else:
+            current_chunk.append(r)
+            current_chars += row_len
+
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+
+def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str=""):
+    """ฟังก์ชันจัดหมวดหมู่และเรียบเรียงรายละเอียดการตรวจสอบระดับแถวอย่างเป็นระเบียบ"""
+    txt = str(raw_detail or "").strip()
+    if not txt or txt == "-":
+        return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)"
+    lines = [ln.strip() for ln in re.split(r"[\n\\r]+|,\\s*(?=[❌✅•\\-])", txt) if ln.strip()]
+    comm_items, frtu_items, action_items = [], [], []
+    for ln in lines:
+        clean_ln = re.sub(r"^[•\\-\\s]+", "", ln).strip()
+        if not clean_ln:
+            continue
+        u = clean_ln.upper()
+        if any(w in u for w in ["สื่อสาร", "MODEM", "SIM", "3G", "4G", "OPTIC", "FIBER", "WRL", "PING", "สัญญาณ", "ONLINE", "ANTENNA", "สายอากาศ"]):
+            comm_items.append(clean_ln)
+        elif any(w in u for w in ["FRTU", "RTU", "BATTERY", "แบต", "FUSE", "ฟิวส์", "POWER", "การ์ด", "BOARD", "CONTROL", "RELAY", "AC", "DC", "ตู้"]):
+            frtu_items.append(clean_ln)
+        else:
+            action_items.append(clean_ln)
+
+    parts = []
+    if comm_items:
+        parts.append("[ระบบสื่อสาร] " + "; ".join(comm_items))
+    if frtu_items:
+        parts.append("[อุปกรณ์ FRTU/ชุดควบคุม] " + "; ".join(frtu_items))
+    if action_items:
+        parts.append("[ผลการตรวจสอบ/แก้ไข] " + "; ".join(action_items))
+    return "\n".join(parts) if parts else txt
+
+
+def _build_deterministic_executive_summary(rows):
+    """สร้างตารางและบทสรุปแยกหมวดหมู่จากข้อมูลจริง"""
+    total = len(rows)
+    online_cnt = sum(1 for r in rows if "ONLINE" in str(r.get("status", "")).upper())
+    connecting_cnt = sum(1 for r in rows if "CONNECTING" in str(r.get("status", "")).upper())
+    offline_cnt = sum(1 for r in rows if "OFFLINE" in str(r.get("status", "")).upper())
+    other_cnt = max(0, total - online_cnt - connecting_cnt - offline_cnt)
+
+    bo_cnt = sum(1 for r in rows if "ผบอ" in str(r.get("resp", "")))
+    po_cnt = sum(1 for r in rows if "ผอส" in str(r.get("resp", "")))
+    done_cnt = sum(1 for r in rows if str(r.get("resp", "-")).strip() in ("-", "", "ไม่มีค่า"))
+
+    comm_issue_cnt = 0
+    frtu_issue_cnt = 0
+    power_issue_cnt = 0
+    for r in rows:
+        d_up = str(r.get("detail", "")).upper()
+        if any(k in d_up for k in ["สื่อสาร", "MODEM", "SIM", "WRL", "OPTIC", "สัญญาณ"]):
+            comm_issue_cnt += 1
+        if any(k in d_up for k in ["FRTU", "RTU", "การ์ด", "CONTROL", "BOARD", "โมดูล"]):
+            frtu_issue_cnt += 1
+        if any(k in d_up for k in ["แบต", "BATTERY", "ฟิวส์", "FUSE", "AC", "DC", "ไฟเลี้ยง"]):
+            power_issue_cnt += 1
+
+    categories = [
+        {
+            "category": "1. หมวดสถานะอุปกรณ์หลังการเข้าตรวจสอบ (Post-Inspection Status)",
+            "items": [
+                f"อุปกรณ์กลับมา Online ปกติ: {online_cnt} ชุด ({(online_cnt/total*100) if total else 0:.1f}%)",
+                f"สถานะ Connecting (รอจูนสัญญาณ/รอตรวจสอบร่วม): {connecting_cnt} ชุด ({(connecting_cnt/total*100) if total else 0:.1f}%)",
+                f"สถานะ Offline (ยังไม่ออนไลน์): {offline_cnt} ชุด ({(offline_cnt/total*100) if total else 0:.1f}%)",
+                f"สถานะอื่นๆ / Initializing / Telemetry: {other_cnt} ชุด",
+            ],
+        },
+        {
+            "category": "2. หมวดสาเหตุและอาการชำรุดที่ตรวจพบ (Fault Categorization)",
+            "items": [
+                f"ระบบสื่อสารและโครงข่าย (Modem / SIM / WRL / สายสัญญาณ): พบเกี่ยวข้อง {comm_issue_cnt} รายการ",
+                f"อุปกรณ์ชุดควบคุมหลัก (FRTU / การ์ดควบคุม / อุปกรณ์ภายในตู้): พบเกี่ยวข้อง {frtu_issue_cnt} รายการ",
+                f"ระบบแหล่งจ่ายไฟและแบตเตอรี่ (Battery / Fuse / ไฟเลี้ยง AC-DC): พบเกี่ยวข้อง {power_issue_cnt} รายการ",
+            ],
+        },
+        {
+            "category": "3. หมวดหน่วยงานผู้รับผิดชอบดำเนินการต่อ (Action Assignment)",
+            "items": [
+                f"รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข (FRTU/อุปกรณ์ชุดควบคุม): {bo_cnt} รายการ",
+                f"รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข (ระบบสื่อสาร): {po_cnt} รายการ",
+                f"ดำเนินการแก้ไขเสร็จสิ้น/ไม่ต้องส่งต่อ (-): {done_cnt} รายการ",
+            ],
+        },
+    ]
+
+    summary_md = (
+        f"สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด {total} รายการ)\n\n"
+        f"1. ภาพรวมสถานะหลังดำเนินการ\n"
+        f"• ตรวจสอบและแก้ไขรวมทั้งสิ้น {total} รายการ | ออนไลน์สำเร็จ {online_cnt} ชุด | Connecting {connecting_cnt} ชุด | Offline {offline_cnt} ชุด\n\n"
+        f"2. การจำแนกตามหมวดหมู่อาการเสียและสาเหตุหลัก\n"
+        f"• ด้านระบบสื่อสาร (ผอส.ฉ.2): เกี่ยวข้อง {comm_issue_cnt} รายการ (อาทิ โมเด็มค้าง, สัญญาณสื่อสารขัดข้อง, ทดสอบ Ping/รีเซ็ตอุปกรณ์สื่อสาร)\n"
+        f"• ด้านอุปกรณ์ FRTU และชุดควบคุม (ผบอ.ฉ.2): เกี่ยวข้อง {frtu_issue_cnt} รายการ (อาทิ ชุดควบคุม FRTU ขัดข้อง, การ์ดสื่อสาร/พอร์ตเชื่อมต่อชำรุด)\n"
+        f"• ด้านระบบไฟเลี้ยงและแบตเตอรี่: เกี่ยวข้อง {power_issue_cnt} รายการ (อาทิ แบตเตอรี่เสื่อม, ฟิวส์ขาด, ระบบไฟเลี้ยง AC/DC ขัดข้อง)\n\n"
+        f"3. การส่งต่อหน่วยงานผู้รับผิดชอบ\n"
+        f"• รอ ผบอ.กบษ.ฉ.2 เข้าแก้ไขต่อ: {bo_cnt} รายการ\n"
+        f"• รอ ผอส.กสฟ.ฉ.2 เข้าแก้ไขต่อ: {po_cnt} รายการ\n"
+        f"• แก้ไขเรียบร้อยแล้ว: {done_cnt} รายการ"
+    )
+    return {
+        "summary_markdown": summary_md,
+        "categories": categories,
+        "metrics": {
+            "total": total,
+            "online": online_cnt,
+            "connecting": connecting_cnt,
+            "offline": offline_cnt,
+            "other": other_cnt,
+            "wait_bo": bo_cnt,
+            "wait_po": po_cnt,
+            "completed": done_cnt,
+            "comm_issues": comm_issue_cnt,
+            "frtu_issues": frtu_issue_cnt,
+            "power_issues": power_issue_cnt,
+        },
+    }
+
+
+def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback", api_key=None):
+    """
+    ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API:
+    1. ทำ Auto Chunking แบ่งข้อมูลจาก Google Sheet ออกเป็นส่วนย่อยๆ อัตโนมัติเมื่อข้อมูลยาว
+    2. ส่งแต่ละ Chunk ให้ Gemini เรียบเรียงข้อความคอลัมน์ 'รายละเอียดการตรวจสอบ/แก้ไข' รายแถวให้เป็นหมวดหมู่สวยงาม
+    3. รวบรวมผลสรุปย่อยจากทุก Chunk มาสังเคราะห์เป็นรายงานสรุปภาพรวม (Executive Summary) แยกหมวดหมู่ชัดเจน
+    """
+    if not rows:
+        raise ValueError("ไม่พบรายการข้อมูลสำหรับสรุปรายงาน")
+
+    base_exec_info = _build_deterministic_executive_summary(rows)
+    rewritten_rows = [dict(r) for r in rows]
+    for r in rewritten_rows:
+        r["ai_detail"] = _deterministic_categorize_row_detail(
+            r.get("detail", ""), r.get("resp", ""), r.get("status", "")
+        )
+
+    model_cfg = GEMINI_FREE_TIER_MODELS.get(
+        preferred_model, GEMINI_FREE_TIER_MODELS["gemini-3.5-flash-lite"]
+    )
+    max_chars = model_cfg.get("max_chunk_chars", 3600)
+    max_rows = model_cfg.get("max_chunk_rows", 18)
+
+    chunks = chunk_inspection_rows(rewritten_rows, max_chars=max_chars, max_rows=max_rows)
+    chunk_summaries = []
+    used_models_log = []
+    fallback_traces = []
+    ai_warning = ""
+
+    for chunk_idx, chunk in enumerate(chunks):
+        lines_payload = []
+        for item_i, r in enumerate(chunk):
+            lines_payload.append(
+                f"[{item_i}] Site: {r.get('site','-')} | รหัสสั่งการ: {r.get('cmd','-')} | "
+                f"สถานที่: {r.get('loc','-')} | รายละเอียดเดิม: {r.get('detail','-')} | "
+                f"ผู้รับผิดชอบต่อ: {r.get('resp','-')} | สถานะ: {r.get('status','-')}"
+            )
+        chunk_text = "\n".join(lines_payload)
+
+        chunk_prompt = (
+            "คุณคือวิศวกรระบบ SCADA เชี่ยวชาญการทำรายงานตรวจเช็คอุปกรณ์ (Inspection Report)\n"
+            "โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นระเบียบ และจัดหมวดหมู่ชัดเจน\n"
+            "ตอบกลับเป็น JSON เท่านั้น ตามโครงสร้างนี้:\n"
+            "{\n"
+            '  "rows": [ {"idx": 0, "clean_detail": "[หมวดอาการ/การแก้ไข] ข้อความที่เรียบเรียงใหม่กระชับชัดเจน"} ],\n'
+            '  "chunk_summary": "สรุปประเด็นสำคัญของชุดข้อมูลนี้ 2-3 บรรทัด"\n'
+            "}\n\n"
+            f"ข้อมูลชุดที่ {chunk_idx + 1}/{len(chunks)}:\n{chunk_text}"
+        )
+
+        try:
+            res = call_gemini_with_fallback(
+                chunk_prompt, preferred_model=preferred_model, api_key=api_key
+            )
+        except RuntimeError as err_rt:
+            # หากติด TOKEN_LIMIT_EXCEEDED ให้แบ่งครึ่ง Chunk ย่อยลงอีกอัตโนมัติ (Recursive Sub-Chunking)
+            if "TOKEN_LIMIT_EXCEEDED" in str(err_rt) and len(chunk) > 1:
+                mid = max(1, len(chunk) // 2)
+                sub_chunks = [chunk[:mid], chunk[mid:]]
+                try:
+                    for sc in sub_chunks:
+                        sc_text = "\n".join(
+                            f"[{idx_s}] Site: {x.get('site','-')} | รายละเอียด: {x.get('detail','-')} | สถานะ: {x.get('status','-')}"
+                            for idx_s, x in enumerate(sc)
+                        )
+                        sc_prompt = (
+                            "สรุปและเรียบเรียงรายละเอียดการตรวจสอบอุปกรณ์ SCADA ต่อไปนี้เป็น JSON:\n"
+                            '{"rows": [{"idx": 0, "clean_detail": "..."}], "chunk_summary": "..."}\n\n'
+                            + sc_text
+                        )
+                        res = call_gemini_with_fallback(
+                            sc_prompt, preferred_model=preferred_model, api_key=api_key
+                        )
+                        used_models_log.append(res["used_model"])
+                    continue
+                except Exception as sub_err:
+                    ai_warning = str(sub_err)
+                    break
+            else:
+                ai_warning = str(err_rt)
+                break
+
+        used_models_log.append(res["used_model"])
+        fallback_traces.extend(res.get("fallback_trace", []))
+        raw_reply = res.get("text", "")
+
+        json_match = re.search(r"\{.*\}", raw_reply, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(0))
+                for r_item in parsed.get("rows", []):
+                    r_idx = r_item.get("idx")
+                    c_det = str(r_item.get("clean_detail") or "").strip()
+                    if isinstance(r_idx, int) and 0 <= r_idx < len(chunk) and c_det:
+                        chunk[r_idx]["ai_detail"] = c_det
+                if parsed.get("chunk_summary"):
+                    chunk_summaries.append(str(parsed["chunk_summary"]).strip())
+            except Exception:
+                chunk_summaries.append(raw_reply[:400])
+        elif raw_reply:
+            chunk_summaries.append(raw_reply[:400])
+
+    final_summary_md = base_exec_info["summary_markdown"]
+    if chunk_summaries and not ai_warning:
+        synth_prompt = (
+            "คุณคือวิศวกรผู้เชี่ยวชาญระบบ SCADA ของ กฟภ. (PEA)\n"
+            "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) จากข้อมูลสรุปย่อยต่อไปนี้\n"
+            "โดยจัดหมวดหมู่ให้ชัดเจน สวยงาม อ่านง่าย เป็นระเบียบ ดังนี้:\n"
+            "1. ภาพรวมผลการตรวจสอบและสถานะอุปกรณ์หลังดำเนินการ (Online / Connecting / Offline)\n"
+            "2. สรุปสาเหตุแยกตามหมวดหมู่อาการชำรุด (ระบบสื่อสาร ผอส.ฉ.2 vs อุปกรณ์ FRTU/ชุดควบคุม ผบอ.ฉ.2 vs ระบบไฟเลี้ยง/แบตเตอรี่)\n"
+            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบและแนวทางติดตามผล\n\n"
+            f"สถิติภาพรวม: ทั้งหมด {base_exec_info['metrics']['total']} รายการ, "
+            f"Online {base_exec_info['metrics']['online']} ชุด, "
+            f"Connecting {base_exec_info['metrics']['connecting']} ชุด, "
+            f"Offline {base_exec_info['metrics']['offline']} ชุด, "
+            f"รอ ผบอ. {base_exec_info['metrics']['wait_bo']} ชุด, "
+            f"รอ ผอส. {base_exec_info['metrics']['wait_po']} ชุด\n\n"
+            "ข้อมูลสรุปรายส่วน (Chunks):\n- " + "\n- ".join(chunk_summaries)
+        )
+        try:
+            synth_res = call_gemini_with_fallback(
+                synth_prompt, preferred_model=preferred_model, api_key=api_key
+            )
+            if synth_res.get("text"):
+                final_summary_md = synth_res["text"].strip()
+            used_models_log.append(synth_res["used_model"])
+            fallback_traces.extend(synth_res.get("fallback_trace", []))
+        except Exception as synth_err:
+            ai_warning = str(synth_err)
+
+    for r in rewritten_rows:
+        if r.get("ai_detail"):
+            r["detail"] = r["ai_detail"]
+
+    return {
+        "success": len(used_models_log) > 0,
+        "warning": ai_warning,
+        "used_model": used_models_log[-1] if used_models_log else preferred_model,
+        "chunk_count": len(chunks),
+        "rows": rewritten_rows,
+        "summary_markdown": final_summary_md,
+        "categories": base_exec_info["categories"],
+        "metrics": base_exec_info["metrics"],
+        "fallback_trace": fallback_traces,
+        "session_state": sync_and_get_session_state(),
+    }
+
+
 def get_status_config(status_text):
     status_upper = str(status_text).strip().upper()
     if status_upper.startswith('TELEMETRY'):
@@ -2802,7 +3514,214 @@ def generate_map():
             transform: translateX(18px) !important;
         }}
     }}
-    </style>
+    
+    /* --- Gemini AI Report Summarizer UI & Real-Time Hover Tooltip --- */
+    .gemini-ai-section {{
+        padding: 12px 14px;
+        margin: 0 0 10px;
+        background: linear-gradient(135deg, rgba(26,115,232,0.06), rgba(155,89,182,0.06));
+        border: 1px solid rgba(26,115,232,0.28);
+        border-radius: 12px;
+    }}
+    .gemini-header-row {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+    }}
+    .gemini-title-badge {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent-primary);
+    }}
+    .gemini-tier-pill {{
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--text-secondary);
+    }}
+    .gemini-grid-row {{
+        display: grid;
+        grid-template-columns: 1.25fr 1fr;
+        gap: 8px;
+        margin-bottom: 8px;
+    }}
+    @media (max-width: 640px) {{
+        .gemini-grid-row {{ grid-template-columns: 1fr; }}
+    }}
+    .gemini-field {{
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }}
+    .gemini-field label {{
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }}
+    .gemini-input, .gemini-select {{
+        width: 100%;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 8px;
+        color: var(--text-primary);
+        padding: 7px 10px;
+        font-size: 12px;
+        min-height: 36px;
+    }}
+    .gemini-input:focus, .gemini-select:focus {{
+        border-color: var(--accent-primary);
+    }}
+    .gemini-model-status-bar {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--border-hairline);
+    }}
+    .gemini-model-chip {{
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        font-weight: 500;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        color: var(--text-secondary);
+    }}
+    .gemini-model-chip.is-ready {{
+        border-color: rgba(22,163,74,0.35);
+        color: #137333;
+        background: #e6f4ea;
+    }}
+    body.theme-dark .gemini-model-chip.is-ready {{
+        background: rgba(22,163,74,0.18);
+        color: #4ade80;
+    }}
+    .gemini-model-chip.is-cooldown {{
+        border-color: rgba(234,88,12,0.45);
+        color: #c25100;
+        background: #fef0e6;
+    }}
+    body.theme-dark .gemini-model-chip.is-cooldown {{
+        background: rgba(234,88,12,0.22);
+        color: #fb923c;
+    }}
+    .gemini-model-chip.is-rpd {{
+        border-color: rgba(220,38,38,0.45);
+        color: #c5221f;
+        background: #fce8e6;
+    }}
+    body.theme-dark .gemini-model-chip.is-rpd {{
+        background: rgba(220,38,38,0.22);
+        color: #f87171;
+    }}
+
+    /* Hover Tooltip Wrapper สำหรับปุ่มสรุปและ Export รายงาน (ทำงานแม้ปุ่มถูก Disabled) */
+    .report-btn-tooltip-wrap {{
+        position: relative;
+        flex: 1.4;
+        display: flex;
+        min-width: 220px;
+    }}
+    .report-btn-tooltip-wrap .report-btn {{
+        width: 100%;
+    }}
+    .report-btn.is-disabled-limit,
+    .report-btn:disabled.is-disabled-limit {{
+        background: #9aa0a6 !important;
+        color: #f1f3f4 !important;
+        border: 1px solid #80868b !important;
+        cursor: not-allowed !important;
+        opacity: 0.78 !important;
+        box-shadow: none !important;
+        pointer-events: none !important;
+    }}
+    .gemini-hover-tooltip {{
+        visibility: hidden;
+        opacity: 0;
+        position: absolute;
+        bottom: calc(100% + 10px);
+        right: 0;
+        min-width: 280px;
+        max-width: 360px;
+        background: #202124;
+        color: #ffffff;
+        text-align: left;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 11.5px;
+        font-weight: 500;
+        line-height: 1.45;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+        border: 1px solid rgba(255,255,255,0.16);
+        z-index: 10000010;
+        pointer-events: none;
+        transform: translateY(4px);
+        transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+    }}
+    .gemini-hover-tooltip::after {{
+        content: "";
+        position: absolute;
+        top: 100%;
+        right: 28px;
+        border-width: 6px;
+        border-style: solid;
+        border-color: #202124 transparent transparent transparent;
+    }}
+    .report-btn-tooltip-wrap:hover .gemini-hover-tooltip.has-tooltip {{
+        visibility: visible !important;
+        opacity: 1 !important;
+        transform: translateY(0) !important;
+    }}
+
+    /* AI Executive Summary Preview Box in Modal */
+    .ai-summary-preview-box {{
+        display: none;
+        margin: 0 0 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--bg-surface);
+        border: 1px solid var(--accent-primary);
+        max-height: 220px;
+        overflow-y: auto;
+        font-size: 12px;
+        line-height: 1.55;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+    }}
+    .ai-summary-preview-box.show {{
+        display: block;
+    }}
+    .ai-summary-preview-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border-subtle);
+        font-weight: 600;
+        color: var(--accent-primary);
+    }}
+</style>
 
     <!-- แถบสลับหน้า แผนที่ (Maps) <-> แดชบอร์ด (%AVA) แบบ Segmented Control + สวิตช์โหมดมืด/สว่างสไตล์ Apple -->
     <div class="top-nav-switcher" id="topNavSwitcher">
@@ -3380,12 +4299,81 @@ def generate_map():
                 <div id="reportPreviewCount" class="report-preview-count">กำลังตรวจสอบ...</div>
             </div>
 
+            <!-- ส่วนตั้งค่า Google Gemini API (Free Tier) และการเลือกโมเดลสรุปรายงาน -->
+            <section class="gemini-ai-section" aria-labelledby="geminiAiHeading">
+                <div class="gemini-header-row">
+                    <span class="gemini-title-badge" id="geminiAiHeading">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L14.8 9.2L22 12L14.8 14.8L12 22L9.2 14.8L2 12L9.2 9.2L12 2Z"/></svg>
+                        สรุปและจัดหมวดหมู่รายงานอัตโนมัติด้วย Google Gemini API (Free Tier)
+                    </span>
+                    <span class="gemini-tier-pill" id="geminiActiveSdkBadge">Google GenAI SDK · Auto Chunking</span>
+                </div>
+
+                <div class="gemini-grid-row">
+                    <div class="gemini-field">
+                        <label for="geminiModelSelect">
+                            <span>เลือกโมเดลสรุปรายงาน (Model Selector)</span>
+                            <span id="geminiSelectedQuotaText" style="color:var(--accent-primary);font-weight:600;">โควต้าพร้อมใช้งาน</span>
+                        </label>
+                        <select id="geminiModelSelect" class="gemini-select" onchange="onGeminiModelChange()">
+                            <option value="auto_fallback" selected>🔄 Auto Fallback (เลือกโมเดลที่ว่างอัตโนมัติ)</option>
+                            <option value="gemini-3.5-flash-lite">⚡ gemini-3.5-flash-lite (โมเดลหลัก - 500 RPD)</option>
+                            <option value="gemini-3.1-flash-lite">🛡️ gemini-3.1-flash-lite (โมเดลสำรอง 1 - 500 RPD)</option>
+                            <option value="gemini-3.8-flash">🧠 gemini-3.8-flash (โมเดลสำรอง 2 - วิเคราะห์เชิงลึก 20 RPD)</option>
+                        </select>
+                    </div>
+
+                    <div class="gemini-field">
+                        <label for="geminiApiKeyInput">
+                            <span>Gemini API Key (Free Tier / Env)</span>
+                            <button type="button" onclick="toggleGeminiKeyVisibility()" style="border:0;background:transparent;color:var(--accent-primary);font-size:10.5px;cursor:pointer;padding:0;">แสดง/ซ่อน</button>
+                        </label>
+                        <input type="password" id="geminiApiKeyInput" class="gemini-input" value="{DEFAULT_GEMINI_API_KEY}" placeholder="ใส่ Gemini API Key หรือใช้ค่าจาก Environment Variable" autocomplete="off">
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" id="enableGeminiAiCheckbox" checked style="width:15px;height:15px;accent-color:var(--accent-primary);cursor:pointer;">
+                        <span>ให้ Gemini AI เกลารายละเอียดรายแถว + สร้าง Sheet สรุปภาพรวมแยกหมวดหมู่</span>
+                    </label>
+                    <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+                        <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                            ✨ พรีวิวผลสรุป AI
+                        </button>
+                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rate_limit_429')" title="จำลอง Error 429 (ล็อก 60 วินาที)">
+                            ทดสอบ 429 (60s)
+                        </button>
+                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rpd_full')" title="จำลองโควต้ารายวันเต็ม (รีเซ็ต 07:00 น.)">
+                            ทดสอบ RPD เต็ม
+                        </button>
+                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('reset')" title="รีเซ็ตสถานะล็อกทั้งหมด">
+                            รีเซ็ตโควต้า
+                        </button>
+                    </div>
+                </div>
+
+                <div class="gemini-model-status-bar" id="geminiModelStatusBar"></div>
+            </section>
+
+            <!-- กล่องพรีวิวผลสรุปภาพรวมจาก Gemini API ก่อนกดดาวน์โหลด -->
+            <div id="aiSummaryPreviewBox" class="ai-summary-preview-box">
+                <div class="ai-summary-preview-header">
+                    <span id="aiSummaryPreviewTitle">✨ ตัวอย่างรายงานสรุปภาพรวมแยกหมวดหมู่ (Gemini AI)</span>
+                    <button type="button" class="report-mini-btn" onclick="document.getElementById('aiSummaryPreviewBox').classList.remove('show')">ซ่อนพรีวิว</button>
+                </div>
+                <div id="aiSummaryPreviewContent"></div>
+            </div>
+
             <div class="report-btn-group">
                 <button class="report-btn report-btn-cancel" type="button" onclick="resetAllReportFilters()">รีเซ็ตค่า</button>
                 <button class="report-btn report-btn-cancel" type="button" onclick="closeReportModal()">ยกเลิก</button>
-                <button id="execReportBtn" class="report-btn report-btn-dl" type="button" onclick="generateExcelReport()">
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> ดาวน์โหลด Excel ขนาด A4 (.xlsx)
-                </button>
+                <div id="execReportBtnWrap" class="report-btn-tooltip-wrap">
+                    <button id="execReportBtn" class="report-btn report-btn-dl" type="button" onclick="generateExcelReport()">
+                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> สรุปและ Export รายงาน (.xlsx)
+                    </button>
+                    <div id="execReportBtnTooltip" class="gemini-hover-tooltip" role="tooltip"></div>
+                </div>
             </div>
             <p class="report-note">* ไฟล์รายงานตั้งค่าหน้ากระดาษขนาด A4 แนวนอน (Fit to 1 Page Wide) พร้อมพิมพ์ทันที</p>
         </div>
@@ -3598,6 +4586,8 @@ def generate_map():
             if (workerColSel) workerColSel.value = 'hide';
             reportModal.classList.add('show');
             initializeReportWorkerFilter();
+            updateGeminiUiAndButtonState();
+            fetch('/api/gemini/status').then(function(r){{return r.json();}}).then(function(s){{syncBackendStatusToLocal(s);}}).catch(function(){{}});
         }});
     }}
 
@@ -4250,9 +5240,666 @@ def generate_map():
     window.addEventListener('resize', function() {{ if (document.getElementById('reportWorkerDropdown').classList.contains('show')) positionReportWorkerDropdown(); }});
     window.addEventListener('scroll', function() {{ if (document.getElementById('reportWorkerDropdown').classList.contains('show')) positionReportWorkerDropdown(); }}, true);
 
+    // ============================================================================
+    // === ระบบบริหารจัดการ Google Gemini API, Auto Fallback, Chunking & Tooltip ===
+    // ============================================================================
+    var GEMINI_MODELS_CONFIG = {{
+        "gemini-3.5-flash-lite": {{
+            label: "gemini-3.5-flash-lite",
+            role: "โมเดลหลัก",
+            rpd_limit: 500,
+            max_chunk_chars: 3800,
+            max_chunk_rows: 20,
+            sdk_candidates: ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
+        }},
+        "gemini-3.1-flash-lite": {{
+            label: "gemini-3.1-flash-lite",
+            role: "โมเดลสำรอง 1",
+            rpd_limit: 500,
+            max_chunk_chars: 3600,
+            max_chunk_rows: 18,
+            sdk_candidates: ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+        }},
+        "gemini-3.8-flash": {{
+            label: "gemini-3.8-flash",
+            role: "โมเดลสำรอง 2",
+            rpd_limit: 20,
+            max_chunk_chars: 4500,
+            max_chunk_rows: 25,
+            sdk_candidates: ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3-flash-preview", "gemini-2.0-flash"]
+        }}
+    }};
+    var GEMINI_FALLBACK_LIST = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    var cachedAiSummaryResult = null;
+    var cachedAiFilterSignature = "";
+
+    function getNextUtcMidnightMs() {{
+        var now = new Date();
+        return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
+    }}
+
+    function formatCountdownThaiHMS(totalSec) {{
+        var sec = Math.max(0, Math.floor(totalSec));
+        var h = Math.floor(sec / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        var s = sec % 60;
+        if (h > 0) return h + " ชม. " + m + " นาที " + s + " วินาที";
+        if (m > 0) return m + " นาที " + s + " วินาที";
+        return s + " วินาที";
+    }}
+
+    function loadLocalGeminiSessionState() {{
+        var nowMs = Date.now();
+        var utcDay = new Date(nowMs).toISOString().slice(0, 10);
+        var raw = null;
+        try {{
+            raw = JSON.parse(localStorage.getItem("scada_gemini_session_state") || "null");
+        }} catch (e) {{ raw = null; }}
+
+        if (!raw || raw.utc_day !== utcDay || !raw.models) {{
+            raw = {{ utc_day: utcDay, models: {{}}, last_used_model: "" }};
+        }}
+        GEMINI_FALLBACK_LIST.forEach(function(m) {{
+            if (!raw.models[m]) {{
+                raw.models[m] = {{
+                    rpd_used: 0,
+                    rpd_limit: GEMINI_MODELS_CONFIG[m].rpd_limit,
+                    cooldown_until_ms: 0,
+                    rpd_locked_until_ms: 0,
+                    last_error_type: "",
+                    last_error: ""
+                }};
+            }}
+            var st = raw.models[m];
+            if (st.cooldown_until_ms && nowMs >= st.cooldown_until_ms) {{
+                st.cooldown_until_ms = 0;
+                if (st.last_error_type === "RATE_LIMIT_429" || st.last_error_type === "TOKEN_LIMIT") {{
+                    st.last_error_type = "";
+                }}
+            }}
+            if (st.rpd_locked_until_ms && nowMs >= st.rpd_locked_until_ms) {{
+                st.rpd_locked_until_ms = 0;
+                st.rpd_used = 0;
+                if (st.last_error_type === "RPD_EXHAUSTED") st.last_error_type = "";
+            }}
+        }});
+        try {{
+            localStorage.setItem("scada_gemini_session_state", JSON.stringify(raw));
+        }} catch (e) {{}}
+        return raw;
+    }}
+
+    function saveLocalGeminiSessionState(st) {{
+        try {{
+            localStorage.setItem("scada_gemini_session_state", JSON.stringify(st));
+        }} catch (e) {{}}
+    }}
+
+    function markLocalModelLimit(modelName, limitType, errMsg) {{
+        var st = loadLocalGeminiSessionState();
+        if (!st.models[modelName]) return;
+        var m = st.models[modelName];
+        m.last_error = String(errMsg || "").slice(0, 200);
+        if (limitType === "RPD_EXHAUSTED" || m.rpd_used >= m.rpd_limit) {{
+            m.rpd_used = m.rpd_limit;
+            m.rpd_locked_until_ms = getNextUtcMidnightMs();
+            m.last_error_type = "RPD_EXHAUSTED";
+        }} else {{
+            // Rolling Window 60 วินาที
+            m.cooldown_until_ms = Date.now() + 60000;
+            m.last_error_type = limitType === "TOKEN_LIMIT" ? "TOKEN_LIMIT" : "RATE_LIMIT_429";
+        }}
+        saveLocalGeminiSessionState(st);
+        updateGeminiUiAndButtonState();
+    }}
+
+    function incrementLocalModelRpd(modelName) {{
+        var st = loadLocalGeminiSessionState();
+        if (!st.models[modelName]) return;
+        var m = st.models[modelName];
+        m.rpd_used = (m.rpd_used || 0) + 1;
+        st.last_used_model = modelName;
+        if (m.rpd_used >= m.rpd_limit) {{
+            m.rpd_locked_until_ms = getNextUtcMidnightMs();
+            m.last_error_type = "RPD_EXHAUSTED";
+        }}
+        saveLocalGeminiSessionState(st);
+        updateGeminiUiAndButtonState();
+    }}
+
+    function syncBackendStatusToLocal(serverState) {{
+        if (!serverState || !serverState.models) return;
+        var st = loadLocalGeminiSessionState();
+        var nowMs = Date.now();
+        GEMINI_FALLBACK_LIST.forEach(function(mName) {{
+            var sm = serverState.models[mName];
+            if (!sm || !st.models[mName]) return;
+            var lm = st.models[mName];
+            lm.rpd_used = Math.max(lm.rpd_used || 0, sm.rpd_used || 0);
+            if (sm.cooldown_remaining_sec > 0) {{
+                var srvCdMs = nowMs + (sm.cooldown_remaining_sec * 1000);
+                if (srvCdMs > (lm.cooldown_until_ms || 0)) lm.cooldown_until_ms = srvCdMs;
+            }}
+            if (sm.block_type === "RPD" || sm.rpd_reset_remaining_sec > 0) {{
+                lm.rpd_locked_until_ms = getNextUtcMidnightMs();
+                lm.last_error_type = "RPD_EXHAUSTED";
+            }}
+        }});
+        saveLocalGeminiSessionState(st);
+        updateGeminiUiAndButtonState();
+    }}
+
+    function evaluateModelBlockInfo(modelName, st, nowMs) {{
+        var m = (st.models && st.models[modelName]) ? st.models[modelName] : null;
+        if (!m) return {{ isBlocked: false, type: "READY", remainSec: 0, tooltip: "" }};
+
+        var cdRemSec = m.cooldown_until_ms > nowMs ? Math.ceil((m.cooldown_until_ms - nowMs) / 1000) : 0;
+        var isRpdFull = (m.rpd_used >= m.rpd_limit) || (m.rpd_locked_until_ms > nowMs);
+        var rpdRemSec = isRpdFull ? Math.max(1, Math.ceil((getNextUtcMidnightMs() - nowMs) / 1000)) : 0;
+
+        if (isRpdFull) {{
+            return {{
+                isBlocked: true,
+                type: "RPD",
+                remainSec: rpdRemSec,
+                tooltip: "⚠️ ติดโควต้ารายวัน (RPD) โมเดล " + modelName + " (" + m.rpd_used + "/" + m.rpd_limit + " RPD) จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(rpdRemSec) + ")"
+            }};
+        }}
+        if (cdRemSec > 0) {{
+            var reasonTxt = m.last_error_type === "TOKEN_LIMIT" ? "Token Limit (TPM)" : "Rate Limit (429)";
+            return {{
+                isBlocked: true,
+                type: "COOLDOWN_60S",
+                remainSec: cdRemSec,
+                tooltip: "⚠️ ติด " + reasonTxt + " โมเดล " + modelName + " ปลดล็อกใน " + cdRemSec + " วินาที"
+            }};
+        }}
+        return {{
+            isBlocked: false,
+            type: "READY",
+            remainSec: 0,
+            tooltip: "✅ โมเดล " + modelName + " พร้อมใช้งาน (ใช้ไป " + m.rpd_used + "/" + m.rpd_limit + " RPD)"
+        }};
+    }}
+
+    function updateGeminiUiAndButtonState() {{
+        var st = loadLocalGeminiSessionState();
+        var nowMs = Date.now();
+        var selEl = document.getElementById("geminiModelSelect");
+        var selectedMode = selEl ? selEl.value : "auto_fallback";
+        var statusBar = document.getElementById("geminiModelStatusBar");
+        var quotaTxt = document.getElementById("geminiSelectedQuotaText");
+
+        if (statusBar) {{
+            var chipsHtml = "";
+            GEMINI_FALLBACK_LIST.forEach(function(mName) {{
+                var info = evaluateModelBlockInfo(mName, st, nowMs);
+                var mObj = st.models[mName];
+                var cls = "gemini-model-chip ";
+                var badgeText = "";
+                if (info.type === "RPD") {{
+                    cls += "is-rpd";
+                    badgeText = "⛔ " + mName + ": เต็ม RPD (รีเซ็ต 07:00 น. · " + formatCountdownThaiHMS(info.remainSec) + ")";
+                }} else if (info.type === "COOLDOWN_60S") {{
+                    cls += "is-cooldown";
+                    badgeText = "⏳ " + mName + ": ติด 429 (" + info.remainSec + "s)";
+                }} else {{
+                    cls += "is-ready";
+                    badgeText = "● " + mName + " (" + mObj.rpd_used + "/" + mObj.rpd_limit + " RPD)";
+                }}
+                chipsHtml += '<span class="' + cls + '" title="' + info.tooltip + '">' + badgeText + '</span>';
+            }});
+            statusBar.innerHTML = chipsHtml;
+        }}
+
+        var buttonBlocked = false;
+        var activeTooltip = "";
+        var activeModelForRun = "";
+
+        if (selectedMode === "auto_fallback") {{
+            var availableModels = [];
+            var blockedInfos = [];
+            GEMINI_FALLBACK_LIST.forEach(function(mName) {{
+                var inf = evaluateModelBlockInfo(mName, st, nowMs);
+                if (!inf.isBlocked) availableModels.push(mName);
+                else blockedInfos.push(inf);
+            }});
+            if (availableModels.length > 0) {{
+                activeModelForRun = availableModels[0];
+                buttonBlocked = false;
+                if (quotaTxt) quotaTxt.textContent = "Auto Fallback → พร้อมใช้ (" + activeModelForRun + ")";
+                if (blockedInfos.length > 0) {{
+                    activeTooltip = "🔄 Auto Fallback สลับใช้ " + activeModelForRun + " อัตโนมัติ (" + blockedInfos[0].tooltip + ")";
+                }}
+            }} else {{
+                buttonBlocked = true;
+                var rpdAll = blockedInfos.every(function(b) {{ return b.type === "RPD"; }});
+                if (rpdAll && blockedInfos.length > 0) {{
+                    activeTooltip = "⚠️ ติดโควต้ารายวัน (RPD) ครบทุกโมเดล จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(blockedInfos[0].remainSec) + ")";
+                }} else {{
+                    var minCd = blockedInfos.filter(function(b) {{ return b.type === "COOLDOWN_60S"; }}).sort(function(a,b) {{ return a.remainSec - b.remainSec; }})[0];
+                    activeTooltip = minCd
+                        ? ("⚠️ ติด Rate Limit (429) ทุกโมเดลสำรอง ปลดล็อกใน " + minCd.remainSec + " วินาที")
+                        : (blockedInfos[0] ? blockedInfos[0].tooltip : "⚠️ โมเดลติดลิมิตการใช้งาน");
+                }}
+                if (quotaTxt) quotaTxt.textContent = "ติดลิมิตทุกโมเดล";
+            }}
+        }} else {{
+            var selInfo = evaluateModelBlockInfo(selectedMode, st, nowMs);
+            buttonBlocked = selInfo.isBlocked;
+            activeTooltip = selInfo.isBlocked ? selInfo.tooltip : "";
+            if (quotaTxt) {{
+                var mData = st.models[selectedMode];
+                quotaTxt.textContent = selInfo.isBlocked
+                    ? (selInfo.type === "RPD" ? "ติด RPD (รีเซ็ต 07:00 น.)" : ("ติด 429 รอ " + selInfo.remainSec + "s"))
+                    : ("โควต้า " + mData.rpd_used + "/" + mData.rpd_limit + " RPD");
+            }}
+        }}
+
+        var execBtn = document.getElementById("execReportBtn");
+        var previewBtn = document.getElementById("previewAiSummaryBtn");
+        var tooltipEl = document.getElementById("execReportBtnTooltip");
+        var wrapEl = document.getElementById("execReportBtnWrap");
+
+        if (execBtn && !execBtn.dataset.isGenerating) {{
+            execBtn.disabled = buttonBlocked;
+            execBtn.classList.toggle("is-disabled-limit", buttonBlocked);
+        }}
+        if (previewBtn && !previewBtn.dataset.isGenerating) {{
+            previewBtn.disabled = buttonBlocked;
+        }}
+        if (tooltipEl) {{
+            if (buttonBlocked || activeTooltip) {{
+                tooltipEl.textContent = activeTooltip;
+                tooltipEl.classList.add("has-tooltip");
+                if (wrapEl) wrapEl.setAttribute("title", activeTooltip);
+            }} else {{
+                tooltipEl.textContent = "พร้อมสรุปเนื้อหาด้วย Gemini API และส่งออกรายงาน Excel ขนาด A4";
+                tooltipEl.classList.remove("has-tooltip");
+                if (wrapEl) wrapEl.removeAttribute("title");
+            }}
+        }}
+    }}
+
+    function onGeminiModelChange() {{
+        updateGeminiUiAndButtonState();
+    }}
+
+    function toggleGeminiKeyVisibility() {{
+        var inp = document.getElementById("geminiApiKeyInput");
+        if (!inp) return;
+        inp.type = (inp.type === "password") ? "text" : "password";
+    }}
+
+    function simulateGeminiRateLimitUI(action) {{
+        var selEl = document.getElementById("geminiModelSelect");
+        var targetModel = (selEl && selEl.value !== "auto_fallback") ? selEl.value : "gemini-3.5-flash-lite";
+        var st = loadLocalGeminiSessionState();
+
+        if (action === "reset") {{
+            GEMINI_FALLBACK_LIST.forEach(function(m) {{
+                st.models[m].cooldown_until_ms = 0;
+                st.models[m].rpd_locked_until_ms = 0;
+                st.models[m].rpd_used = 0;
+                st.models[m].last_error_type = "";
+                st.models[m].last_error = "";
+            }});
+            saveLocalGeminiSessionState(st);
+        }} else if (action === "rate_limit_429") {{
+            markLocalModelLimit(targetModel, "RATE_LIMIT_429", "Simulated 429 Rate Limit (Rolling Window 60s)");
+        }} else if (action === "rpd_full") {{
+            markLocalModelLimit(targetModel, "RPD_EXHAUSTED", "Simulated RPD Daily Limit Reached");
+        }}
+
+        fetch("/api/gemini/simulate-limit", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ action: action, model: action === "reset" ? "all" : targetModel }})
+        }}).then(function(r) {{ return r.json(); }}).then(function(srv) {{
+            syncBackendStatusToLocal(srv);
+        }}).catch(function() {{}});
+
+        updateGeminiUiAndButtonState();
+    }}
+
+    // ตั้งเวลาอัปเดต Countdown Tooltip ทุก 1 วินาที (Rolling Window 60s และ RPD 07:00 น.)
+    setInterval(function() {{
+        var modalEl = document.getElementById("reportModalOverlay");
+        if (modalEl && modalEl.classList.contains("show")) {{
+            updateGeminiUiAndButtonState();
+        }}
+    }}, 1000);
+
+    function categorizeRowDetailJS(rawDetail) {{
+        var txt = String(rawDetail || "").trim();
+        if (!txt || txt === "-") return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)";
+        var lines = txt.split(/[\n\r]+|,\s*(?=[❌✅•\-])/).map(function(s) {{ return s.trim(); }}).filter(Boolean);
+        var comm = [], frtu = [], act = [];
+        lines.forEach(function(ln) {{
+            var clean = ln.replace(/^[•\-\s]+/, "").trim();
+            if (!clean) return;
+            var u = clean.toUpperCase();
+            if (/สื่อสาร|MODEM|SIM|3G|4G|OPTIC|FIBER|WRL|PING|สัญญาณ|ONLINE|สายอากาศ/.test(u)) comm.push(clean);
+            else if (/FRTU|RTU|BATTERY|แบต|FUSE|ฟิวส์|POWER|การ์ด|BOARD|CONTROL|RELAY|AC|DC|ตู้/.test(u)) frtu.push(clean);
+            else act.push(clean);
+        }});
+        var out = [];
+        if (comm.length) out.push("[ระบบสื่อสาร] " + comm.join("; "));
+        if (frtu.length) out.push("[อุปกรณ์ FRTU/ชุดควบคุม] " + frtu.join("; "));
+        if (act.length) out.push("[ผลการตรวจสอบ/แก้ไข] " + act.join("; "));
+        return out.length ? out.join("\n") : txt;
+    }}
+
+    function buildDeterministicSummaryJS(rows) {{
+        var total = rows.length;
+        var onlineCnt = 0, connCnt = 0, offCnt = 0, boCnt = 0, poCnt = 0, doneCnt = 0;
+        var commIssues = 0, frtuIssues = 0, powerIssues = 0;
+
+        rows.forEach(function(r) {{
+            var st = String(r.status || "").toUpperCase();
+            if (st.includes("ONLINE")) onlineCnt++;
+            else if (st.includes("CONNECTING")) connCnt++;
+            else if (st.includes("OFFLINE")) offCnt++;
+
+            var resp = String(r.resp || "-").trim();
+            if (resp.includes("ผบอ")) boCnt++;
+            if (resp.includes("ผอส")) poCnt++;
+            if (resp === "-" || resp === "" || resp === "ไม่มีค่า") doneCnt++;
+
+            var dUp = String(r.detail || "").toUpperCase();
+            if (/สื่อสาร|MODEM|SIM|WRL|OPTIC|สัญญาณ/.test(dUp)) commIssues++;
+            if (/FRTU|RTU|การ์ด|CONTROL|BOARD|โมดูล/.test(dUp)) frtuIssues++;
+            if (/แบต|BATTERY|ฟิวส์|FUSE|AC|DC|ไฟเลี้ยง/.test(dUp)) powerIssues++;
+        }});
+        var otherCnt = Math.max(0, total - onlineCnt - connCnt - offCnt);
+
+        var md =
+            "สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด " + total + " รายการ)\n\n" +
+            "1. ภาพรวมสถานะหลังดำเนินการ\n" +
+            "• ตรวจสอบและแก้ไขรวมทั้งสิ้น: " + total + " รายการ\n" +
+            "• อุปกรณ์กลับมา Online ปกติ: " + onlineCnt + " ชุด (" + (total ? (onlineCnt/total*100).toFixed(1) : "0.0") + "%)\n" +
+            "• สถานะ Connecting (รอจูนสัญญาณ/ตรวจสอบร่วม): " + connCnt + " ชุด\n" +
+            "• สถานะ Offline (ยังไม่ออนไลน์): " + offCnt + " ชุด\n\n" +
+            "2. การจำแนกตามหมวดหมู่สาเหตุและอาการชำรุด\n" +
+            "• หมวดระบบสื่อสารและซิมการ์ด (ผอส.กสฟ.ฉ.2): พบเกี่ยวข้อง " + commIssues + " รายการ\n" +
+            "• หมวดอุปกรณ์ชุดควบคุม FRTU (ผบอ.กบษ.ฉ.2): พบเกี่ยวข้อง " + frtuIssues + " รายการ\n" +
+            "• หมวดระบบแหล่งจ่ายไฟและแบตเตอรี่ (AC/DC/Fuse): พบเกี่ยวข้อง " + powerIssues + " รายการ\n\n" +
+            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบดำเนินการต่อ\n" +
+            "• รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข: " + boCnt + " รายการ\n" +
+            "• รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข: " + poCnt + " รายการ\n" +
+            "• ดำเนินการแก้ไขเสร็จสิ้นเรียบร้อย (-): " + doneCnt + " รายการ";
+
+        return {{
+            summary_markdown: md,
+            metrics: {{
+                total: total,
+                online: onlineCnt,
+                connecting: connCnt,
+                offline: offCnt,
+                other: otherCnt,
+                wait_bo: boCnt,
+                wait_po: poCnt,
+                completed: doneCnt,
+                comm_issues: commIssues,
+                frtu_issues: frtuIssues,
+                power_issues: powerIssues
+            }},
+            categories: [
+                {{
+                    category: "1. หมวดสถานะอุปกรณ์หลังการเข้าตรวจสอบ (Post-Inspection Status)",
+                    items: [
+                        "อุปกรณ์กลับมา Online ปกติ: " + onlineCnt + " ชุด",
+                        "สถานะ Connecting: " + connCnt + " ชุด",
+                        "สถานะ Offline: " + offCnt + " ชุด",
+                        "สถานะอื่นๆ / Initializing: " + otherCnt + " ชุด"
+                    ]
+                }},
+                {{
+                    category: "2. หมวดสาเหตุและอาการชำรุดที่ตรวจพบ (Fault Categorization)",
+                    items: [
+                        "ระบบสื่อสารและโครงข่าย (Modem / SIM / WRL / สายสัญญาณ): " + commIssues + " รายการ",
+                        "อุปกรณ์ชุดควบคุมหลัก (FRTU / การ์ดควบคุม / ตู้ควบคุม): " + frtuIssues + " รายการ",
+                        "ระบบแหล่งจ่ายไฟและแบตเตอรี่ (Battery / Fuse / AC-DC): " + powerIssues + " รายการ"
+                    ]
+                }},
+                {{
+                    category: "3. หมวดหน่วยงานผู้รับผิดชอบดำเนินการต่อ (Action Assignment)",
+                    items: [
+                        "รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข: " + boCnt + " รายการ",
+                        "รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข: " + poCnt + " รายการ",
+                        "ดำเนินการแก้ไขเสร็จสิ้น (-): " + doneCnt + " รายการ"
+                    ]
+                }}
+            ]
+        }};
+    }}
+
+    async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey) {{
+        var st = loadLocalGeminiSessionState();
+        var nowMs = Date.now();
+        var order = (preferredModel === "auto_fallback" || !GEMINI_MODELS_CONFIG[preferredModel])
+            ? GEMINI_FALLBACK_LIST.slice()
+            : [preferredModel].concat(GEMINI_FALLBACK_LIST.filter(function(m) {{ return m !== preferredModel; }}));
+
+        var lastErr = "";
+        for (var i = 0; i < order.length; i++) {{
+            var logicalModel = order[i];
+            var blk = evaluateModelBlockInfo(logicalModel, st, nowMs);
+            if (blk.isBlocked) {{
+                if (preferredModel !== "auto_fallback" && logicalModel === preferredModel) {{
+                    throw new Error(blk.tooltip);
+                }}
+                continue;
+            }}
+            var candidates = GEMINI_MODELS_CONFIG[logicalModel].sdk_candidates;
+            for (var c = 0; c < candidates.length; c++) {{
+                var sdkId = candidates[c];
+                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(sdkId) + ":generateContent?key=" + encodeURIComponent(apiKey);
+                try {{
+                    var resp = await fetch(url, {{
+                        method: "POST",
+                        headers: {{ "Content-Type": "application/json" }},
+                        body: JSON.stringify({{
+                            contents: [{{ parts: [{{ text: promptText }}] }}],
+                            generationConfig: {{ temperature: 0.2 }}
+                        }})
+                    }});
+                    if (resp.status === 404) continue;
+                    if (resp.status === 429) {{
+                        var errBody429 = await resp.text();
+                        var isRpd = /perday|per_day|daily|rpd/i.test(errBody429);
+                        markLocalModelLimit(logicalModel, isRpd ? "RPD_EXHAUSTED" : "RATE_LIMIT_429", errBody429);
+                        lastErr = "HTTP 429 Rate Limit on " + logicalModel;
+                        break;
+                    }}
+                    if (!resp.ok) {{
+                        var errBody = await resp.text();
+                        if (/token|tpm|too large|payload/i.test(errBody)) {{
+                            throw new Error("TOKEN_LIMIT_EXCEEDED: " + errBody);
+                        }}
+                        lastErr = "HTTP " + resp.status + ": " + errBody;
+                        break;
+                    }}
+                    var data = await resp.json();
+                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\n").trim();
+                    if (textOut) {{
+                        incrementLocalModelRpd(logicalModel);
+                        return {{ text: textOut, used_model: logicalModel, sdk_model: sdkId }};
+                    }}
+                }} catch (err) {{
+                    if (String(err.message || "").includes("TOKEN_LIMIT_EXCEEDED")) throw err;
+                    lastErr = String(err.message || err);
+                }}
+            }}
+        }}
+        throw new Error(lastErr || "ไม่สามารถเชื่อมต่อ Gemini API ได้ในขณะนี้");
+    }}
+
+    async function summarizeInspectionRowsWithGeminiJS(filteredRows) {{
+        var selEl = document.getElementById("geminiModelSelect");
+        var preferredModel = selEl ? selEl.value : "auto_fallback";
+        var keyEl = document.getElementById("geminiApiKeyInput");
+        var apiKey = keyEl ? keyEl.value.trim() : "";
+
+        var baseExec = buildDeterministicSummaryJS(filteredRows);
+        var workingRows = filteredRows.map(function(r) {{
+            var copy = Object.assign({{}}, r);
+            copy.ai_detail = categorizeRowDetailJS(r.detail);
+            return copy;
+        }});
+
+        // 1. พยายามเรียกผ่าน Flask Backend API (/api/gemini/summarize) ก่อน
+        try {{
+            var resp = await fetch("/api/gemini/summarize", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{
+                    rows: workingRows,
+                    model: preferredModel,
+                    api_key: apiKey
+                }})
+            }});
+            if (resp.status === 200 || resp.status === 429) {{
+                var srvData = await resp.json();
+                if (srvData.session_state) syncBackendStatusToLocal(srvData.session_state);
+                if (srvData.rows && srvData.rows.length === workingRows.length) {{
+                    return srvData;
+                }}
+            }}
+        }} catch (srvErr) {{
+            // กรณีรันไฟล์ HTML แบบ Standalone (ไม่ได้เปิดผ่าน Flask Server) จะทำ Auto Chunking ผ่าน Browser REST API โดยตรง
+        }}
+
+        // 2. Fallback ทำ Auto Chunking + เรียก Gemini API โดยตรง (กรณีเปิดไฟล์ scada_detailed_map.html แบบ Standalone)
+        var maxRowsPerChunk = 18;
+        var chunks = [];
+        for (var i = 0; i < workingRows.length; i += maxRowsPerChunk) {{
+            chunks.push(workingRows.slice(i, i + maxRowsPerChunk));
+        }}
+
+        var chunkSummaries = [];
+        var usedModelName = preferredModel === "auto_fallback" ? "gemini-3.5-flash-lite" : preferredModel;
+        var warningMsg = "";
+
+        for (var cIdx = 0; cIdx < chunks.length; cIdx++) {{
+            var ch = chunks[cIdx];
+            var linesStr = ch.map(function(r, idx) {{
+                return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะ: " + r.status;
+            }}).join("\n");
+
+            var prompt =
+                "คุณคือวิศวกรระบบ SCADA โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นหมวดหมู่ชัดเจน\n" +
+                "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"...\"}}],\"chunk_summary\":\"...\"}}\n\n" +
+                linesStr;
+            try {{
+                var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, apiKey);
+                usedModelName = aiRes.used_model;
+                var mJson = aiRes.text.match(/\{{[\s\S]*\}}/);
+                if (mJson) {{
+                    var parsed = JSON.parse(mJson[0]);
+                    (parsed.rows || []).forEach(function(item) {{
+                        if (typeof item.idx === "number" && ch[item.idx] && item.clean_detail) {{
+                            ch[item.idx].ai_detail = String(item.clean_detail).trim();
+                            ch[item.idx].detail = ch[item.idx].ai_detail;
+                        }}
+                    }});
+                    if (parsed.chunk_summary) chunkSummaries.push(parsed.chunk_summary);
+                }}
+            }} catch (err) {{
+                warningMsg = String(err.message || err);
+                break;
+            }}
+        }}
+
+        var finalSummaryMd = baseExec.summary_markdown;
+        if (chunkSummaries.length > 0 && !warningMsg) {{
+            try {{
+                var synthPrompt =
+                    "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) แยกตามหมวดหมู่ชัดเจน สวยงาม อ่านง่าย จากข้อมูลสรุปย่อยต่อไปนี้:\n- " +
+                    chunkSummaries.join("\n- ");
+                var synthRes = await callDirectGeminiRestFromBrowser(synthPrompt, preferredModel, apiKey);
+                if (synthRes.text) finalSummaryMd = synthRes.text;
+                usedModelName = synthRes.used_model;
+            }} catch (e) {{}}
+        }}
+
+        workingRows.forEach(function(r) {{
+            if (r.ai_detail) r.detail = r.ai_detail;
+        }});
+
+        return {{
+            success: !warningMsg,
+            warning: warningMsg,
+            used_model: usedModelName,
+            chunk_count: chunks.length,
+            rows: workingRows,
+            summary_markdown: finalSummaryMd,
+            categories: baseExec.categories,
+            metrics: baseExec.metrics
+        }};
+    }}
+
+    async function runGeminiPreviewOnly() {{
+        var previewBtn = document.getElementById("previewAiSummaryBtn");
+        var previewBox = document.getElementById("aiSummaryPreviewBox");
+        var previewContent = document.getElementById("aiSummaryPreviewContent");
+        var previewTitle = document.getElementById("aiSummaryPreviewTitle");
+
+        var filteredResult = getFilteredReportResult();
+        if (!filteredResult.rows || filteredResult.rows.length === 0) {{
+            showCustomAlert("ไม่พบข้อมูลรายงานที่ตรงกับตัวกรองที่เลือก");
+            return;
+        }}
+
+        if (previewBtn) {{
+            previewBtn.dataset.isGenerating = "1";
+            previewBtn.disabled = true;
+            previewBtn.textContent = "⏳ กำลังสรุปด้วย Gemini AI...";
+        }}
+        if (previewBox && previewContent) {{
+            previewBox.classList.add("show");
+            previewContent.textContent = "กำลังแบ่ง Chunk อัตโนมัติและประมวลผลสรุปรายงานผ่าน Google Gemini API...";
+        }}
+
+        try {{
+            var aiRes = await summarizeInspectionRowsWithGeminiJS(filteredResult.rows);
+            cachedAiSummaryResult = aiRes;
+            if (previewTitle) {{
+                previewTitle.textContent = "✨ รายงานสรุปภาพรวมแยกหมวดหมู่ (โมเดล: " + (aiRes.used_model || "Auto") + " · " + (aiRes.chunk_count || 1) + " Chunks)";
+            }}
+            if (previewContent) {{
+                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\n\n") : "";
+                previewContent.textContent = note + (aiRes.summary_markdown || "");
+            }}
+        }} catch (err) {{
+            if (previewContent) previewContent.textContent = "เกิดข้อผิดพลาด: " + String(err.message || err);
+        }} finally {{
+            if (previewBtn) {{
+                delete previewBtn.dataset.isGenerating;
+                previewBtn.textContent = "✨ พรีวิวผลสรุป AI";
+            }}
+            updateGeminiUiAndButtonState();
+        }}
+    }}
+
     async function generateExcelReport() {{
         var btn = document.getElementById('execReportBtn');
-        btn.disabled = true; btn.innerHTML = 'กำลังสร้างไฟล์ A4...';
+        var st = loadLocalGeminiSessionState();
+        var selEl = document.getElementById('geminiModelSelect');
+        var selectedMode = selEl ? selEl.value : 'auto_fallback';
+
+        // ตรวจสอบว่าโมเดลที่เลือกติด Rate Limit / RPD หรือไม่
+        if (selectedMode !== 'auto_fallback') {{
+            var blkInfo = evaluateModelBlockInfo(selectedMode, st, Date.now());
+            if (blkInfo.isBlocked) {{
+                updateGeminiUiAndButtonState();
+                return;
+            }}
+        }}
+
+        btn.dataset.isGenerating = "1";
+        btn.disabled = true;
+        btn.innerHTML = '⏳ กำลังสรุปด้วย Gemini AI และสร้างไฟล์ A4...';
 
         var params = getCurrentFilterParams();
         var startInput = params.startInput;
@@ -4263,8 +5910,9 @@ def generate_map():
         var dateValidationMessage = validateReportDateRange(startInput, endInput);
         if (dateValidationMessage) {{
             showCustomAlert(dateValidationMessage);
-            btn.disabled = false;
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> ดาวน์โหลด Excel ขนาด A4 (.xlsx)';
+            delete btn.dataset.isGenerating;
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> สรุปและ Export รายงาน (.xlsx)';
+            updateGeminiUiAndButtonState();
             return;
         }}
 
@@ -4273,12 +5921,44 @@ def generate_map():
 
         if (filteredData.length === 0) {{
             showCustomAlert("ไม่พบข้อมูลรายงานที่ตรงกับช่วงวันที่และตัวกรองที่เลือก");
-            btn.disabled = false;
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> ดาวน์โหลด Excel ขนาด A4 (.xlsx)';
+            delete btn.dataset.isGenerating;
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> สรุปและ Export รายงาน (.xlsx)';
+            updateGeminiUiAndButtonState();
             return;
         }}
 
+        var useAiEl = document.getElementById("enableGeminiAiCheckbox");
+        var useGeminiAi = useAiEl ? useAiEl.checked : true;
+        var aiSummaryData = null;
+
+        if (useGeminiAi) {{
+            try {{
+                aiSummaryData = await summarizeInspectionRowsWithGeminiJS(filteredData);
+                if (aiSummaryData && aiSummaryData.rows && aiSummaryData.rows.length === filteredData.length) {{
+                    filteredData = aiSummaryData.rows;
+                }}
+                var previewBox = document.getElementById("aiSummaryPreviewBox");
+                var previewContent = document.getElementById("aiSummaryPreviewContent");
+                var previewTitle = document.getElementById("aiSummaryPreviewTitle");
+                if (previewBox && previewContent && aiSummaryData) {{
+                    previewBox.classList.add("show");
+                    if (previewTitle) {{
+                        previewTitle.textContent = "✨ รายงานสรุปภาพรวมแยกหมวดหมู่ (โมเดล: " + (aiSummaryData.used_model || "Auto") + " · " + (aiSummaryData.chunk_count || 1) + " Chunks)";
+                    }}
+                    previewContent.textContent = aiSummaryData.summary_markdown || "";
+                }}
+            }} catch (aiErr) {{
+                aiSummaryData = buildDeterministicSummaryJS(filteredData);
+            }}
+        }} else {{
+            aiSummaryData = buildDeterministicSummaryJS(filteredData);
+        }}
+
         var workbook = new ExcelJS.Workbook();
+
+        // =========================================================================
+        // Sheet ที่ 1: ตารางรายการตรวจสอบและแก้ไขอุปกรณ์ (พร้อมรายละเอียดที่เกลาและจัดหมวดหมู่ใหม่)
+        // =========================================================================
         var ws = workbook.addWorksheet('Report', {{
             pageSetup: {{
                 paperSize: 9, // A4 Standard
@@ -4295,14 +5975,14 @@ def generate_map():
         var lastColLetter = includeWorkerCol ? 'H' : 'G';
         ws.mergeCells('A1:' + lastColLetter + '1');
         var titleCell = ws.getCell('A1');
-        titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine";
+        titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine (เรียบเรียงด้วย Gemini AI)";
         titleCell.font = {{ name: 'TH SarabunPSK', size: 20, bold: true }};
         titleCell.alignment = {{ vertical: 'middle', horizontal: 'center' }};
         ws.getRow(1).height = 30;
 
         var headers = includeWorkerCol
-            ? ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
-            : ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
+            ? ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
+            : ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
 
         var headerRow = ws.addRow(headers);
         headerRow.height = 36;
@@ -4317,9 +5997,10 @@ def generate_map():
         var currentStatus = filteredData[0].status;
 
         filteredData.forEach(function(row, i) {{
+            var cleanDetailText = row.ai_detail || row.detail || '-';
             var rowValues = includeWorkerCol
-                ? [ i+1, row.cmd, row.site, row.loc, row.detail, row.resp, splitOperatorNames(row.workers).join('\\n') || '-', row.status ]
-                : [ i+1, row.cmd, row.site, row.loc, row.detail, row.resp, row.status ];
+                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\n') || '-', row.status ]
+                : [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, row.status ];
 
             var dataRow = ws.addRow(rowValues);
             dataRow.eachCell(function(cell, colNumber) {{
@@ -4349,7 +6030,7 @@ def generate_map():
             ws.getColumn(2).width = 18;
             ws.getColumn(3).width = 18;
             ws.getColumn(4).width = 25;
-            ws.getColumn(5).width = 52;
+            ws.getColumn(5).width = 56;
             ws.getColumn(6).width = 28;
             ws.getColumn(7).width = 30;
             ws.getColumn(8).width = 20;
@@ -4358,10 +6039,92 @@ def generate_map():
             ws.getColumn(2).width = 20;
             ws.getColumn(3).width = 20;
             ws.getColumn(4).width = 28;
-            ws.getColumn(5).width = 62;
+            ws.getColumn(5).width = 65;
             ws.getColumn(6).width = 32;
             ws.getColumn(7).width = 22;
         }}
+
+        // =========================================================================
+        // Sheet ที่ 2: รายงานสรุปภาพรวมแยกหมวดหมู่โดย Google Gemini API (ขนาด A4)
+        // =========================================================================
+        var wsAi = workbook.addWorksheet('สรุปภาพรวม AI (A4)', {{
+            pageSetup: {{
+                paperSize: 9, // A4 Standard
+                orientation: 'landscape',
+                fitToPage: true,
+                fitToWidth: 1,
+                fitToHeight: 0,
+                horizontalCentered: true,
+                margins: {{ left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }}
+            }}
+        }});
+
+        wsAi.mergeCells('A1:D1');
+        var aiTitle = wsAi.getCell('A1');
+        aiTitle.value = "รายงานสรุปผลการตรวจเช็คและแก้ไขอุปกรณ์ SCADA แยกตามหมวดหมู่ (Gemini AI Summary)";
+        aiTitle.font = {{ name: 'TH SarabunPSK', size: 20, bold: true, color: {{ argb: 'FF1A73E8' }} }};
+        aiTitle.alignment = {{ vertical: 'middle', horizontal: 'center' }};
+        wsAi.getRow(1).height = 32;
+
+        wsAi.mergeCells('A2:D2');
+        var aiMeta = wsAi.getCell('A2');
+        var usedModelStr = (aiSummaryData && aiSummaryData.used_model) ? aiSummaryData.used_model : selectedMode;
+        var chunkCntStr = (aiSummaryData && aiSummaryData.chunk_count) ? aiSummaryData.chunk_count : 1;
+        aiMeta.value = "โมเดลที่ใช้ประมวลผล: " + usedModelStr + " | จำนวน Chunks อัตโนมัติ: " + chunkCntStr + " ชุด | จำนวนอุปกรณ์ที่วิเคราะห์: " + filteredData.length + " รายการ";
+        aiMeta.font = {{ name: 'TH SarabunPSK', size: 15, italic: true }};
+        aiMeta.alignment = {{ vertical: 'middle', horizontal: 'center' }};
+        wsAi.getRow(2).height = 24;
+
+        var catHeaderRow = wsAi.addRow(['ลำดับหมวด', 'หมวดหมู่การวิเคราะห์ (Category)', 'รายละเอียดและสถิติที่ตรวจพบ', 'หมายเหตุ / การติดตามผล']);
+        catHeaderRow.height = 30;
+        catHeaderRow.eachCell(function(c) {{
+            c.font = {{ name: 'TH SarabunPSK', size: 16, bold: true }};
+            c.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFE8F0FE' }} }};
+            c.alignment = {{ vertical: 'middle', horizontal: 'center', wrapText: true }};
+            c.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+        }});
+
+        var cats = (aiSummaryData && aiSummaryData.categories) ? aiSummaryData.categories : [];
+        cats.forEach(function(catObj, cIdx) {{
+            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\n");
+            var rRow = wsAi.addRow([
+                cIdx + 1,
+                catObj.category || "-",
+                itemsJoined || "-",
+                cIdx === 0 ? "อ้างอิงสถานะหลังตรวจสอบ" : (cIdx === 1 ? "จำแนกจากบันทึกการเข้าแก้ไข" : "แยกตามหน่วยงานรับผิดชอบ")
+            ]);
+            rRow.eachCell(function(c, colN) {{
+                c.font = {{ name: 'TH SarabunPSK', size: 16, bold: colN === 2 }};
+                c.alignment = {{ vertical: 'top', horizontal: colN === 1 ? 'center' : 'left', wrapText: true }};
+                c.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+            }});
+        }});
+
+        wsAi.addRow([]);
+        var synthTitleRow = wsAi.addRow(['บทสรุปผู้บริหารและข้อเสนอแนะจาก Gemini API (Executive Narrative Summary)', '', '', '']);
+        var synthRowNum = synthTitleRow.number;
+        wsAi.mergeCells('A' + synthRowNum + ':D' + synthRowNum);
+        var stCell = wsAi.getCell('A' + synthRowNum);
+        stCell.font = {{ name: 'TH SarabunPSK', size: 17, bold: true }};
+        stCell.fill = {{ type: 'pattern', pattern: 'solid', fgColor: {{ argb: 'FFF1F3F4' }} }};
+        stCell.alignment = {{ vertical: 'middle', horizontal: 'left' }};
+        stCell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+        synthTitleRow.height = 28;
+
+        var mdBody = (aiSummaryData && aiSummaryData.summary_markdown) ? aiSummaryData.summary_markdown : "-";
+        var synthBodyRow = wsAi.addRow([mdBody, '', '', '']);
+        var bodyRowNum = synthBodyRow.number;
+        wsAi.mergeCells('A' + bodyRowNum + ':D' + bodyRowNum);
+        var sbCell = wsAi.getCell('A' + bodyRowNum);
+        sbCell.font = {{ name: 'TH SarabunPSK', size: 16 }};
+        sbCell.alignment = {{ vertical: 'top', horizontal: 'left', wrapText: true }};
+        sbCell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
+        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\n').length * 20));
+
+        wsAi.getColumn(1).width = 12;
+        wsAi.getColumn(2).width = 36;
+        wsAi.getColumn(3).width = 64;
+        wsAi.getColumn(4).width = 28;
 
         var buffer = await workbook.xlsx.writeBuffer();
         var blob = new Blob([buffer], {{ type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }});
@@ -4378,15 +6141,16 @@ def generate_map():
             ? '_Selected_' + selectedWorkers.length + '_Workers'
             : '_All_Workers';
         var dedupeSuffix = params.dedupeMode === 'latest' ? '_UniqueLatest' : (params.dedupeMode === 'earliest' ? '_UniqueFirst' : '');
-        link.download = 'SCADA_Report_A4_' + safeFilenameDate + workerFileSuffix + dedupeSuffix + '.xlsx';
+        link.download = 'SCADA_Inspection_Report_AI_A4_' + safeFilenameDate + workerFileSuffix + dedupeSuffix + '.xlsx';
 
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
 
-        btn.disabled = false; btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> ดาวน์โหลด Excel ขนาด A4 (.xlsx)';
-        closeReportModal();
+        delete btn.dataset.isGenerating;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> สรุปและ Export รายงาน (.xlsx)';
+        updateGeminiUiAndButtonState();
     }}
 
-    function hideCustomPanel() {{
+function hideCustomPanel() {{
         var panel = document.getElementById('customInfoPanel');
         if (panel) panel.style.display = 'none';
         clearHighlight();
@@ -6021,6 +7785,56 @@ def map_data():
     except Exception:
         trigger_update_if_needed()
         return "<style>body{background:#f0f2f5;}</style>", 503
+
+@app.route('/api/gemini/status', methods=['GET'])
+def api_gemini_status():
+    """คืนค่าสถานะ session_state ของโมเดล Gemini ทั้งหมด (Cooldown 60s และ RPD Reset 07:00 น.)"""
+    return jsonify(sync_and_get_session_state())
+
+
+@app.route('/api/gemini/simulate-limit', methods=['POST'])
+def api_gemini_simulate_limit():
+    """Endpoint สำหรับจำลองหรือรีเซ็ตสถานะ Rate Limit (429) / RPD เพื่อทดสอบระบบปุ่ม Disabled และ Hover Tooltip"""
+    payload = request.get_json(silent=True) or {}
+    action = payload.get("action", "reset")
+    target_model = payload.get("model", "gemini-3.5-flash-lite")
+    if action == "reset":
+        reset_model_limit_state(target_model if target_model != "all" else None)
+    elif action == "rate_limit_429":
+        mark_model_rate_limited(target_model, error_msg="Simulated 429 Too Many Requests (Rolling Window 60s)", is_rpd=False)
+    elif action == "rpd_full":
+        mark_model_rate_limited(target_model, error_msg="Simulated RPD Daily Quota Exhausted (Reset 07:00 TH)", is_rpd=True)
+    return jsonify(sync_and_get_session_state())
+
+
+@app.route('/api/gemini/summarize', methods=['POST'])
+def api_gemini_summarize():
+    """Endpoint หลังบ้านสำหรับรับข้อมูลรายงานมาทำ Auto Chunking + สรุปด้วย Gemini API + Auto Fallback"""
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get("rows") or []
+    preferred_model = payload.get("model") or "auto_fallback"
+    custom_api_key = str(payload.get("api_key") or "").strip() or DEFAULT_GEMINI_API_KEY
+
+    if not rows:
+        return jsonify({
+            "success": False,
+            "error": "ไม่พบข้อมูลสำหรับการสรุปรายงาน",
+            "session_state": sync_and_get_session_state(),
+        }), 400
+
+    try:
+        result = summarize_inspection_report_with_gemini(
+            rows=rows,
+            preferred_model=preferred_model,
+            api_key=custom_api_key,
+        )
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "session_state": sync_and_get_session_state(),
+        }), 429
 
 @app.route('/api/version')
 def api_version():
