@@ -339,11 +339,11 @@ except ImportError:
     genai_types = None
     HAS_GOOGLE_GENAI_SDK = False
 
-# ตั้งค่า API Key เริ่มต้น (ห้ามฝัง API Key ลงในโค้ดเด็ดขาด อ่านจาก Environment Variable เท่านั้น หรือรับจากช่องกรอก UI)
+# CHANGED: ตั้งค่า Default/Hardcode API Key (Free Tier) ในโค้ดเป็นค่าเริ่มต้น พร้อมรองรับ Environment Variable
 DEFAULT_GEMINI_API_KEY = (
     os.environ.get("GEMINI_API_KEY")
     or os.environ.get("GOOGLE_API_KEY")
-    or ""
+    or "AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ"
 )
 
 # System Instruction มาตรฐานวิศวกรรม (Engineering Format: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์])
@@ -483,7 +483,9 @@ def _create_initial_session_state():
         }
     return {
         "utc_day": utc_day_str,
-        "selected_model": "auto_fallback",
+        # CHANGED: ตั้งค่าเริ่มต้น (Default) ให้เลือกโมเดลหลักที่ดีที่สุดและคุ้มค่าที่สุด (Primary: gemini-3.5-flash-lite)
+        "selected_model": "gemini-3.5-flash-lite",
+        "auto_fallback_enabled": True,
         "api_key_configured": bool(DEFAULT_GEMINI_API_KEY),
         "models": models_state,
         "last_used_model": "",
@@ -697,12 +699,13 @@ def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperatur
         raise RuntimeError(f"HTTP {http_err.code}: {err_body or http_err.reason}")
 
 
-def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_key=None, system_instruction=None):
+# CHANGED: ปรับ Default preferred_model เป็นโมเดลหลัก (gemini-3.5-flash-lite) และเปิด Auto-Fallback (Smart Routing) เสมอเมื่อโมเดลหลักติดโควต้าเต็ม
+def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-flash-lite", api_key=None, system_instruction=None):
     """
     เรียกใช้งาน Gemini API พร้อมระบบ:
     - ตรวจสอบสถานะ Cooldown (60s Rolling Window) และ RPD (07:00 น. เวลาไทย)
     - ระบบ Auto-Mapping ไปยัง Model ID จริงใน SDK เพื่อป้องกัน Error 404
-    - ระบบ Auto Fallback สลับไปใช้โมเดลสำรองในรายการเมื่อเกิด Error 429 / RPD โดยไม่ทำให้โปรแกรมล่ม
+    - ระบบ Auto Fallback (Smart Routing) สลับไปใช้โมเดลที่เก่งรองลงมาอัตโนมัติเมื่อโมเดลหลักติด Error 429 / RPD
     """
     state_snap = sync_and_get_session_state()
     models_info = state_snap["models"]
@@ -710,7 +713,7 @@ def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_
     if preferred_model == "auto_fallback" or preferred_model not in GEMINI_FREE_TIER_MODELS:
         candidate_logical_models = list(GEMINI_FALLBACK_ORDER)
     else:
-        # เริ่มจากโมเดลที่ผู้ใช้เลือก หากติด 429 ระหว่างทำงานให้สลับไปโมเดลสำรองใน Fallback List อัตโนมัติ
+        # เริ่มจากโมเดลหลักที่เลือก หากติด Rate Limit / โควต้าเต็ม ให้เลื่อนลำดับไปยังโมเดลสำรองใน GEMINI_FALLBACK_ORDER อัตโนมัติ
         candidate_logical_models = [preferred_model] + [
             m for m in GEMINI_FALLBACK_ORDER if m != preferred_model
         ]
@@ -726,8 +729,7 @@ def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_
                 "status": "skipped_blocked",
                 "reason": m_status.get("tooltip", "Blocked"),
             })
-            if preferred_model != "auto_fallback" and logical_model == preferred_model:
-                raise RuntimeError(m_status.get("tooltip") or f"โมเดล {logical_model} ติดลิมิตการใช้งาน")
+            # CHANGED: Auto-Fallback (Smart Routing) ข้ามโมเดลที่โควต้าเต็มไปยังโมเดลที่เก่งรองลงมาโดยอัตโนมัติ
             continue
 
         sdk_candidates = GEMINI_FREE_TIER_MODELS[logical_model]["sdk_candidates"]
@@ -2895,13 +2897,15 @@ def generate_map():
     .report-preview-count {{ background: var(--bg-active); color: var(--accent-primary); padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }}
     .report-preview-count.is-invalid {{ background: #fce8e6; color: #c5221f; white-space: normal; }}
 
-    .report-btn-group {{ display: flex; gap: 8px; flex-wrap: wrap; }}
-    .report-btn {{ flex: 1; min-height: 40px; padding: 8px 14px; border-radius: 8px; border: none; font-size: 12.5px; font-weight: 500; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 6px; }}
-    .report-btn-cancel {{ background: var(--bg-subtle); color: var(--text-primary); border: 1px solid var(--border-hairline); flex: 0 0 auto; }}
-    .report-btn-cancel:hover {{ background: var(--bg-hover); }}
-    .report-btn-dl {{ background: var(--accent-primary); color: #ffffff; font-weight: 600; }}
-    .report-btn-dl:hover {{ background: var(--accent-hover); }}
-    .report-note {{ font-size: 11px; color: var(--text-secondary); margin: 8px 0 0; line-height: 1.45; }}
+    /* CHANGED: ปรับปุ่ม "รีเซ็ตค่า" และ "ยกเลิก" เป็นสไตล์ Ghost/Outline สีเทา และจัดวางปุ่ม "สรุปและ Export รายงาน" (Primary Blue) ให้โดดเด่นที่สุดอยู่ด้านล่างสุด */
+    .report-btn-group {{ display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }}
+    .report-btn-secondary-row {{ display: flex; gap: 8px; width: 100%; }}
+    .report-btn {{ flex: 1; min-height: 40px; padding: 8px 14px; border-radius: 10px; border: none; font-size: 12.5px; font-weight: 500; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 6px; transition: all 0.16s ease; }}
+    .report-btn-cancel {{ background: transparent; color: var(--text-secondary); border: 1px solid var(--border-hairline); flex: 1; }}
+    .report-btn-cancel:hover {{ background: var(--bg-hover); color: var(--text-primary); border-color: #9aa0a6; }}
+    .report-btn-dl {{ background: var(--accent-primary); color: #ffffff; font-weight: 600; min-height: 44px; font-size: 13.5px; width: 100%; box-shadow: 0 2px 8px rgba(26, 115, 232, 0.26); }}
+    .report-btn-dl:hover {{ background: var(--accent-hover); box-shadow: 0 4px 12px rgba(26, 115, 232, 0.34); }}
+    .report-note {{ font-size: 11px; color: var(--text-secondary); margin: 8px 0 0; line-height: 1.45; text-align: center; }}
 
     /* --- Map Station Popup Card --- */
     .custom-info-panel {{ display: none; position: fixed; top: 68px; left: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 88px); background: var(--bg-surface); color: var(--text-primary); border-radius: 16px; box-shadow: var(--shadow-float); border: 1px solid var(--border-hairline); z-index: 99999; flex-direction: column; overflow: hidden; pointer-events: auto; }}
@@ -3610,19 +3614,19 @@ def generate_map():
         }}
     }}
     
-    /* --- Gemini AI Report Summarizer UI (Collapsible + Premium Model Selector + Quota Tooltips) --- */
+    /* CHANGED: Refactor สไตล์ Gemini AI Section & Model Dropdown Menu เป็นสไตล์ Minimalist, Clean & Functional (Google / Gemini / ChatGPT Style) */
     .gemini-ai-section {{
         margin: 0 0 12px;
         background: var(--bg-subtle);
         border: 1px solid var(--border-subtle);
-        border-radius: 14px;
+        border-radius: 12px;
         overflow: visible;
-        transition: border-color 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.22s ease, background-color 0.22s ease;
+        transition: border-color 0.2s ease, background-color 0.2s ease;
     }}
     .gemini-ai-section.is-open {{
-        background: linear-gradient(145deg, rgba(26,115,232,0.04) 0%, rgba(139,92,246,0.04) 100%);
-        border-color: rgba(26,115,232,0.38);
-        box-shadow: 0 4px 20px rgba(26,115,232,0.07);
+        background: var(--bg-surface);
+        border-color: var(--border-hairline);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
     }}
     .gemini-collapse-trigger {{
         width: 100%;
@@ -3630,55 +3634,54 @@ def generate_map():
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        padding: 12px 15px;
+        padding: 11px 14px;
         background: transparent;
         border: 0;
-        border-radius: 14px;
+        border-radius: 12px;
         color: var(--text-primary);
         cursor: pointer;
         text-align: left;
-        transition: background-color 0.18s ease;
+        transition: background-color 0.15s ease;
     }}
     .gemini-collapse-trigger:hover {{
-        background: rgba(26,115,232,0.05);
+        background: var(--bg-hover);
     }}
     .gemini-trigger-left {{
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 9px;
         min-width: 0;
         flex-wrap: wrap;
     }}
+    /* CHANGED: ปรับไอคอนหัวข้อ AI ให้เป็นโทนสีเดียว (Monochrome Outline) ดูสะอาดตา */
     .gemini-sparkle-icon {{
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        background: linear-gradient(135deg, #1a73e8, #7c3aed);
-        color: #ffffff;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        color: var(--text-secondary);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        box-shadow: 0 2px 8px rgba(26,115,232,0.28);
     }}
     .gemini-title-badge {{
-        font-size: 13px;
+        font-size: 12.5px;
         font-weight: 600;
         color: var(--text-primary);
-        letter-spacing: -0.1px;
     }}
     .gemini-tier-pill {{
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        padding: 2px 9px;
+        gap: 4px;
+        padding: 2px 8px;
         border-radius: 999px;
         background: var(--bg-surface);
         border: 1px solid var(--border-hairline);
         font-size: 10.5px;
-        font-weight: 600;
-        color: var(--accent-primary);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        font-weight: 500;
+        color: var(--text-secondary);
     }}
     .gemini-trigger-right {{
         display: inline-flex;
@@ -3696,37 +3699,33 @@ def generate_map():
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: 50%;
-        background: var(--bg-surface);
-        border: 1px solid var(--border-hairline);
-        transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.18s ease;
+        color: var(--text-secondary);
+        transition: transform 0.2s ease;
     }}
     .gemini-ai-section.is-open .gemini-chevron-icon {{
         transform: rotate(180deg);
-        background: var(--bg-active);
-        color: var(--accent-primary);
-        border-color: rgba(26,115,232,0.35);
+        color: var(--text-primary);
     }}
     .gemini-collapsible-body {{
         display: none;
-        padding: 4px 15px 15px;
+        padding: 4px 14px 14px;
         border-top: 1px solid var(--border-subtle);
-        animation: geminiSlideDown 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+        animation: geminiSlideDown 0.18s ease;
     }}
     .gemini-collapsible-body.show {{
         display: block;
     }}
     @keyframes geminiSlideDown {{
-        from {{ opacity: 0; transform: translateY(-4px); }}
+        from {{ opacity: 0; transform: translateY(-3px); }}
         to {{ opacity: 1; transform: translateY(0); }}
     }}
 
     .gemini-grid-row {{
         display: grid;
-        grid-template-columns: 1.25fr 1fr;
+        grid-template-columns: 1.2fr 1fr;
         gap: 12px;
-        margin-top: 12px;
-        margin-bottom: 12px;
+        margin-top: 10px;
+        margin-bottom: 10px;
     }}
     @media (max-width: 640px) {{
         .gemini-grid-row {{ grid-template-columns: 1fr; }}
@@ -3734,63 +3733,59 @@ def generate_map():
     .gemini-field {{
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 5px;
         min-width: 0;
         position: relative;
     }}
     .gemini-field label {{
         font-size: 11.5px;
         color: var(--text-secondary);
-        font-weight: 600;
+        font-weight: 500;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 6px;
     }}
 
-    /* Premium API Key Input Wrapper */
+    /* CHANGED: ปรับ UI ช่องใส่ API Key ให้เรียบง่าย พร้อมปุ่มไอคอนรูปตา (Show/Hide) โทน Monochrome */
     .gemini-key-input-wrap {{
         position: relative;
         display: flex;
         align-items: center;
-        background: var(--bg-surface);
+        background: var(--bg-subtle);
         border: 1px solid var(--border-hairline);
-        border-radius: 10px;
-        transition: border-color 0.18s ease, box-shadow 0.18s ease;
-        min-height: 42px;
-        padding: 0 8px 0 11px;
+        border-radius: 9px;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
+        min-height: 40px;
+        padding: 0 6px 0 10px;
     }}
     .gemini-key-input-wrap:focus-within {{
+        background: var(--bg-surface);
         border-color: var(--accent-primary);
-        box-shadow: 0 0 0 3px rgba(26,115,232,0.14);
-    }}
-    .gemini-key-icon {{
-        color: var(--text-secondary);
-        display: flex;
-        align-items: center;
-        margin-right: 8px;
-        flex-shrink: 0;
     }}
     .gemini-input {{
         width: 100%;
         background: transparent;
         border: none;
         color: var(--text-primary);
-        padding: 8px 4px;
+        padding: 7px 4px;
         font-size: 12.5px;
-        min-height: 38px;
+        min-height: 36px;
+        letter-spacing: 0.4px;
     }}
     .gemini-key-toggle-btn {{
-        border: 1px solid var(--border-subtle);
-        background: var(--bg-subtle);
+        border: none;
+        background: transparent;
         color: var(--text-secondary);
-        font-size: 11px;
-        font-weight: 500;
+        width: 30px;
+        height: 30px;
         border-radius: 6px;
-        padding: 4px 8px;
+        padding: 0;
         cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.15s ease, color 0.15s ease;
         flex-shrink: 0;
     }}
     .gemini-key-toggle-btn:hover {{
@@ -3798,52 +3793,56 @@ def generate_map():
         background: var(--bg-hover);
     }}
 
-    /* --- Premium Custom Model Selector (ChatGPT / Gemini / Vercel Style) --- */
+    /* CHANGED: ปรับโครงสร้าง Model Dropdown Menu สไตล์ Minimalist & Clean (ไอคอน Monochrome, ชื่อตัวหนา, คำอธิบายสั้น, Badge โควต้า และเครื่องหมายติ๊กถูกชิดขวา) */
     .model-selector-custom {{
         position: relative;
         width: 100%;
     }}
     .model-selector-trigger {{
         width: 100%;
-        min-height: 42px;
-        padding: 7px 12px;
-        background: var(--bg-surface);
+        min-height: 40px;
+        padding: 6px 10px;
+        background: var(--bg-subtle);
         border: 1px solid var(--border-hairline);
-        border-radius: 10px;
+        border-radius: 9px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
+        gap: 8px;
         cursor: pointer;
         text-align: left;
-        transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        transition: border-color 0.15s ease, background-color 0.15s ease;
     }}
-    .model-selector-trigger:hover {{
-        border-color: var(--accent-primary);
-        box-shadow: 0 2px 8px rgba(26,115,232,0.10);
-    }}
+    .model-selector-trigger:hover,
     .model-selector-custom.is-open .model-selector-trigger {{
+        background: var(--bg-surface);
         border-color: var(--accent-primary);
-        box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
     }}
     .model-trigger-main {{
         display: flex;
         align-items: center;
-        gap: 9px;
+        gap: 8px;
         min-width: 0;
         flex: 1;
     }}
     .model-trigger-icon {{
-        width: 26px;
-        height: 26px;
-        border-radius: 7px;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-size: 13px;
-        background: var(--bg-active);
+        color: var(--text-secondary);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
         flex-shrink: 0;
+    }}
+    .model-trigger-icon svg {{
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
     }}
     .model-trigger-text {{
         display: flex;
@@ -3877,6 +3876,14 @@ def generate_map():
         white-space: nowrap;
         flex-shrink: 0;
     }}
+    .model-trigger-badge.is-warn {{
+        background: #fef0e6;
+        color: #c25100;
+    }}
+    .model-trigger-badge.is-full {{
+        background: #fce8e6;
+        color: #c5221f;
+    }}
     body.theme-dark .model-trigger-badge {{
         background: rgba(22,163,74,0.2);
         color: #4ade80;
@@ -3886,19 +3893,19 @@ def generate_map():
     .model-selector-menu {{
         display: none;
         position: absolute;
-        top: calc(100% + 6px);
+        top: calc(100% + 5px);
         left: 0;
         width: 100%;
-        min-width: 310px;
+        min-width: 320px;
         background: var(--bg-surface);
         border: 1px solid var(--border-hairline);
-        border-radius: 12px;
-        box-shadow: 0 12px 32px rgba(0,0,0,0.16), 0 2px 6px rgba(0,0,0,0.08);
-        padding: 6px;
+        border-radius: 11px;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06);
+        padding: 5px;
         z-index: 10000020;
         flex-direction: column;
-        gap: 4px;
-        animation: geminiSlideDown 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+        gap: 2px;
+        animation: geminiSlideDown 0.15s ease;
     }}
     .model-selector-custom.is-open .model-selector-menu {{
         display: flex;
@@ -3909,100 +3916,101 @@ def generate_map():
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        padding: 9px 11px;
-        border-radius: 9px;
+        padding: 8px 10px;
+        border-radius: 8px;
         border: 1px solid transparent;
         background: transparent;
         cursor: pointer;
         text-align: left;
-        transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+        transition: background-color 0.14s ease;
     }}
     .model-option-card:hover:not(.is-disabled) {{
         background: var(--bg-hover);
-        border-color: var(--border-subtle);
     }}
     .model-option-card.is-selected {{
-        background: var(--bg-active);
-        border-color: rgba(26,115,232,0.35);
+        background: var(--bg-subtle);
     }}
     .model-option-card.is-disabled {{
-        background: var(--bg-subtle) !important;
-        border-color: transparent !important;
-        opacity: 0.58;
+        opacity: 0.55;
         cursor: not-allowed !important;
-        filter: grayscale(0.85);
     }}
     .model-opt-left {{
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         gap: 9px;
         min-width: 0;
         flex: 1;
     }}
+    /* CHANGED: ไอคอนหน้าชื่อโมเดลแบบ Outline โทนสีเดียว (Monochrome) */
     .model-opt-icon {{
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        background: var(--bg-subtle);
-        border: 1px solid var(--border-subtle);
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        background: transparent;
+        border: 1px solid var(--border-hairline);
+        color: var(--text-secondary);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-size: 14px;
         flex-shrink: 0;
-        margin-top: 1px;
+    }}
+    .model-opt-icon svg {{
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
     }}
     .model-option-card.is-selected .model-opt-icon {{
-        background: var(--accent-primary);
-        color: #ffffff;
-        border-color: var(--accent-primary);
+        color: var(--text-primary);
+        border-color: var(--text-secondary);
+        background: var(--bg-surface);
     }}
     .model-opt-info {{
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 1px;
         min-width: 0;
     }}
     .model-opt-title-row {{
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-wrap: wrap;
     }}
     .model-opt-title {{
         font-size: 12.5px;
-        font-weight: 600;
+        font-weight: 700;
         color: var(--text-primary);
-    }}
-    .model-opt-role-tag {{
-        font-size: 10px;
-        font-weight: 600;
-        padding: 1px 6px;
-        border-radius: 4px;
-        background: var(--bg-subtle);
-        color: var(--text-secondary);
-        border: 1px solid var(--border-hairline);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }}
     .model-opt-sub {{
         font-size: 11px;
         color: var(--text-secondary);
-        line-height: 1.35;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }}
+    /* CHANGED: จัดวาง Badge สถานะโควต้า (เขียว=ว่าง, แดง=เต็ม) และเครื่องหมายติ๊กถูก (✓) ให้ชิดขวาอย่างเป็นระเบียบ */
     .model-opt-right {{
         display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 3px;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
         flex-shrink: 0;
+        margin-left: auto;
     }}
     .model-opt-quota {{
         font-size: 10.5px;
         font-weight: 600;
-        padding: 2px 7px;
+        padding: 2px 8px;
         border-radius: 999px;
         background: #e6f4ea;
         color: #137333;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
     }}
     .model-opt-quota.is-warn {{
         background: #fef0e6;
@@ -4011,6 +4019,30 @@ def generate_map():
     .model-opt-quota.is-full {{
         background: #fce8e6;
         color: #c5221f;
+    }}
+    body.theme-dark .model-opt-quota {{
+        background: rgba(22,163,74,0.2);
+        color: #4ade80;
+    }}
+    body.theme-dark .model-opt-quota.is-full {{
+        background: rgba(220,38,38,0.22);
+        color: #f87171;
+    }}
+    .model-opt-check {{
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent-primary);
+        flex-shrink: 0;
+    }}
+    .model-opt-check svg {{
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2.3;
     }}
 
     /* Hover Tooltip on Disabled Model Option Card */
@@ -4047,7 +4079,7 @@ def generate_map():
         margin-top: 10px;
         padding: 10px 12px;
         border-radius: 10px;
-        background: var(--bg-surface);
+        background: var(--bg-subtle);
         border: 1px solid var(--border-hairline);
     }}
     .gemini-prompt-box.show {{
@@ -4055,79 +4087,26 @@ def generate_map():
     }}
     .gemini-prompt-textarea {{
         width: 100%;
-        min-height: 110px;
+        min-height: 100px;
         border: 1px solid var(--border-hairline);
         border-radius: 8px;
         padding: 8px 10px;
         font-size: 11.5px;
         color: var(--text-primary);
-        background: var(--bg-subtle);
+        background: var(--bg-surface);
         line-height: 1.45;
         resize: vertical;
         margin-top: 6px;
     }}
     .gemini-prompt-textarea:focus {{
         border-color: var(--accent-primary);
-        background: var(--bg-surface);
-    }}
-
-    .gemini-model-status-bar {{
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px dashed var(--border-hairline);
-    }}
-    .gemini-model-chip {{
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 3px 9px;
-        border-radius: 999px;
-        font-size: 10.5px;
-        font-weight: 500;
-        background: var(--bg-surface);
-        border: 1px solid var(--border-hairline);
-        color: var(--text-secondary);
-        transition: all 0.15s ease;
-    }}
-    .gemini-model-chip.is-ready {{
-        border-color: rgba(22,163,74,0.35);
-        color: #137333;
-        background: #e6f4ea;
-    }}
-    body.theme-dark .gemini-model-chip.is-ready {{
-        background: rgba(22,163,74,0.18);
-        color: #4ade80;
-    }}
-    .gemini-model-chip.is-cooldown {{
-        border-color: rgba(234,88,12,0.45);
-        color: #c25100;
-        background: #fef0e6;
-    }}
-    body.theme-dark .gemini-model-chip.is-cooldown {{
-        background: rgba(234,88,12,0.22);
-        color: #fb923c;
-    }}
-    .gemini-model-chip.is-rpd {{
-        border-color: rgba(220,38,38,0.45);
-        color: #c5221f;
-        background: #fce8e6;
-        opacity: 0.78;
-    }}
-    body.theme-dark .gemini-model-chip.is-rpd {{
-        background: rgba(220,38,38,0.22);
-        color: #f87171;
     }}
 
     /* Hover Tooltip Wrapper สำหรับปุ่มสรุปและ Export รายงาน (ทำงานแม้ปุ่มถูก Disabled) */
     .report-btn-tooltip-wrap {{
         position: relative;
-        flex: 1.4;
+        width: 100%;
         display: flex;
-        min-width: 220px;
     }}
     .report-btn-tooltip-wrap .report-btn {{
         width: 100%;
@@ -4868,90 +4847,86 @@ def generate_map():
                 <div id="reportPreviewCount" class="report-preview-count">กำลังตรวจสอบ...</div>
             </div>
 
-            <!-- ส่วนตั้งค่า Google Gemini API (Free Tier) - เริ่มต้นแบบพับเก็บไว้ (Collapsed by default) -->
+            <!-- CHANGED: ส่วนตั้งค่า AI Model Selector สไตล์ Minimalist, Clean & Functional (พับเก็บเป็นค่าเริ่มต้น) -->
             <section class="gemini-ai-section" id="geminiAiSectionCard" aria-labelledby="geminiAiHeading">
                 <button type="button" class="gemini-collapse-trigger" id="geminiCollapseBtn" onclick="toggleGeminiAiPanel()" aria-expanded="false">
                     <div class="gemini-trigger-left">
                         <span class="gemini-sparkle-icon">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L14.8 9.2L22 12L14.8 14.8L12 22L9.2 14.8L2 12L9.2 9.2L12 2Z"/></svg>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
                         </span>
                         <span class="gemini-title-badge" id="geminiAiHeading">
-                            สรุปและจัดหมวดหมู่รายงานอัตโนมัติด้วย Google Gemini API (Free Tier)
+                            สรุปและเรียบเรียงรายงานด้วย Gemini AI
                         </span>
-                        <span class="gemini-tier-pill" id="geminiCollapsedSummaryPill">⚡ Gemini 3.5 Flash Lite · โครงสร้างวิศวกรรม</span>
+                        <span class="gemini-tier-pill" id="geminiCollapsedSummaryPill">Gemini 3.5 Flash Lite · Primary</span>
                     </div>
                     <div class="gemini-trigger-right">
-                        <span id="geminiCollapseLabel">ตั้งค่า AI ▾</span>
+                        <span id="geminiCollapseLabel">ตั้งค่า AI</span>
                         <span class="gemini-chevron-icon">
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                         </span>
                     </div>
                 </button>
 
                 <div class="gemini-collapsible-body" id="geminiCollapsibleBody">
                     <div class="gemini-grid-row">
-                        <!-- Custom Premium Model Selector (Selectable Cards Popover + Quota Tooltips) -->
+                        <!-- CHANGED: Model Dropdown Menu แบบ Clean & Functional (เลือกโมเดลหลักที่คุ้มค่าที่สุดเป็น Default + รองรับ Auto Fallback Smart Routing) -->
                         <div class="gemini-field">
                             <label>
-                                <span>เลือกโมเดล AI (สำหรับเกลาประโยคแบบวิศวกรรม)</span>
-                                <span id="geminiSelectedQuotaText" style="color:var(--accent-primary);font-weight:600;">โควต้าพร้อมใช้งาน</span>
+                                <span>โมเดล AI (Smart Routing)</span>
+                                <span id="geminiSelectedQuotaText" style="color:var(--text-secondary);font-weight:500;">พร้อมใช้งาน</span>
                             </label>
                             <input type="hidden" id="geminiModelSelect" value="gemini-3.5-flash-lite">
                             <div class="model-selector-custom" id="geminiCustomModelSelector">
                                 <button type="button" class="model-selector-trigger" id="geminiCustomModelTrigger" onclick="toggleCustomModelMenu(event)" aria-haspopup="listbox" aria-expanded="false">
                                     <div class="model-trigger-main">
-                                        <span class="model-trigger-icon" id="geminiTriggerIcon">⚡</span>
+                                        <span class="model-trigger-icon" id="geminiTriggerIcon">
+                                            <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                        </span>
                                         <div class="model-trigger-text">
                                             <span class="model-trigger-name" id="geminiTriggerName">Gemini 3.5 Flash Lite</span>
-                                            <span class="model-trigger-desc" id="geminiTriggerDesc">โมเดลหลัก · ความเร็วสูงและโควต้า 500 RPD</span>
+                                            <span class="model-trigger-desc" id="geminiTriggerDesc">Primary · เร็วและคุ้มค่าที่สุด (แนะนำ)</span>
                                         </div>
                                     </div>
-                                    <span class="model-trigger-badge" id="geminiTriggerBadge">0/500 RPD</span>
-                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--text-secondary)" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                    <span class="model-trigger-badge" id="geminiTriggerBadge">ว่าง · 500 RPD</span>
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text-secondary)" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                                 </button>
                                 <div class="model-selector-menu" id="geminiCustomModelMenu" role="listbox" aria-label="รายการโมเดล Gemini AI"></div>
                             </div>
                         </div>
 
-                        <!-- ช่องกรอก API Key แบบปลอดภัย (ห้ามฝังคีย์ในโค้ด) -->
+                        <!-- CHANGED: ช่องใส่ API Key (ตั้งค่า Default Free Tier Key เป็นค่าเริ่มต้น ซ่อนเป็นจุด •••••••• พร้อมปุ่มรูปตา Show/Hide) -->
                         <div class="gemini-field">
                             <label for="geminiApiKeyInput">
-                                <span>Gemini API Key (Free Tier / Google AI Studio)</span>
-                                <span style="font-size:10.5px;color:var(--text-muted);font-weight:400;">ไม่ฝังคีย์ในโค้ด</span>
+                                <span>API Key (Free Tier)</span>
+                                <span style="font-size:10.5px;color:var(--text-muted);font-weight:400;">Default Key พร้อมใช้งาน</span>
                             </label>
                             <div class="gemini-key-input-wrap">
-                                <span class="gemini-key-icon">
-                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                </span>
-                                <input type="password" id="geminiApiKeyInput" class="gemini-input" value="" placeholder="กรอก Gemini API Key (AIza...) ที่นี่" autocomplete="off" oninput="saveUserGeminiApiKey(this.value)">
-                                <button type="button" class="gemini-key-toggle-btn" onclick="toggleGeminiKeyVisibility()">แสดง/ซ่อน</button>
+                                <input type="password" id="geminiApiKeyInput" class="gemini-input" value="AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ" placeholder="••••••••••••••••••••••••" autocomplete="off" oninput="saveUserGeminiApiKey(this.value)">
+                                <button type="button" class="gemini-key-toggle-btn" id="geminiKeyToggleBtn" onclick="toggleGeminiKeyVisibility()" title="แสดง API Key" aria-label="แสดงหรือซ่อน API Key">
+                                    <svg id="geminiKeyEyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
                     </div>
 
+                    <!-- CHANGED: ลบปุ่มทดสอบ (ทดสอบ 429, ทดสอบ RPD เต็ม, รีเซ็ตโควต้า) และ Status Pill ด้านล่างออก คงไว้เฉพาะเครื่องมือหลักที่จำเป็น -->
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
                             <input type="checkbox" id="enableGeminiAiCheckbox" checked style="width:15px;height:15px;accent-color:var(--accent-primary);cursor:pointer;">
-                            <span>เกลาประโยคโครงสร้างวิศวกรรม <strong>[สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์]</strong> + สร้าง Sheet สรุป</span>
+                            <span>เรียบเรียงโครงสร้างวิศวกรรม <strong>[สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์]</strong></span>
                         </label>
                         <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
                             <button type="button" class="report-mini-btn" onclick="toggleEngineeringPromptBox()" title="ดูหรือปรับแต่ง System Prompt สำหรับวิศวกร">
-                                ⚙️ ตั้งค่า Prompt วิศวกร
+                                ตั้งค่า Prompt
                             </button>
-                            <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                                📝 จัดการประโยครายแถวก่อน Export
+                            <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()">
+                                แก้ไขประโยครายแถว
                             </button>
-                            <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="background:var(--bg-active);border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                                ✨ ให้ AI เกลาประโยค & พรีวิวสรุป
-                            </button>
-                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rate_limit_429')" title="จำลอง Error 429 (ล็อก 60 วินาที)">
-                                ทดสอบ 429 (60s)
-                            </button>
-                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rpd_full')" title="จำลองโควต้ารายวันเต็ม (รีเซ็ต 07:00 น.)">
-                                ทดสอบ RPD เต็ม
-                            </button>
-                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('reset')" title="รีเซ็ตสถานะล็อกทั้งหมด">
-                                รีเซ็ตโควต้า
+                            <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="color:var(--accent-primary);border-color:rgba(26,115,232,0.35);font-weight:500;">
+                                พรีวิวสรุป AI
                             </button>
                         </div>
                     </div>
@@ -4959,15 +4934,13 @@ def generate_map():
                     <!-- กล่องดูและปรับแต่ง System Prompt โครงสร้างวิศวกรรม 3 ส่วน -->
                     <div id="engineeringPromptBox" class="gemini-prompt-box">
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                            <span style="font-size:11.5px;font-weight:600;color:var(--accent-primary);">
-                                🛠️ System Instruction (Prompt วิศวกรผู้จัดทำรายงาน: [สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์])
+                            <span style="font-size:11.5px;font-weight:600;color:var(--text-primary);">
+                                System Instruction ([สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์])
                             </span>
                             <button type="button" class="report-mini-btn" onclick="resetEngineeringPromptDefault()">คืนค่าเริ่มต้น</button>
                         </div>
                         <textarea id="geminiCustomPromptInput" class="gemini-prompt-textarea"></textarea>
                     </div>
-
-                    <div class="gemini-model-status-bar" id="geminiModelStatusBar"></div>
                 </div>
             </section>
 
@@ -4975,12 +4948,12 @@ def generate_map():
             <div id="sentenceManagerBox" class="sentence-manager-box">
                 <div class="sentence-mgr-header">
                     <span class="sentence-mgr-title">
-                        📝 หน้าต่างจัดการประโยครายละเอียดการตรวจสอบ (แก้ไข/ตรวจสอบก่อนกด Export)
+                        จัดการประโยครายละเอียดการตรวจสอบ (แก้ไขก่อนกด Export)
                     </span>
                     <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">[สาเหตุ→การดำเนินการ→ผลลัพธ์] เกลาทุกแถว</button>
-                        <button type="button" class="report-mini-btn" onclick="resetCustomRowSentences()" title="คืนค่าข้อความต้นฉบับ">↺ คืนค่าต้นฉบับ</button>
-                        <button type="button" class="report-mini-btn" onclick="document.getElementById('sentenceManagerBox').classList.remove('show')">ซ่อนหน้าต่าง</button>
+                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">จัดรูปแบบทุกแถว</button>
+                        <button type="button" class="report-mini-btn" onclick="resetCustomRowSentences()" title="คืนค่าข้อความต้นฉบับ">คืนค่าต้นฉบับ</button>
+                        <button type="button" class="report-mini-btn" onclick="document.getElementById('sentenceManagerBox').classList.remove('show')">ปิด</button>
                     </div>
                 </div>
                 <div id="sentenceManagerList" class="sentence-mgr-list"></div>
@@ -4989,15 +4962,18 @@ def generate_map():
             <!-- กล่องพรีวิวผลสรุปภาพรวมจาก Gemini API ก่อนกดดาวน์โหลด -->
             <div id="aiSummaryPreviewBox" class="ai-summary-preview-box">
                 <div class="ai-summary-preview-header">
-                    <span id="aiSummaryPreviewTitle">✨ ตัวอย่างรายงานสรุปภาพรวมแยกหมวดหมู่ (Gemini AI)</span>
+                    <span id="aiSummaryPreviewTitle">ตัวอย่างรายงานสรุปภาพรวมแยกหมวดหมู่ (Gemini AI)</span>
                     <button type="button" class="report-mini-btn" onclick="document.getElementById('aiSummaryPreviewBox').classList.remove('show')">ซ่อนพรีวิว</button>
                 </div>
                 <div id="aiSummaryPreviewContent"></div>
             </div>
 
+            <!-- CHANGED: ปุ่ม "รีเซ็ตค่า" และ "ยกเลิก" เป็น Ghost/Outline สีเทา ส่วนปุ่ม "สรุปและ Export รายงาน" โดดเด่นที่สุดอยู่ด้านล่างสุด (Primary Blue) -->
             <div class="report-btn-group">
-                <button class="report-btn report-btn-cancel" type="button" onclick="resetAllReportFilters()">รีเซ็ตค่า</button>
-                <button class="report-btn report-btn-cancel" type="button" onclick="closeReportModal()">ยกเลิก</button>
+                <div class="report-btn-secondary-row">
+                    <button class="report-btn report-btn-cancel" type="button" onclick="resetAllReportFilters()">รีเซ็ตค่า</button>
+                    <button class="report-btn report-btn-cancel" type="button" onclick="closeReportModal()">ยกเลิก</button>
+                </div>
                 <div id="execReportBtnWrap" class="report-btn-tooltip-wrap">
                     <button id="execReportBtn" class="report-btn report-btn-dl" type="button" onclick="generateExcelReport()">
                         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> สรุปและ Export รายงาน (.xlsx)
@@ -5005,7 +4981,7 @@ def generate_map():
                     <div id="execReportBtnTooltip" class="gemini-hover-tooltip" role="tooltip"></div>
                 </div>
             </div>
-            <p class="report-note">* ไฟล์รายงานตั้งค่าหน้ากระดาษขนาด A4 แนวนอน (Fit to 1 Page Wide) พร้อมพิมพ์ทันที</p>
+                        <p class="report-note">* ไฟล์รายงานตั้งค่าหน้ากระดาษขนาด A4 แนวนอน (Fit to 1 Page Wide) พร้อมพิมพ์ทันที</p>
         </div>
         <div id="reportWorkerDropdown" class="report-worker-dropdown" role="listbox" aria-label="ผลการค้นหาผู้ปฏิบัติงาน"></div>
     </div>
@@ -5888,14 +5864,28 @@ def generate_map():
         "- ห้ามใช้คำเยิ่นเย้อหรือคำเชื่อมที่พรรณนาเกินความจำเป็น\\n" +
         "- กรณีที่ข้อมูลนำเข้าไม่ครบถ้วนทั้ง 3 ส่วน ให้พยายามจัดรูปแบบจากข้อมูลที่มีให้ใกล้เคียงโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] มากที่สุด โดยไม่เติมข้อมูลมั่ว";
 
+    // CHANGED: ตั้งค่า Default/Hardcode API Key (Free Tier) ในโค้ดเป็นค่าเริ่มต้น
+    var DEFAULT_FREE_TIER_API_KEY = "AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ";
+
+    // CHANGED: ไอคอน SVG แบบ Outline โทนสีเดียว (Monochrome) แทนการใช้ Emoji หลากสีที่รกตา
+    var MODEL_MONO_ICONS = {{
+        bolt: '<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        routing: '<svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>',
+        layers: '<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+        cpu: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>',
+        lock: '<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+        check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
+    }};
+
+    // CHANGED: ปรับโครงสร้างข้อมูลโมเดลให้กระชับ ชัดเจน และใช้ไอคอน Monochrome Outline
     var GEMINI_MODELS_CONFIG = {{
         "gemini-3.5-flash-lite": {{
             id: "gemini-3.5-flash-lite",
-            icon: "⚡",
+            iconSvg: MODEL_MONO_ICONS.bolt,
             title: "Gemini 3.5 Flash Lite",
             label: "gemini-3.5-flash-lite",
-            role: "Primary · แนะนำ",
-            desc: "เน้นความเร็วสูง ประหยัดโควต้า เกลาประโยควิศวกรรมแม่นยำ",
+            role: "Primary",
+            desc: "โมเดลหลัก เร็วและคุ้มค่าที่สุดสำหรับสรุปรายงาน",
             rpd_limit: 500,
             max_chunk_chars: 3800,
             max_chunk_rows: 20,
@@ -5903,11 +5893,11 @@ def generate_map():
         }},
         "auto_fallback": {{
             id: "auto_fallback",
-            icon: "🔄",
+            iconSvg: MODEL_MONO_ICONS.routing,
             title: "Auto Fallback (Smart Routing)",
             label: "auto_fallback",
-            role: "Auto Switch",
-            desc: "สลับโมเดลสำรองอัตโนมัติทันทีเมื่อโมเดลหลักติด Rate Limit",
+            role: "Smart Routing",
+            desc: "สลับไปเลือกโมเดลที่เก่งรองลงมาอัตโนมัติเมื่อโควต้าเต็ม",
             rpd_limit: 1020,
             max_chunk_chars: 3800,
             max_chunk_rows: 20,
@@ -5915,11 +5905,11 @@ def generate_map():
         }},
         "gemini-3.1-flash-lite": {{
             id: "gemini-3.1-flash-lite",
-            icon: "🛡️",
+            iconSvg: MODEL_MONO_ICONS.layers,
             title: "Gemini 3.1 Flash Lite",
             label: "gemini-3.1-flash-lite",
             role: "Fallback 1",
-            desc: "โมเดลสำรองลำดับที่ 1 เสถียรสำหรับงานสรุปรายงานจำนวนมาก",
+            desc: "โมเดลสำรองอันดับ 1 เสถียรและรองรับงานปริมาณมาก",
             rpd_limit: 500,
             max_chunk_chars: 3600,
             max_chunk_rows: 18,
@@ -5927,11 +5917,11 @@ def generate_map():
         }},
         "gemini-3.8-flash": {{
             id: "gemini-3.8-flash",
-            icon: "🧠",
+            iconSvg: MODEL_MONO_ICONS.cpu,
             title: "Gemini 3.8 Flash",
             label: "gemini-3.8-flash",
-            role: "Fallback 2 · Deep",
-            desc: "วิเคราะห์เชิงลึกและสังเคราะห์บทสรุปผู้บริหาร (โควต้า 20 RPD)",
+            role: "Fallback 2",
+            desc: "โมเดลสำรองอันดับ 2 เน้นวิเคราะห์เชิงลึก",
             rpd_limit: 20,
             max_chunk_chars: 4500,
             max_chunk_rows: 25,
@@ -5939,11 +5929,11 @@ def generate_map():
         }},
         "gemini-3.5-pro-exp": {{
             id: "gemini-3.5-pro-exp",
-            icon: "🔒",
-            title: "Gemini 3.5 Pro (Experimental)",
+            iconSvg: MODEL_MONO_ICONS.lock,
+            title: "Gemini 3.5 Pro (Exp)",
             label: "gemini-3.5-pro-exp",
-            role: "Pro Tier",
-            desc: "โมเดลขนาดใหญ่พิเศษ (จำลองสถานะโควต้าเต็ม / Free Tier ไม่รองรับ)",
+            role: "Pro",
+            desc: "โมเดลวิเคราะห์ขั้นสูง (โควต้าเต็มใน Free Tier)",
             rpd_limit: 10,
             max_chunk_chars: 4000,
             max_chunk_rows: 20,
@@ -5953,7 +5943,9 @@ def generate_map():
         }}
     }};
     var GEMINI_FALLBACK_LIST = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    // CHANGED: ตั้งค่าให้โมเดลหลักที่ดีที่สุดและคุ้มค่าที่สุด (gemini-3.5-flash-lite) เป็นตัวเลือกแรกสุด ตามด้วย Auto Fallback (Smart Routing)
     var GEMINI_SELECTOR_ORDER = ["gemini-3.5-flash-lite", "auto_fallback", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-pro-exp"];
+    var autoFallbackSmartRoutingEnabled = true;
     var cachedAiSummaryResult = null;
     var cachedAiFilterSignature = "";
     var customRowSentences = Object.create(null);
@@ -5968,7 +5960,7 @@ def generate_map():
         body.classList.toggle("show", shouldOpen);
         sec.classList.toggle("is-open", shouldOpen);
         if (btn) btn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
-        if (lbl) lbl.textContent = shouldOpen ? "พับเก็บ ▴" : "ตั้งค่า AI ▾";
+        if (lbl) lbl.textContent = shouldOpen ? "พับเก็บ" : "ตั้งค่า AI";
     }}
 
     function toggleEngineeringPromptBox() {{
@@ -5997,12 +5989,16 @@ def generate_map():
         }} catch (e) {{}}
     }}
 
+    // CHANGED: โหลด API Key โดยใช้ DEFAULT_FREE_TIER_API_KEY เป็นค่าปริยายเสมอหากผู้ใช้ไม่ได้ตั้งค่าอื่นไว้
     function loadSavedUserGeminiApiKey() {{
+        var inp = document.getElementById("geminiApiKeyInput");
+        if (!inp) return;
         try {{
             var saved = localStorage.getItem("scada_user_gemini_api_key") || "";
-            var inp = document.getElementById("geminiApiKeyInput");
-            if (inp && !inp.value && saved) inp.value = saved;
-        }} catch (e) {{}}
+            inp.value = saved || inp.value || DEFAULT_FREE_TIER_API_KEY;
+        }} catch (e) {{
+            if (!inp.value) inp.value = DEFAULT_FREE_TIER_API_KEY;
+        }}
     }}
 
     function toggleCustomModelMenu(e) {{
@@ -6251,12 +6247,12 @@ def generate_map():
                 isBlocked: true,
                 type: "UNSUPPORTED_OR_FULL",
                 remainSec: 0,
-                shortReason: "โควต้าเต็มชั่วคราว / API Key ไม่รองรับ",
-                tooltip: "⚠️ ไม่สามารถเลือกโมเดลนี้ได้: " + cfg.simulated_reason
+                shortReason: "เต็ม · 10/10 RPD",
+                tooltip: "ไม่สามารถเลือกโมเดลนี้ได้: " + cfg.simulated_reason
             }};
         }}
         var m = (st.models && st.models[modelName]) ? st.models[modelName] : null;
-        if (!m) return {{ isBlocked: false, type: "READY", remainSec: 0, shortReason: "พร้อมใช้งาน", tooltip: "" }};
+        if (!m) return {{ isBlocked: false, type: "READY", remainSec: 0, shortReason: "ว่าง", tooltip: "" }};
 
         var cdRemSec = m.cooldown_until_ms > nowMs ? Math.ceil((m.cooldown_until_ms - nowMs) / 1000) : 0;
         var isRpdFull = (m.rpd_used >= m.rpd_limit) || (m.rpd_locked_until_ms > nowMs);
@@ -6267,30 +6263,41 @@ def generate_map():
                 isBlocked: true,
                 type: "RPD",
                 remainSec: rpdRemSec,
-                shortReason: "โควต้ารายวันเต็ม (" + m.rpd_used + "/" + m.rpd_limit + " RPD)",
-                tooltip: "⚠️ โควต้ารายวันเต็ม (" + m.rpd_used + "/" + m.rpd_limit + " RPD) จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(rpdRemSec) + ")"
+                shortReason: "เต็ม · " + m.rpd_used + "/" + m.rpd_limit + " RPD",
+                tooltip: "โควต้ารายวันเต็ม (" + m.rpd_used + "/" + m.rpd_limit + " RPD) รีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(rpdRemSec) + ")"
             }};
         }}
         if (cdRemSec > 0) {{
-            var reasonTxt = m.last_error_type === "TOKEN_LIMIT" ? "Token Limit (TPM)" : "โควต้าเต็มชั่วคราว (429)";
+            var reasonTxt = m.last_error_type === "TOKEN_LIMIT" ? "Token Limit (TPM)" : "Rate Limit (429)";
             return {{
                 isBlocked: true,
                 type: "COOLDOWN_60S",
                 remainSec: cdRemSec,
-                shortReason: "โควต้าเต็มชั่วคราว (" + cdRemSec + "s)",
-                tooltip: "⚠️ ติด " + reasonTxt + " โมเดล " + modelName + " ปลดล็อกใน " + cdRemSec + " วินาที"
+                shortReason: "เต็มชั่วคราว · " + cdRemSec + "s",
+                tooltip: "ติด " + reasonTxt + " โมเดล " + modelName + " ปลดล็อกใน " + cdRemSec + " วินาที"
             }};
         }}
         return {{
             isBlocked: false,
             type: "READY",
             remainSec: 0,
-            shortReason: "พร้อมใช้งาน (" + m.rpd_used + "/" + m.rpd_limit + " RPD)",
-            tooltip: "✅ โมเดล " + modelName + " พร้อมใช้งาน (ใช้ไป " + m.rpd_used + "/" + m.rpd_limit + " RPD)"
+            shortReason: "ว่าง · " + (m.rpd_limit - m.rpd_used) + "/" + m.rpd_limit + " RPD",
+            tooltip: "โมเดล " + modelName + " พร้อมใช้งาน (ใช้ไป " + m.rpd_used + "/" + m.rpd_limit + " RPD)"
         }};
     }}
 
-    function renderCustomModelSelectorUI(st, nowMs, selectedMode) {{
+    // CHANGED: ฟังก์ชันคำนวณโมเดลที่พร้อมใช้งานถัดไปอัตโนมัติ (Smart Model Routing) เมื่อโมเดลหลักติดโควต้าเต็ม
+    function getNextAvailableFallbackModel(st, nowMs) {{
+        for (var i = 0; i < GEMINI_FALLBACK_LIST.length; i++) {{
+            var candidate = GEMINI_FALLBACK_LIST[i];
+            var info = evaluateModelBlockInfo(candidate, st, nowMs);
+            if (!info.isBlocked) return candidate;
+        }}
+        return "";
+    }}
+
+    // CHANGED: ปรับการเรนเดอร์ Dropdown Menu ให้คลีน มีไอคอน Monochrome, ชื่อตัวหนา, คำอธิบายสั้น, Badge สถานะโควต้า (เขียว=ว่าง, แดง=เต็ม) และติ๊กถูก (✓) ชิดขวา
+    function renderCustomModelSelectorUI(st, nowMs, selectedMode, activeRoutedModel) {{
         var menuEl = document.getElementById("geminiCustomModelMenu");
         var trigIcon = document.getElementById("geminiTriggerIcon");
         var trigName = document.getElementById("geminiTriggerName");
@@ -6298,18 +6305,44 @@ def generate_map():
         var trigBadge = document.getElementById("geminiTriggerBadge");
         var summaryPill = document.getElementById("geminiCollapsedSummaryPill");
 
+        var effectiveModelId = (selectedMode === "auto_fallback" && activeRoutedModel) ? activeRoutedModel : selectedMode;
         var selCfg = GEMINI_MODELS_CONFIG[selectedMode] || GEMINI_MODELS_CONFIG["gemini-3.5-flash-lite"];
-        if (trigIcon) trigIcon.textContent = selCfg.icon || "⚡";
-        if (trigName) trigName.textContent = selCfg.title || selectedMode;
-        if (trigDesc) trigDesc.textContent = selCfg.desc || "";
-        if (summaryPill) summaryPill.textContent = (selCfg.icon || "⚡") + " " + (selCfg.title || selectedMode) + " · โครงสร้างวิศวกรรม";
+        var activeCfg = GEMINI_MODELS_CONFIG[effectiveModelId] || selCfg;
+
+        if (trigIcon) trigIcon.innerHTML = selCfg.iconSvg || MODEL_MONO_ICONS.bolt;
+        if (trigName) {{
+            trigName.textContent = (selectedMode === "auto_fallback" && activeRoutedModel)
+                ? ("Auto Fallback · " + activeCfg.title)
+                : (selCfg.title || selectedMode);
+        }}
+        if (trigDesc) {{
+            trigDesc.textContent = (selectedMode === "auto_fallback" && activeRoutedModel)
+                ? ("เลือกโมเดลอัตโนมัติ: " + activeCfg.title)
+                : (selCfg.desc || "");
+        }}
+        if (summaryPill) {{
+            summaryPill.textContent = activeCfg.title + (selectedMode === "auto_fallback" ? " · Auto Fallback" : (" · " + activeCfg.role));
+        }}
 
         if (trigBadge) {{
+            trigBadge.className = "model-trigger-badge";
             if (selectedMode === "auto_fallback") {{
-                trigBadge.textContent = "Smart Auto";
+                if (activeRoutedModel) {{
+                    var rtSt = st.models[activeRoutedModel] || {{ rpd_used: 0, rpd_limit: activeCfg.rpd_limit }};
+                    trigBadge.textContent = "ว่าง · " + (rtSt.rpd_limit - rtSt.rpd_used) + " RPD";
+                }} else {{
+                    trigBadge.textContent = "เต็มทุกโมเดล";
+                    trigBadge.classList.add("is-full");
+                }}
             }} else {{
+                var selBlk = evaluateModelBlockInfo(selectedMode, st, nowMs);
                 var mSt = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: selCfg.rpd_limit }};
-                trigBadge.textContent = mSt.rpd_used + "/" + mSt.rpd_limit + " RPD";
+                if (selBlk.isBlocked) {{
+                    trigBadge.textContent = selBlk.type === "COOLDOWN_60S" ? ("เต็ม · " + selBlk.remainSec + "s") : "เต็ม · RPD";
+                    trigBadge.classList.add("is-full");
+                }} else {{
+                    trigBadge.textContent = "ว่าง · " + (mSt.rpd_limit - mSt.rpd_used) + " RPD";
+                }}
             }}
         }}
 
@@ -6319,32 +6352,38 @@ def generate_map():
         GEMINI_SELECTOR_ORDER.forEach(function(mId) {{
             var cfg = GEMINI_MODELS_CONFIG[mId];
             if (!cfg) return;
-            var isSelected = (mId === selectedMode);
             var blkInfo = (mId === "auto_fallback")
                 ? {{ isBlocked: false, type: "READY", remainSec: 0, tooltip: "" }}
                 : evaluateModelBlockInfo(mId, st, nowMs);
 
+            // CHANGED: แสดงเครื่องหมายติ๊กถูก (✓) ทั้งกรณีผู้ใช้เลือกโดยตรง และกรณี Auto Fallback เลื่อนลำดับมาเลือกโมเดลรองให้อัตโนมัติ
+            var isChecked = (mId === selectedMode) || (selectedMode === "auto_fallback" && mId === activeRoutedModel);
+
             var card = document.createElement("div");
-            card.className = "model-option-card" + (isSelected ? " is-selected" : "") + (blkInfo.isBlocked ? " is-disabled" : "");
+            card.className = "model-option-card" + (isChecked ? " is-selected" : "") + (blkInfo.isBlocked ? " is-disabled" : "");
             card.setAttribute("role", "option");
-            card.setAttribute("aria-selected", isSelected ? "true" : "false");
+            card.setAttribute("aria-selected", isChecked ? "true" : "false");
             card.setAttribute("aria-disabled", blkInfo.isBlocked ? "true" : "false");
 
-            var quotaText = "Auto Switch";
+            var quotaText = "Auto Routing";
             var quotaCls = "model-opt-quota";
-            if (mId !== "auto_fallback") {{
-                var mObj = st.models[mId] || {{ rpd_used: 0, rpd_limit: cfg.rpd_limit }};
-                if (blkInfo.type === "UNSUPPORTED_OR_FULL") {{
-                    quotaText = "โควต้าเต็ม / ไม่รองรับ";
+            if (mId === "auto_fallback") {{
+                if (activeRoutedModel) {{
+                    quotaText = "ว่าง · Auto";
+                }} else {{
+                    quotaText = "เต็มทุกโมเดล";
                     quotaCls += " is-full";
-                }} else if (blkInfo.type === "RPD") {{
-                    quotaText = "เต็ม " + mObj.rpd_used + "/" + mObj.rpd_limit + " RPD";
+                }}
+            }} else {{
+                var mObj = st.models[mId] || {{ rpd_used: 0, rpd_limit: cfg.rpd_limit }};
+                if (blkInfo.type === "UNSUPPORTED_OR_FULL" || blkInfo.type === "RPD") {{
+                    quotaText = "เต็ม · " + mObj.rpd_used + "/" + mObj.rpd_limit + " RPD";
                     quotaCls += " is-full";
                 }} else if (blkInfo.type === "COOLDOWN_60S") {{
-                    quotaText = "ติด 429 (" + blkInfo.remainSec + "s)";
-                    quotaCls += " is-warn";
+                    quotaText = "เต็ม · " + blkInfo.remainSec + "s";
+                    quotaCls += " is-full";
                 }} else {{
-                    quotaText = mObj.rpd_used + "/" + mObj.rpd_limit + " RPD";
+                    quotaText = "ว่าง · " + (mObj.rpd_limit - mObj.rpd_used) + "/" + mObj.rpd_limit + " RPD";
                 }}
             }}
 
@@ -6352,20 +6391,24 @@ def generate_map():
                 ? '<div class="model-opt-tooltip">' + blkInfo.tooltip + '</div>'
                 : '';
 
+            var checkHtml = isChecked
+                ? '<span class="model-opt-check" title="เลือกใช้งาน">' + MODEL_MONO_ICONS.check + '</span>'
+                : '<span class="model-opt-check" style="opacity:0;"></span>';
+
             card.innerHTML =
                 tooltipHtml +
                 '<div class="model-opt-left">' +
-                    '<span class="model-opt-icon">' + cfg.icon + '</span>' +
+                    '<span class="model-opt-icon">' + (cfg.iconSvg || MODEL_MONO_ICONS.bolt) + '</span>' +
                     '<div class="model-opt-info">' +
                         '<div class="model-opt-title-row">' +
                             '<span class="model-opt-title">' + cfg.title + '</span>' +
-                            '<span class="model-opt-role-tag">' + cfg.role + '</span>' +
                         '</div>' +
                         '<span class="model-opt-sub">' + cfg.desc + '</span>' +
                     '</div>' +
                 '</div>' +
                 '<div class="model-opt-right">' +
                     '<span class="' + quotaCls + '">' + quotaText + '</span>' +
+                    checkHtml +
                 '</div>';
 
             if (!blkInfo.isBlocked) {{
@@ -6379,6 +6422,7 @@ def generate_map():
         }});
     }}
 
+    // CHANGED: ปรับ Logic Smart Model Routing — หากโมเดลหลักติดโควต้าเต็ม ให้เลื่อนไปเลือกโมเดลที่เก่งรองลงมาอัตโนมัติพร้อมติ๊กถูกแสดงให้ผู้ใช้เห็น
     function updateGeminiUiAndButtonState() {{
         loadSavedUserGeminiApiKey();
         var promptTa = document.getElementById("geminiCustomPromptInput");
@@ -6388,77 +6432,63 @@ def generate_map():
         var nowMs = Date.now();
         var selEl = document.getElementById("geminiModelSelect");
         var selectedMode = selEl ? selEl.value : "gemini-3.5-flash-lite";
-        var statusBar = document.getElementById("geminiModelStatusBar");
         var quotaTxt = document.getElementById("geminiSelectedQuotaText");
 
-        renderCustomModelSelectorUI(st, nowMs, selectedMode);
+        var nextAvailableModel = getNextAvailableFallbackModel(st, nowMs);
+        var autoSwitchedNotice = "";
 
-        if (statusBar) {{
-            var chipsHtml = "";
-            GEMINI_FALLBACK_LIST.concat(["gemini-3.5-pro-exp"]).forEach(function(mName) {{
-                var info = evaluateModelBlockInfo(mName, st, nowMs);
-                var mObj = st.models[mName] || {{ rpd_used: 0, rpd_limit: 0 }};
-                var cls = "gemini-model-chip ";
-                var badgeText = "";
-                if (info.type === "UNSUPPORTED_OR_FULL") {{
-                    cls += "is-rpd";
-                    badgeText = "🔒 " + mName + ": โควต้าเต็มชั่วคราว / API Key ไม่รองรับ";
-                }} else if (info.type === "RPD") {{
-                    cls += "is-rpd";
-                    badgeText = "⛔ " + mName + ": เต็ม RPD (รีเซ็ต 07:00 น. · " + formatCountdownThaiHMS(info.remainSec) + ")";
-                }} else if (info.type === "COOLDOWN_60S") {{
-                    cls += "is-cooldown";
-                    badgeText = "⏳ " + mName + ": ติด 429 (" + info.remainSec + "s)";
-                }} else {{
-                    cls += "is-ready";
-                    badgeText = "● " + mName + " (" + mObj.rpd_used + "/" + mObj.rpd_limit + " RPD)";
-                }}
-                chipsHtml += '<span class="' + cls + '" title="' + info.tooltip + '">' + badgeText + '</span>';
-            }});
-            statusBar.innerHTML = chipsHtml;
+        // CHANGED: หากโมเดลที่เลือกไว้ติดเงื่อนไขโควต้าเต็ม (Rate Limit / RPD) และเปิด Smart Routing ไว้
+        // ให้ระบบเลื่อนลำดับไปเลือกโมเดลที่เก่งรองลงมาให้โดยอัตโนมัติ พร้อมแสดงติ๊กถูกบนโมเดลนั้นทันที
+        if (selectedMode !== "auto_fallback" && autoFallbackSmartRoutingEnabled) {{
+            var currentCheck = evaluateModelBlockInfo(selectedMode, st, nowMs);
+            if (currentCheck.isBlocked && nextAvailableModel && nextAvailableModel !== selectedMode) {{
+                var prevModelTitle = (GEMINI_MODELS_CONFIG[selectedMode] || {{}}).title || selectedMode;
+                selectedMode = nextAvailableModel;
+                if (selEl) selEl.value = nextAvailableModel;
+                autoSwitchedNotice = "Auto-Fallback สลับจาก " + prevModelTitle + " มายัง " + GEMINI_MODELS_CONFIG[nextAvailableModel].title + " อัตโนมัติ";
+            }}
         }}
+
+        renderCustomModelSelectorUI(st, nowMs, selectedMode, nextAvailableModel);
 
         var buttonBlocked = false;
         var activeTooltip = "";
-        var activeModelForRun = "";
 
         if (selectedMode === "auto_fallback") {{
-            var availableModels = [];
             var blockedInfos = [];
             GEMINI_FALLBACK_LIST.forEach(function(mName) {{
                 var inf = evaluateModelBlockInfo(mName, st, nowMs);
-                if (!inf.isBlocked) availableModels.push(mName);
-                else blockedInfos.push(inf);
+                if (inf.isBlocked) blockedInfos.push(inf);
             }});
-            if (availableModels.length > 0) {{
-                activeModelForRun = availableModels[0];
+            if (nextAvailableModel) {{
                 buttonBlocked = false;
-                if (quotaTxt) quotaTxt.textContent = "Auto Fallback → พร้อมใช้ (" + activeModelForRun + ")";
+                var routedTitle = (GEMINI_MODELS_CONFIG[nextAvailableModel] || {{}}).title || nextAvailableModel;
+                if (quotaTxt) quotaTxt.textContent = "ใช้งาน: " + routedTitle;
                 if (blockedInfos.length > 0) {{
-                    activeTooltip = "🔄 Auto Fallback สลับใช้ " + activeModelForRun + " อัตโนมัติ (" + blockedInfos[0].tooltip + ")";
+                    activeTooltip = "Auto Fallback เลือกใช้ " + routedTitle + " อัตโนมัติ (" + blockedInfos[0].tooltip + ")";
                 }}
             }} else {{
                 buttonBlocked = true;
                 var rpdAll = blockedInfos.every(function(b) {{ return b.type === "RPD"; }});
                 if (rpdAll && blockedInfos.length > 0) {{
-                    activeTooltip = "⚠️ ติดโควต้ารายวัน (RPD) ครบทุกโมเดล จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(blockedInfos[0].remainSec) + ")";
+                    activeTooltip = "ติดโควต้ารายวัน (RPD) ครบทุกโมเดล รีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(blockedInfos[0].remainSec) + ")";
                 }} else {{
                     var minCd = blockedInfos.filter(function(b) {{ return b.type === "COOLDOWN_60S"; }}).sort(function(a,b) {{ return a.remainSec - b.remainSec; }})[0];
                     activeTooltip = minCd
-                        ? ("⚠️ ติด Rate Limit (429) ทุกโมเดลสำรอง ปลดล็อกใน " + minCd.remainSec + " วินาที")
-                        : (blockedInfos[0] ? blockedInfos[0].tooltip : "⚠️ โมเดลติดลิมิตการใช้งาน");
+                        ? ("ติด Rate Limit (429) ทุกโมเดลสำรอง ปลดล็อกใน " + minCd.remainSec + " วินาที")
+                        : (blockedInfos[0] ? blockedInfos[0].tooltip : "โมเดลติดลิมิตการใช้งาน");
                 }}
-                if (quotaTxt) quotaTxt.textContent = "ติดลิมิตทุกโมเดล";
+                if (quotaTxt) quotaTxt.textContent = "โควต้าเต็มทุกโมเดล";
             }}
         }} else {{
             var selInfo = evaluateModelBlockInfo(selectedMode, st, nowMs);
             buttonBlocked = selInfo.isBlocked;
-            activeTooltip = selInfo.isBlocked ? selInfo.tooltip : "";
+            activeTooltip = selInfo.isBlocked ? selInfo.tooltip : autoSwitchedNotice;
             if (quotaTxt) {{
                 var mData = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: 500 }};
                 quotaTxt.textContent = selInfo.isBlocked
                     ? selInfo.shortReason
-                    : ("โควต้า " + mData.rpd_used + "/" + mData.rpd_limit + " RPD");
+                    : (autoSwitchedNotice ? ("สลับอัตโนมัติ · " + (GEMINI_MODELS_CONFIG[selectedMode] || {{}}).title) : ("ว่าง " + (mData.rpd_limit - mData.rpd_used) + "/" + mData.rpd_limit + " RPD"));
             }}
         }}
 
@@ -6491,44 +6521,25 @@ def generate_map():
         updateGeminiUiAndButtonState();
     }}
 
+    // CHANGED: สลับการแสดงผลคีย์ในช่อง API Key (ซ่อนเป็นจุด •••••••• โดยปริยาย และเปลี่ยนไอคอนรูปตาเมื่อกดดู)
     function toggleGeminiKeyVisibility() {{
         var inp = document.getElementById("geminiApiKeyInput");
+        var icon = document.getElementById("geminiKeyEyeIcon");
+        var btn = document.getElementById("geminiKeyToggleBtn");
         if (!inp) return;
-        inp.type = (inp.type === "password") ? "text" : "password";
-    }}
-
-    function simulateGeminiRateLimitUI(action) {{
-        var selEl = document.getElementById("geminiModelSelect");
-        var targetModel = (selEl && selEl.value !== "auto_fallback" && selEl.value !== "gemini-3.5-pro-exp") ? selEl.value : "gemini-3.5-flash-lite";
-        var st = loadLocalGeminiSessionState();
-
-        if (action === "reset") {{
-            GEMINI_FALLBACK_LIST.forEach(function(m) {{
-                st.models[m].cooldown_until_ms = 0;
-                st.models[m].rpd_locked_until_ms = 0;
-                st.models[m].rpd_used = 0;
-                st.models[m].last_error_type = "";
-                st.models[m].last_error = "";
-            }});
-            saveLocalGeminiSessionState(st);
-        }} else if (action === "rate_limit_429") {{
-            markLocalModelLimit(targetModel, "RATE_LIMIT_429", "Simulated 429 Rate Limit (Rolling Window 60s)");
-        }} else if (action === "rpd_full") {{
-            markLocalModelLimit(targetModel, "RPD_EXHAUSTED", "Simulated RPD Daily Limit Reached");
+        var isHidden = (inp.type === "password");
+        inp.type = isHidden ? "text" : "password";
+        if (icon) {{
+            icon.innerHTML = isHidden
+                ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>'
+                : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
         }}
-
-        fetch("/api/gemini/simulate-limit", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ action: action, model: action === "reset" ? "all" : targetModel }})
-        }}).then(function(r) {{ return r.json(); }}).then(function(srv) {{
-            syncBackendStatusToLocal(srv);
-        }}).catch(function() {{}});
-
-        updateGeminiUiAndButtonState();
+        if (btn) {{
+            btn.setAttribute("title", isHidden ? "ซ่อน API Key" : "แสดง API Key");
+        }}
     }}
 
-    // ตั้งเวลาอัปเดต Countdown Tooltip ทุก 1 วินาที (Rolling Window 60s และ RPD 07:00 น.)
+    // ตั้งเวลาอัปเดตสถานะโควต้าและ Smart Model Routing ทุก 1 วินาทีขณะเปิดหน้าต่าง
     setInterval(function() {{
         var modalEl = document.getElementById("reportModalOverlay");
         if (modalEl && modalEl.classList.contains("show")) {{
@@ -6672,9 +6683,12 @@ def generate_map():
     }}
 
     async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey) {{
-        if (!apiKey) {{
+        // CHANGED: ใช้ DEFAULT_FREE_TIER_API_KEY เป็นค่าปริยายหากช่องกรอกว่าง
+        var effectiveKey = String(apiKey || DEFAULT_FREE_TIER_API_KEY).trim();
+        if (!effectiveKey) {{
             throw new Error("กรุณากรอก Gemini API Key ในหน้าต่างตั้งค่า AI ก่อนเรียกใช้งาน");
         }}
+        apiKey = effectiveKey;
         var st = loadLocalGeminiSessionState();
         var nowMs = Date.now();
         var order = (preferredModel === "auto_fallback" || !GEMINI_MODELS_CONFIG[preferredModel])
@@ -6687,9 +6701,7 @@ def generate_map():
             var logicalModel = order[i];
             var blk = evaluateModelBlockInfo(logicalModel, st, nowMs);
             if (blk.isBlocked) {{
-                if (preferredModel !== "auto_fallback" && logicalModel === preferredModel) {{
-                    throw new Error(blk.tooltip);
-                }}
+                // CHANGED: Smart Model Routing — หากโมเดลหลักติดโควต้าเต็ม ให้ข้ามไปเลือกโมเดลสำรองลำดับถัดไปโดยอัตโนมัติ
                 continue;
             }}
             var candidates = GEMINI_MODELS_CONFIG[logicalModel].sdk_candidates || [];
@@ -6741,7 +6753,7 @@ def generate_map():
         var selEl = document.getElementById("geminiModelSelect");
         var preferredModel = selEl ? selEl.value : "gemini-3.5-flash-lite";
         var keyEl = document.getElementById("geminiApiKeyInput");
-        var apiKey = keyEl ? keyEl.value.trim() : "";
+        var apiKey = (keyEl && keyEl.value.trim()) ? keyEl.value.trim() : DEFAULT_FREE_TIER_API_KEY; // CHANGED: ใช้ Default Free Tier API Key หากช่องว่าง
         var customPrompt = getActiveEngineeringPrompt();
 
         var baseExec = buildDeterministicSummaryJS(filteredRows);
@@ -6903,7 +6915,7 @@ def generate_map():
         var btn = document.getElementById('execReportBtn');
         var st = loadLocalGeminiSessionState();
         var selEl = document.getElementById('geminiModelSelect');
-        var selectedMode = selEl ? selEl.value : 'auto_fallback';
+        var selectedMode = selEl ? selEl.value : 'gemini-3.5-flash-lite'; // CHANGED: ใช้โมเดลหลักเป็นค่าเริ่มต้น
 
         // ตรวจสอบว่าโมเดลที่เลือกติด Rate Limit / RPD หรือไม่
         if (selectedMode !== 'auto_fallback') {{
