@@ -339,11 +339,28 @@ except ImportError:
     genai_types = None
     HAS_GOOGLE_GENAI_SDK = False
 
-# ตั้งค่า API Key เริ่มต้น (อ่านจาก Environment Variable GEMINI_API_KEY หรือ GOOGLE_API_KEY ก่อน หากไม่มีจะใช้คีย์เริ่มต้นที่กำหนด)
+# ตั้งค่า API Key เริ่มต้น (ห้ามฝัง API Key ลงในโค้ดเด็ดขาด อ่านจาก Environment Variable เท่านั้น หรือรับจากช่องกรอก UI)
 DEFAULT_GEMINI_API_KEY = (
     os.environ.get("GEMINI_API_KEY")
     or os.environ.get("GOOGLE_API_KEY")
-    or "AQ.Ab8RN6KytzQLVV-Y29ZrGHHppnSfiSN_Fbg2b1smzb5z82agXA"
+    or ""
+)
+
+# System Instruction มาตรฐานวิศวกรรม (Engineering Format: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์])
+ENGINEERING_SYSTEM_PROMPT = (
+    "คุณเป็นวิศวกรผู้จัดทำรายงานระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) "
+    "หน้าที่ของคุณคือการปรับแก้ข้อความรายละเอียดการตรวจสอบและแก้ไขอุปกรณ์ต่อไปนี้ให้เป็นภาษาทางการ สั้น กระชับ "
+    "และต้องเรียบเรียงตามโครงสร้าง 3 ส่วนนี้ในประโยคเดียวหรือสองประโยคเท่านั้น:\n"
+    "1. สาเหตุ (Cause): เกิดอะไรขึ้น ตรวจพบอาการผิดปกติหรืออุปกรณ์ใดชำรุด\n"
+    "2. การดำเนินการ (Action): ทำการแก้ไข ทดสอบ หรือจัดการอย่างไร\n"
+    "3. ผลการดำเนินการ (Result): สถานะปัจจุบันหลังจากการแก้ไข หรือการส่งต่อหน่วยงานรับผิดชอบ\n\n"
+    "ตัวอย่างการปรับแก้:\n"
+    "- ประโยคต้นทาง: 'ปั๊มน้ำพังเพราะลูกปืนแตก ช่างเลยไปเปลี่ยนลูกปืนใหม่ ตอนนี้ปั๊มใช้ได้แล้ว'\n"
+    "- ประโยคที่ต้องการ: 'ลูกปืนปั๊มน้ำชำรุดทำให้เครื่องหยุดทำงาน (สาเหตุ) จึงดำเนินการเปลี่ยนลูกปืนใหม่ (การดำเนินการ) ปัจจุบันปั๊มน้ำสามารถใช้งานได้ตามปกติ (ผลลัพธ์)'\n\n"
+    "ข้อกำหนดเหล็ก:\n"
+    "- บังคับจัดเรียงโครงสร้างเป็น: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] เสมอ\n"
+    "- ห้ามใช้คำเยิ่นเย้อหรือคำเชื่อมที่พรรณนาเกินความจำเป็น\n"
+    "- กรณีที่ข้อมูลนำเข้าไม่ครบถ้วนทั้ง 3 ส่วน ให้พยายามจัดรูปแบบจากข้อเท็จจริงที่มีให้ใกล้เคียงโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] มากที่สุด โดยห้ามแต่งเติมหรือเดาข้อมูลมั่วที่ไม่ได้ระบุในต้นฉบับเด็ดขาด"
 )
 
 # กำหนดรายการโมเดลกลุ่ม Free Tier ตามลำดับความสำคัญ (Primary -> Fallback 1 -> Fallback 2)
@@ -394,6 +411,20 @@ GEMINI_FREE_TIER_MODELS = {
             "gemini-2.0-flash",
         ],
     },
+    "gemini-3.5-pro-exp": {
+        "label": "gemini-3.5-pro-exp (โมเดลวิเคราะห์ขั้นสูง - โควต้าเต็มชั่วคราว)",
+        "role": "Experimental Pro",
+        "rpd_limit": 10,
+        "rpm_limit": 2,
+        "tpm_limit": 125000,
+        "max_chunk_chars": 4000,
+        "max_chunk_rows": 20,
+        "simulated_disabled": True,
+        "simulated_reason": "โควต้าเต็มชั่วคราว (10/10 RPD) หรือ API Key (Free Tier) ไม่รองรับโมเดลนี้",
+        "sdk_candidates": [
+            "gemini-2.5-pro",
+        ],
+    },
 }
 
 GEMINI_FALLBACK_ORDER = [
@@ -440,13 +471,14 @@ def _create_initial_session_state():
     utc_day_str = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%Y-%m-%d")
     models_state = {}
     for m_name, cfg in GEMINI_FREE_TIER_MODELS.items():
+        is_sim_dis = bool(cfg.get("simulated_disabled", False))
         models_state[m_name] = {
-            "rpd_used": 0,
+            "rpd_used": cfg["rpd_limit"] if is_sim_dis else 0,
             "rpd_limit": cfg["rpd_limit"],
             "cooldown_until": 0.0,      # Timestamp ปลดล็อก 60s Rolling Window (Rate Limit 429 / TPM)
-            "rpd_locked_until": 0.0,    # Timestamp ปลดล็อก RPD (00:00 UTC / 07:00 น. เวลาไทย)
-            "last_error": "",
-            "last_error_type": "",      # "RATE_LIMIT_429" | "RPD_EXHAUSTED" | "TOKEN_LIMIT" | ""
+            "rpd_locked_until": get_next_utc_midnight_timestamp(now_ts) if is_sim_dis else 0.0,
+            "last_error": cfg.get("simulated_reason", "") if is_sim_dis else "",
+            "last_error_type": "RPD_EXHAUSTED" if is_sim_dis else "",
             "resolved_sdk_model": cfg["sdk_candidates"][0],
         }
     return {
@@ -602,19 +634,24 @@ def _classify_gemini_exception(exc_str):
     }
 
 
-def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperature=0.2):
-    """เชื่อมต่อ Gemini API โดยใช้ Google GenAI SDK เวอร์ชันล่าสุด (google-genai) พร้อม REST API สำรอง"""
+def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperature=0.2, system_instruction=None):
+    """เชื่อมต่อ Gemini API โดยใช้ Google GenAI SDK เวอร์ชันล่าสุด (google-genai) พร้อม System Instruction และ REST API สำรอง"""
     clean_key = str(api_key or DEFAULT_GEMINI_API_KEY).strip()
     if not clean_key:
-        raise RuntimeError("ไม่พบ Gemini API Key กรุณาตั้งค่า GEMINI_API_KEY หรือกรอกในช่องตั้งค่า UI")
+        raise RuntimeError("ไม่พบ Gemini API Key กรุณากรอก API Key ในช่องตั้งค่า UI หรือตั้งค่าใน Environment Variable")
+
+    sys_inst = str(system_instruction or ENGINEERING_SYSTEM_PROMPT).strip()
 
     # 1. เรียกผ่าน Google GenAI SDK ล่าสุด (google-genai) หากติดตั้งไว้ในระบบ
     if HAS_GOOGLE_GENAI_SDK and genai is not None:
         client = genai.Client(api_key=clean_key)
         cfg = (
-            genai_types.GenerateContentConfig(temperature=temperature)
+            genai_types.GenerateContentConfig(
+                temperature=temperature,
+                system_instruction=sys_inst,
+            )
             if genai_types is not None
-            else {"temperature": temperature}
+            else {"temperature": temperature, "system_instruction": sys_inst}
         )
         resp = client.models.generate_content(
             model=sdk_model_id,
@@ -628,6 +665,7 @@ def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperatur
     # 2. Fallback เรียกผ่าน Google Generative Language REST API v1beta โดยตรง
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{sdk_model_id}:generateContent?key={clean_key}"
     payload = {
+        "systemInstruction": {"parts": [{"text": sys_inst}]},
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {"temperature": temperature},
     }
@@ -659,7 +697,7 @@ def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperatur
         raise RuntimeError(f"HTTP {http_err.code}: {err_body or http_err.reason}")
 
 
-def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_key=None):
+def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_key=None, system_instruction=None):
     """
     เรียกใช้งาน Gemini API พร้อมระบบ:
     - ตรวจสอบสถานะ Cooldown (60s Rolling Window) และ RPD (07:00 น. เวลาไทย)
@@ -696,7 +734,7 @@ def call_gemini_with_fallback(prompt_text, preferred_model="auto_fallback", api_
 
         for sdk_id in sdk_candidates:
             try:
-                res_text = _call_single_gemini_candidate(sdk_id, prompt_text, api_key)
+                res_text = _call_single_gemini_candidate(sdk_id, prompt_text, api_key, system_instruction=system_instruction)
                 increment_model_rpd_usage(logical_model, resolved_sdk_name=sdk_id)
                 fallback_trace.append({
                     "model": logical_model,
@@ -775,32 +813,66 @@ def chunk_inspection_rows(rows, max_chars=3500, max_rows=18):
 
 
 def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str=""):
-    """ฟังก์ชันจัดหมวดหมู่และเรียบเรียงรายละเอียดการตรวจสอบระดับแถวอย่างเป็นระเบียบ"""
+    """
+    ฟังก์ชันจัดรูปแบบประโยคแบบวิศวกรรม (Deterministic Fallback):
+    เรียบเรียงตามโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ให้สั้น กระชับ เป็นทางการ
+    และรองรับกรณีข้อมูลไม่ครบถ้วนโดยไม่เติมข้อมูลมั่ว
+    """
     txt = str(raw_detail or "").strip()
-    if not txt or txt == "-":
-        return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)"
-    lines = [ln.strip() for ln in re.split(r"[\n\r]+|,\s*(?=[❌✅•\-])", txt) if ln.strip()]
-    comm_items, frtu_items, action_items = [], [], []
-    for ln in lines:
-        clean_ln = re.sub(r"^[•\-\s]+", "", ln).strip()
-        if not clean_ln:
-            continue
-        u = clean_ln.upper()
-        if any(w in u for w in ["สื่อสาร", "MODEM", "SIM", "3G", "4G", "OPTIC", "FIBER", "WRL", "PING", "สัญญาณ", "ONLINE", "ANTENNA", "สายอากาศ"]):
-            comm_items.append(clean_ln)
-        elif any(w in u for w in ["FRTU", "RTU", "BATTERY", "แบต", "FUSE", "ฟิวส์", "POWER", "การ์ด", "BOARD", "CONTROL", "RELAY", "AC", "DC", "ตู้"]):
-            frtu_items.append(clean_ln)
-        else:
-            action_items.append(clean_ln)
+    st_clean = str(status_str or "").strip()
+    resp_clean = str(resp_str or "").strip()
 
-    parts = []
-    if comm_items:
-        parts.append("[ระบบสื่อสาร] " + "; ".join(comm_items))
-    if frtu_items:
-        parts.append("[อุปกรณ์ FRTU/ชุดควบคุม] " + "; ".join(frtu_items))
-    if action_items:
-        parts.append("[ผลการตรวจสอบ/แก้ไข] " + "; ".join(action_items))
-    return "\n".join(parts) if parts else txt
+    if not txt or txt == "-":
+        if st_clean and st_clean != "-":
+            return f"ไม่พบบันทึกสาเหตุและรายละเอียดการแก้ไขในระบบ (สาเหตุ/การดำเนินการ) ปัจจุบันอุปกรณ์มีสถานะ {st_clean} (ผลลัพธ์)"
+        return "- (ไม่มีบันทึกข้อมูลการตรวจสอบ)"
+
+    tokens = [
+        re.sub(r"^[•\-\s✅❌☑☒✔✘]+", "", t).strip()
+        for t in re.split(r"[\n\r;|]+|,\s*", txt)
+        if t.strip()
+    ]
+    causes, actions, results = [], [], []
+    cause_kw = ["ชำรุด", "เสีย", "พัง", "แตก", "ขาด", "เสื่อม", "ค้าง", "หลวม", "ขัดข้อง", "ไม่มีไฟ", "NO AC", "OFFLINE", "ALARM", "FAULT", "ไม่ทำงาน", "กระพริบ", "ต่ำ", "รั่ว", "ไหม้"]
+    action_kw = ["เปลี่ยน", "แก้ไข", "รีเซ็ต", "RESET", "RESTART", "ทำความสะอาด", "ขัน", "ปรับ", "ตั้งค่า", "จูน", "ตรวจสอบ", "วัด", "เช็ค", "ทดลอง", "ย้ำสาย", "ซ่อม", "ตัดต่อ", "ดำเนินการ"]
+    result_kw = ["ใช้งานได้", "ปกติ", "ONLINE", "สำเร็จ", "เรียบร้อย", "ยังไม่ออนไลน์", "รอ ", "ส่งต่อ", "ใช้ได้แล้ว", "CONNECTING"]
+
+    for tk in tokens:
+        if not tk:
+            continue
+        u = tk.upper()
+        if any(k in u for k in action_kw):
+            actions.append(tk)
+        elif any(k in u for k in cause_kw):
+            causes.append(tk)
+        elif any(k in u for k in result_kw):
+            results.append(tk)
+        else:
+            if not causes:
+                causes.append(tk)
+            else:
+                actions.append(tk)
+
+    if not results:
+        if "ONLINE" in st_clean.upper():
+            results.append("ปัจจุบันอุปกรณ์สามารถออนไลน์และใช้งานได้ตามปกติ")
+        elif resp_clean and resp_clean not in ("-", "ไม่มีค่า"):
+            results.append(f"ปัจจุบันสถานะ {st_clean or 'ยังไม่ออนไลน์'} อยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไข")
+        elif st_clean and st_clean != "-":
+            results.append(f"ปัจจุบันอุปกรณ์อยู่ในสถานะ {st_clean}")
+
+    segments = []
+    if causes:
+        segments.append(f"{' และ'.join(causes)} (สาเหตุ)")
+    if actions:
+        act_str = " ".join(actions)
+        if not act_str.startswith("จึง") and not act_str.startswith("ได้ดำเนินการ"):
+            act_str = "จึงดำเนินการ" + act_str
+        segments.append(f"{act_str} (การดำเนินการ)")
+    if results:
+        segments.append(f"{' '.join(results)} (ผลลัพธ์)")
+
+    return " ".join(segments) if segments else txt
 
 
 def _build_deterministic_executive_summary(rows):
@@ -887,7 +959,7 @@ def _build_deterministic_executive_summary(rows):
     }
 
 
-def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback", api_key=None):
+def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback", api_key=None, custom_prompt=None):
     """
     ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API:
     1. ทำ Auto Chunking แบ่งข้อมูลจาก Google Sheet ออกเป็นส่วนย่อยๆ อัตโนมัติเมื่อข้อมูลยาว
@@ -926,12 +998,15 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
             )
         chunk_text = "\n".join(lines_payload)
 
+        active_sys_prompt = str(custom_prompt or ENGINEERING_SYSTEM_PROMPT).strip()
         chunk_prompt = (
-            "คุณคือวิศวกรระบบ SCADA เชี่ยวชาญการทำรายงานตรวจเช็คอุปกรณ์ (Inspection Report)\n"
-            "โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นระเบียบ และจัดหมวดหมู่ชัดเจน\n"
+            f"{active_sys_prompt}\n\n"
+            "โปรดปรับแก้ข้อความรายละเอียดของแต่ละรายการต่อไปนี้ให้เป็นโครงสร้างวิศวกรรม: "
+            "[สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ใน 1-2 ประโยคที่เป็นทางการ สั้น กระชับ "
+            "(หากข้อมูลไม่ครบให้จัดเรียงเท่าที่มีโดยห้ามแต่งเติมข้อมูลมั่ว)\n"
             "ตอบกลับเป็น JSON เท่านั้น ตามโครงสร้างนี้:\n"
             "{\n"
-            '  "rows": [ {"idx": 0, "clean_detail": "[หมวดอาการ/การแก้ไข] ข้อความที่เรียบเรียงใหม่กระชับชัดเจน"} ],\n'
+            '  "rows": [ {"idx": 0, "clean_detail": "...(สาเหตุ) จึงดำเนินการ...(การดำเนินการ) ปัจจุบัน...(ผลลัพธ์)"} ],\n'
             '  "chunk_summary": "สรุปประเด็นสำคัญของชุดข้อมูลนี้ 2-3 บรรทัด"\n'
             "}\n\n"
             f"ข้อมูลชุดที่ {chunk_idx + 1}/{len(chunks)}:\n{chunk_text}"
@@ -939,7 +1014,10 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
 
         try:
             res = call_gemini_with_fallback(
-                chunk_prompt, preferred_model=preferred_model, api_key=api_key
+                chunk_prompt,
+                preferred_model=preferred_model,
+                api_key=api_key,
+                system_instruction=active_sys_prompt,
             )
         except RuntimeError as err_rt:
             # หากติด TOKEN_LIMIT_EXCEEDED ให้แบ่งครึ่ง Chunk ย่อยลงอีกอัตโนมัติ (Recursive Sub-Chunking)
@@ -3532,46 +3610,123 @@ def generate_map():
         }}
     }}
     
-    /* --- Gemini AI Report Summarizer UI & Real-Time Hover Tooltip --- */
+    /* --- Gemini AI Report Summarizer UI (Collapsible + Premium Model Selector + Quota Tooltips) --- */
     .gemini-ai-section {{
-        padding: 12px 14px;
-        margin: 0 0 10px;
-        background: linear-gradient(135deg, rgba(26,115,232,0.06), rgba(155,89,182,0.06));
-        border: 1px solid rgba(26,115,232,0.28);
-        border-radius: 12px;
+        margin: 0 0 12px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-subtle);
+        border-radius: 14px;
+        overflow: visible;
+        transition: border-color 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.22s ease, background-color 0.22s ease;
     }}
-    .gemini-header-row {{
+    .gemini-ai-section.is-open {{
+        background: linear-gradient(145deg, rgba(26,115,232,0.04) 0%, rgba(139,92,246,0.04) 100%);
+        border-color: rgba(26,115,232,0.38);
+        box-shadow: 0 4px 20px rgba(26,115,232,0.07);
+    }}
+    .gemini-collapse-trigger {{
+        width: 100%;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 10px;
+        gap: 10px;
+        padding: 12px 15px;
+        background: transparent;
+        border: 0;
+        border-radius: 14px;
+        color: var(--text-primary);
+        cursor: pointer;
+        text-align: left;
+        transition: background-color 0.18s ease;
+    }}
+    .gemini-collapse-trigger:hover {{
+        background: rgba(26,115,232,0.05);
+    }}
+    .gemini-trigger-left {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
         flex-wrap: wrap;
     }}
-    .gemini-title-badge {{
+    .gemini-sparkle-icon {{
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #1a73e8, #7c3aed);
+        color: #ffffff;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        justify-content: center;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(26,115,232,0.28);
+    }}
+    .gemini-title-badge {{
         font-size: 13px;
         font-weight: 600;
-        color: var(--accent-primary);
+        color: var(--text-primary);
+        letter-spacing: -0.1px;
     }}
     .gemini-tier-pill {{
         display: inline-flex;
         align-items: center;
-        padding: 2px 8px;
+        gap: 5px;
+        padding: 2px 9px;
         border-radius: 999px;
         background: var(--bg-surface);
         border: 1px solid var(--border-hairline);
         font-size: 10.5px;
         font-weight: 600;
-        color: var(--text-secondary);
+        color: var(--accent-primary);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }}
+    .gemini-trigger-right {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }}
+    .gemini-chevron-icon {{
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.18s ease;
+    }}
+    .gemini-ai-section.is-open .gemini-chevron-icon {{
+        transform: rotate(180deg);
+        background: var(--bg-active);
+        color: var(--accent-primary);
+        border-color: rgba(26,115,232,0.35);
+    }}
+    .gemini-collapsible-body {{
+        display: none;
+        padding: 4px 15px 15px;
+        border-top: 1px solid var(--border-subtle);
+        animation: geminiSlideDown 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }}
+    .gemini-collapsible-body.show {{
+        display: block;
+    }}
+    @keyframes geminiSlideDown {{
+        from {{ opacity: 0; transform: translateY(-4px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+
     .gemini-grid-row {{
         display: grid;
         grid-template-columns: 1.25fr 1fr;
-        gap: 8px;
-        margin-bottom: 8px;
+        gap: 12px;
+        margin-top: 12px;
+        margin-bottom: 12px;
     }}
     @media (max-width: 640px) {{
         .gemini-grid-row {{ grid-template-columns: 1fr; }}
@@ -3579,49 +3734,364 @@ def generate_map():
     .gemini-field {{
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
         min-width: 0;
+        position: relative;
     }}
     .gemini-field label {{
-        font-size: 11px;
+        font-size: 11.5px;
         color: var(--text-secondary);
-        font-weight: 500;
+        font-weight: 600;
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 6px;
     }}
-    .gemini-input, .gemini-select {{
-        width: 100%;
+
+    /* Premium API Key Input Wrapper */
+    .gemini-key-input-wrap {{
+        position: relative;
+        display: flex;
+        align-items: center;
         background: var(--bg-surface);
         border: 1px solid var(--border-hairline);
-        border-radius: 8px;
-        color: var(--text-primary);
-        padding: 7px 10px;
-        font-size: 12px;
-        min-height: 36px;
+        border-radius: 10px;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        min-height: 42px;
+        padding: 0 8px 0 11px;
     }}
-    .gemini-input:focus, .gemini-select:focus {{
+    .gemini-key-input-wrap:focus-within {{
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 3px rgba(26,115,232,0.14);
+    }}
+    .gemini-key-icon {{
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }}
+    .gemini-input {{
+        width: 100%;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        padding: 8px 4px;
+        font-size: 12.5px;
+        min-height: 38px;
+    }}
+    .gemini-key-toggle-btn {{
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-subtle);
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }}
+    .gemini-key-toggle-btn:hover {{
+        color: var(--text-primary);
+        background: var(--bg-hover);
+    }}
+
+    /* --- Premium Custom Model Selector (ChatGPT / Gemini / Vercel Style) --- */
+    .model-selector-custom {{
+        position: relative;
+        width: 100%;
+    }}
+    .model-selector-trigger {{
+        width: 100%;
+        min-height: 42px;
+        padding: 7px 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }}
+    .model-selector-trigger:hover {{
+        border-color: var(--accent-primary);
+        box-shadow: 0 2px 8px rgba(26,115,232,0.10);
+    }}
+    .model-selector-custom.is-open .model-selector-trigger {{
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
+    }}
+    .model-trigger-main {{
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+        flex: 1;
+    }}
+    .model-trigger-icon {{
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        background: var(--bg-active);
+        flex-shrink: 0;
+    }}
+    .model-trigger-text {{
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }}
+    .model-trigger-name {{
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--text-primary);
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .model-trigger-desc {{
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .model-trigger-badge {{
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e6f4ea;
+        color: #137333;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }}
+    body.theme-dark .model-trigger-badge {{
+        background: rgba(22,163,74,0.2);
+        color: #4ade80;
+    }}
+
+    /* Floating Model Selector Popover Menu */
+    .model-selector-menu {{
+        display: none;
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        width: 100%;
+        min-width: 310px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.16), 0 2px 6px rgba(0,0,0,0.08);
+        padding: 6px;
+        z-index: 10000020;
+        flex-direction: column;
+        gap: 4px;
+        animation: geminiSlideDown 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }}
+    .model-selector-custom.is-open .model-selector-menu {{
+        display: flex;
+    }}
+    .model-option-card {{
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 11px;
+        border-radius: 9px;
+        border: 1px solid transparent;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+    }}
+    .model-option-card:hover:not(.is-disabled) {{
+        background: var(--bg-hover);
+        border-color: var(--border-subtle);
+    }}
+    .model-option-card.is-selected {{
+        background: var(--bg-active);
+        border-color: rgba(26,115,232,0.35);
+    }}
+    .model-option-card.is-disabled {{
+        background: var(--bg-subtle) !important;
+        border-color: transparent !important;
+        opacity: 0.58;
+        cursor: not-allowed !important;
+        filter: grayscale(0.85);
+    }}
+    .model-opt-left {{
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        min-width: 0;
+        flex: 1;
+    }}
+    .model-opt-icon {{
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-subtle);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex-shrink: 0;
+        margin-top: 1px;
+    }}
+    .model-option-card.is-selected .model-opt-icon {{
+        background: var(--accent-primary);
+        color: #ffffff;
         border-color: var(--accent-primary);
     }}
+    .model-opt-info {{
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }}
+    .model-opt-title-row {{
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }}
+    .model-opt-title {{
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }}
+    .model-opt-role-tag {{
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--bg-subtle);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-hairline);
+    }}
+    .model-opt-sub {{
+        font-size: 11px;
+        color: var(--text-secondary);
+        line-height: 1.35;
+    }}
+    .model-opt-right {{
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 3px;
+        flex-shrink: 0;
+    }}
+    .model-opt-quota {{
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: #e6f4ea;
+        color: #137333;
+        font-variant-numeric: tabular-nums;
+    }}
+    .model-opt-quota.is-warn {{
+        background: #fef0e6;
+        color: #c25100;
+    }}
+    .model-opt-quota.is-full {{
+        background: #fce8e6;
+        color: #c5221f;
+    }}
+
+    /* Hover Tooltip on Disabled Model Option Card */
+    .model-opt-tooltip {{
+        visibility: hidden;
+        opacity: 0;
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 12px;
+        right: 12px;
+        background: #1e293b;
+        color: #f8fafc;
+        padding: 7px 10px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1.4;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.28);
+        border: 1px solid rgba(255,255,255,0.14);
+        z-index: 10000030;
+        pointer-events: none;
+        transform: translateY(4px);
+        transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+    }}
+    .model-option-card.is-disabled:hover .model-opt-tooltip {{
+        visibility: visible;
+        opacity: 1;
+        transform: translateY(0);
+    }}
+
+    /* Engineering Prompt Editor Box inside Gemini Section */
+    .gemini-prompt-box {{
+        display: none;
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+    }}
+    .gemini-prompt-box.show {{
+        display: block;
+    }}
+    .gemini-prompt-textarea {{
+        width: 100%;
+        min-height: 110px;
+        border: 1px solid var(--border-hairline);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 11.5px;
+        color: var(--text-primary);
+        background: var(--bg-subtle);
+        line-height: 1.45;
+        resize: vertical;
+        margin-top: 6px;
+    }}
+    .gemini-prompt-textarea:focus {{
+        border-color: var(--accent-primary);
+        background: var(--bg-surface);
+    }}
+
     .gemini-model-status-bar {{
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        margin-top: 6px;
-        padding-top: 8px;
+        margin-top: 10px;
+        padding-top: 10px;
         border-top: 1px dashed var(--border-hairline);
     }}
     .gemini-model-chip {{
+        position: relative;
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        padding: 3px 8px;
+        padding: 3px 9px;
         border-radius: 999px;
         font-size: 10.5px;
         font-weight: 500;
         background: var(--bg-surface);
         border: 1px solid var(--border-hairline);
         color: var(--text-secondary);
+        transition: all 0.15s ease;
     }}
     .gemini-model-chip.is-ready {{
         border-color: rgba(22,163,74,0.35);
@@ -3645,6 +4115,7 @@ def generate_map():
         border-color: rgba(220,38,38,0.45);
         color: #c5221f;
         background: #fce8e6;
+        opacity: 0.78;
     }}
     body.theme-dark .gemini-model-chip.is-rpd {{
         background: rgba(220,38,38,0.22);
@@ -4397,64 +4868,107 @@ def generate_map():
                 <div id="reportPreviewCount" class="report-preview-count">กำลังตรวจสอบ...</div>
             </div>
 
-            <!-- ส่วนตั้งค่า Google Gemini API (Free Tier) และการเลือกโมเดลสรุปรายงาน -->
-            <section class="gemini-ai-section" aria-labelledby="geminiAiHeading">
-                <div class="gemini-header-row">
-                    <span class="gemini-title-badge" id="geminiAiHeading">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L14.8 9.2L22 12L14.8 14.8L12 22L9.2 14.8L2 12L9.2 9.2L12 2Z"/></svg>
-                        สรุปและจัดหมวดหมู่รายงานอัตโนมัติด้วย Google Gemini API (Free Tier)
-                    </span>
-                    <span class="gemini-tier-pill" id="geminiActiveSdkBadge">Google GenAI SDK · Auto Chunking</span>
-                </div>
+            <!-- ส่วนตั้งค่า Google Gemini API (Free Tier) - เริ่มต้นแบบพับเก็บไว้ (Collapsed by default) -->
+            <section class="gemini-ai-section" id="geminiAiSectionCard" aria-labelledby="geminiAiHeading">
+                <button type="button" class="gemini-collapse-trigger" id="geminiCollapseBtn" onclick="toggleGeminiAiPanel()" aria-expanded="false">
+                    <div class="gemini-trigger-left">
+                        <span class="gemini-sparkle-icon">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L14.8 9.2L22 12L14.8 14.8L12 22L9.2 14.8L2 12L9.2 9.2L12 2Z"/></svg>
+                        </span>
+                        <span class="gemini-title-badge" id="geminiAiHeading">
+                            สรุปและจัดหมวดหมู่รายงานอัตโนมัติด้วย Google Gemini API (Free Tier)
+                        </span>
+                        <span class="gemini-tier-pill" id="geminiCollapsedSummaryPill">⚡ Gemini 3.5 Flash Lite · โครงสร้างวิศวกรรม</span>
+                    </div>
+                    <div class="gemini-trigger-right">
+                        <span id="geminiCollapseLabel">ตั้งค่า AI ▾</span>
+                        <span class="gemini-chevron-icon">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
+                    </div>
+                </button>
 
-                <div class="gemini-grid-row">
-                    <div class="gemini-field">
-                        <label for="geminiModelSelect">
-                            <span>เลือกโมเดล AI (สำหรับจัดการประโยคก่อน Export)</span>
-                            <span id="geminiSelectedQuotaText" style="color:var(--accent-primary);font-weight:600;">โควต้าพร้อมใช้งาน</span>
+                <div class="gemini-collapsible-body" id="geminiCollapsibleBody">
+                    <div class="gemini-grid-row">
+                        <!-- Custom Premium Model Selector (Selectable Cards Popover + Quota Tooltips) -->
+                        <div class="gemini-field">
+                            <label>
+                                <span>เลือกโมเดล AI (สำหรับเกลาประโยคแบบวิศวกรรม)</span>
+                                <span id="geminiSelectedQuotaText" style="color:var(--accent-primary);font-weight:600;">โควต้าพร้อมใช้งาน</span>
+                            </label>
+                            <input type="hidden" id="geminiModelSelect" value="gemini-3.5-flash-lite">
+                            <div class="model-selector-custom" id="geminiCustomModelSelector">
+                                <button type="button" class="model-selector-trigger" id="geminiCustomModelTrigger" onclick="toggleCustomModelMenu(event)" aria-haspopup="listbox" aria-expanded="false">
+                                    <div class="model-trigger-main">
+                                        <span class="model-trigger-icon" id="geminiTriggerIcon">⚡</span>
+                                        <div class="model-trigger-text">
+                                            <span class="model-trigger-name" id="geminiTriggerName">Gemini 3.5 Flash Lite</span>
+                                            <span class="model-trigger-desc" id="geminiTriggerDesc">โมเดลหลัก · ความเร็วสูงและโควต้า 500 RPD</span>
+                                        </div>
+                                    </div>
+                                    <span class="model-trigger-badge" id="geminiTriggerBadge">0/500 RPD</span>
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--text-secondary)" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                </button>
+                                <div class="model-selector-menu" id="geminiCustomModelMenu" role="listbox" aria-label="รายการโมเดล Gemini AI"></div>
+                            </div>
+                        </div>
+
+                        <!-- ช่องกรอก API Key แบบปลอดภัย (ห้ามฝังคีย์ในโค้ด) -->
+                        <div class="gemini-field">
+                            <label for="geminiApiKeyInput">
+                                <span>Gemini API Key (Free Tier / Google AI Studio)</span>
+                                <span style="font-size:10.5px;color:var(--text-muted);font-weight:400;">ไม่ฝังคีย์ในโค้ด</span>
+                            </label>
+                            <div class="gemini-key-input-wrap">
+                                <span class="gemini-key-icon">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                                </span>
+                                <input type="password" id="geminiApiKeyInput" class="gemini-input" value="" placeholder="กรอก Gemini API Key (AIza...) ที่นี่" autocomplete="off" oninput="saveUserGeminiApiKey(this.value)">
+                                <button type="button" class="gemini-key-toggle-btn" onclick="toggleGeminiKeyVisibility()">แสดง/ซ่อน</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                        <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                            <input type="checkbox" id="enableGeminiAiCheckbox" checked style="width:15px;height:15px;accent-color:var(--accent-primary);cursor:pointer;">
+                            <span>เกลาประโยคโครงสร้างวิศวกรรม <strong>[สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์]</strong> + สร้าง Sheet สรุป</span>
                         </label>
-                        <select id="geminiModelSelect" class="gemini-select" onchange="onGeminiModelChange()">
-                            <option value="gemini-3.5-flash-lite" selected>⚡ Gemini 3.5 Flash Lite (gemini-3.5-flash-lite · โมเดลหลัก 500 RPD)</option>
-                            <option value="auto_fallback">🔄 Auto Fallback (สลับโมเดลสำรองอัตโนมัติเมื่อติดลิมิต)</option>
-                            <option value="gemini-3.1-flash-lite">🛡️ Gemini 3.1 Flash Lite (gemini-3.1-flash-lite · โมเดลสำรอง 1 · 500 RPD)</option>
-                            <option value="gemini-3.8-flash">🧠 Gemini 3.8 Flash (gemini-3.8-flash · โมเดลสำรอง 2 · วิเคราะห์เชิงลึก 20 RPD)</option>
-                        </select>
+                        <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+                            <button type="button" class="report-mini-btn" onclick="toggleEngineeringPromptBox()" title="ดูหรือปรับแต่ง System Prompt สำหรับวิศวกร">
+                                ⚙️ ตั้งค่า Prompt วิศวกร
+                            </button>
+                            <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                                📝 จัดการประโยครายแถวก่อน Export
+                            </button>
+                            <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="background:var(--bg-active);border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                                ✨ ให้ AI เกลาประโยค & พรีวิวสรุป
+                            </button>
+                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rate_limit_429')" title="จำลอง Error 429 (ล็อก 60 วินาที)">
+                                ทดสอบ 429 (60s)
+                            </button>
+                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rpd_full')" title="จำลองโควต้ารายวันเต็ม (รีเซ็ต 07:00 น.)">
+                                ทดสอบ RPD เต็ม
+                            </button>
+                            <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('reset')" title="รีเซ็ตสถานะล็อกทั้งหมด">
+                                รีเซ็ตโควต้า
+                            </button>
+                        </div>
                     </div>
 
-                    <div class="gemini-field">
-                        <label for="geminiApiKeyInput">
-                            <span>Gemini API Key (Free Tier / Env)</span>
-                            <button type="button" onclick="toggleGeminiKeyVisibility()" style="border:0;background:transparent;color:var(--accent-primary);font-size:10.5px;cursor:pointer;padding:0;">แสดง/ซ่อน</button>
-                        </label>
-                        <input type="password" id="geminiApiKeyInput" class="gemini-input" value="{DEFAULT_GEMINI_API_KEY}" placeholder="ใส่ Gemini API Key หรือใช้ค่าจาก Environment Variable" autocomplete="off">
+                    <!-- กล่องดูและปรับแต่ง System Prompt โครงสร้างวิศวกรรม 3 ส่วน -->
+                    <div id="engineeringPromptBox" class="gemini-prompt-box">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                            <span style="font-size:11.5px;font-weight:600;color:var(--accent-primary);">
+                                🛠️ System Instruction (Prompt วิศวกรผู้จัดทำรายงาน: [สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์])
+                            </span>
+                            <button type="button" class="report-mini-btn" onclick="resetEngineeringPromptDefault()">คืนค่าเริ่มต้น</button>
+                        </div>
+                        <textarea id="geminiCustomPromptInput" class="gemini-prompt-textarea"></textarea>
                     </div>
+
+                    <div class="gemini-model-status-bar" id="geminiModelStatusBar"></div>
                 </div>
-
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
-                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
-                        <input type="checkbox" id="enableGeminiAiCheckbox" checked style="width:15px;height:15px;accent-color:var(--accent-primary);cursor:pointer;">
-                        <span>ให้ Gemini AI เกลารายละเอียดรายแถว + สร้าง Sheet สรุปภาพรวมแยกหมวดหมู่</span>
-                    </label>
-                    <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                            📝 จัดการประโยครายแถวก่อน Export
-                        </button>
-                        <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="background:var(--bg-active);border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                            ✨ ให้ AI เกลาประโยค & พรีวิวสรุป
-                        </button>
-                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rate_limit_429')" title="จำลอง Error 429 (ล็อก 60 วินาที)">
-                            ทดสอบ 429 (60s)
-                        </button>
-                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('rpd_full')" title="จำลองโควต้ารายวันเต็ม (รีเซ็ต 07:00 น.)">
-                            ทดสอบ RPD เต็ม
-                        </button>
-                        <button type="button" class="report-mini-btn" onclick="simulateGeminiRateLimitUI('reset')" title="รีเซ็ตสถานะล็อกทั้งหมด">
-                            รีเซ็ตโควต้า
-                        </button>
-                    </div>
-                </div>
-
-                <div class="gemini-model-status-bar" id="geminiModelStatusBar"></div>
             </section>
 
             <!-- หน้าต่างจัดการและแก้ไขประโยครายแถวก่อนกดปุ่ม Export -->
@@ -4464,7 +4978,7 @@ def generate_map():
                         📝 หน้าต่างจัดการประโยครายละเอียดการตรวจสอบ (แก้ไข/ตรวจสอบก่อนกด Export)
                     </span>
                     <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">[หมวดหมู่] จัดระเบียบทุกแถว</button>
+                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">[สาเหตุ→การดำเนินการ→ผลลัพธ์] เกลาทุกแถว</button>
                         <button type="button" class="report-mini-btn" onclick="resetCustomRowSentences()" title="คืนค่าข้อความต้นฉบับ">↺ คืนค่าต้นฉบับ</button>
                         <button type="button" class="report-mini-btn" onclick="document.getElementById('sentenceManagerBox').classList.remove('show')">ซ่อนหน้าต่าง</button>
                     </div>
@@ -4700,6 +5214,7 @@ def generate_map():
             if (expandBtn) expandBtn.setAttribute('aria-expanded', 'false');
             var workerColSel = document.getElementById('advWorkerColToggle');
             if (workerColSel) workerColSel.value = 'hide';
+            toggleGeminiAiPanel(false);
             reportModal.classList.add('show');
             initializeReportWorkerFilter();
             updateGeminiUiAndButtonState();
@@ -5358,38 +5873,171 @@ def generate_map():
     window.addEventListener('scroll', function() {{ if (document.getElementById('reportWorkerDropdown').classList.contains('show')) positionReportWorkerDropdown(); }}, true);
 
     // ============================================================================
-    // === ระบบบริหารจัดการ Google Gemini API, Auto Fallback, Chunking & Tooltip ===
+    // === ระบบบริหารจัดการ Google Gemini API, Engineering Prompt, Custom Model Selector & Tooltip ===
     // ============================================================================
+    var DEFAULT_ENGINEERING_PROMPT_JS =
+        "คุณเป็นวิศวกรผู้จัดทำรายงานระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) หน้าที่ของคุณคือการปรับแก้ข้อความต่อไปนี้ให้เป็นภาษาทางการ สั้น กระชับ และต้องเรียบเรียงตามโครงสร้าง 3 ส่วนนี้ในประโยคเดียวหรือสองประโยคเท่านั้น:\\n" +
+        "1. สาเหตุ (Cause): เกิดอะไรขึ้น หรือทำไมถึงต้องทำสิ่งนี้\\n" +
+        "2. การดำเนินการ (Action): ทำการแก้ไขหรือจัดการอย่างไร\\n" +
+        "3. ผลการดำเนินการ (Result): สถานะปัจจุบันหลังจากการแก้ไข\\n\\n" +
+        "ตัวอย่างการปรับแก้:\\n" +
+        "ประโยคต้นทาง: 'ปั๊มน้ำพังเพราะลูกปืนแตก ช่างเลยไปเปลี่ยนลูกปืนใหม่ ตอนนี้ปั๊มใช้ได้แล้ว'\\n" +
+        "ประโยคที่ต้องการ: 'ลูกปืนปั๊มน้ำชำรุดทำให้เครื่องหยุดทำงาน (สาเหตุ) จึงดำเนินการเปลี่ยนลูกปืนใหม่ (การดำเนินการ) ปัจจุบันปั๊มน้ำสามารถใช้งานได้ตามปกติ (ผลลัพธ์)'\\n\\n" +
+        "ข้อกำหนด:\\n" +
+        "- บังคับให้ออกมาเป็นโครงสร้างวิศวกรรมแบบสั้นกระชับเสมอ คือ: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์]\\n" +
+        "- ห้ามใช้คำเยิ่นเย้อหรือคำเชื่อมที่พรรณนาเกินความจำเป็น\\n" +
+        "- กรณีที่ข้อมูลนำเข้าไม่ครบถ้วนทั้ง 3 ส่วน ให้พยายามจัดรูปแบบจากข้อมูลที่มีให้ใกล้เคียงโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] มากที่สุด โดยไม่เติมข้อมูลมั่ว";
+
     var GEMINI_MODELS_CONFIG = {{
         "gemini-3.5-flash-lite": {{
+            id: "gemini-3.5-flash-lite",
+            icon: "⚡",
+            title: "Gemini 3.5 Flash Lite",
             label: "gemini-3.5-flash-lite",
-            role: "โมเดลหลัก",
+            role: "Primary · แนะนำ",
+            desc: "เน้นความเร็วสูง ประหยัดโควต้า เกลาประโยควิศวกรรมแม่นยำ",
             rpd_limit: 500,
             max_chunk_chars: 3800,
             max_chunk_rows: 20,
             sdk_candidates: ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
         }},
+        "auto_fallback": {{
+            id: "auto_fallback",
+            icon: "🔄",
+            title: "Auto Fallback (Smart Routing)",
+            label: "auto_fallback",
+            role: "Auto Switch",
+            desc: "สลับโมเดลสำรองอัตโนมัติทันทีเมื่อโมเดลหลักติด Rate Limit",
+            rpd_limit: 1020,
+            max_chunk_chars: 3800,
+            max_chunk_rows: 20,
+            sdk_candidates: []
+        }},
         "gemini-3.1-flash-lite": {{
+            id: "gemini-3.1-flash-lite",
+            icon: "🛡️",
+            title: "Gemini 3.1 Flash Lite",
             label: "gemini-3.1-flash-lite",
-            role: "โมเดลสำรอง 1",
+            role: "Fallback 1",
+            desc: "โมเดลสำรองลำดับที่ 1 เสถียรสำหรับงานสรุปรายงานจำนวนมาก",
             rpd_limit: 500,
             max_chunk_chars: 3600,
             max_chunk_rows: 18,
             sdk_candidates: ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
         }},
         "gemini-3.8-flash": {{
+            id: "gemini-3.8-flash",
+            icon: "🧠",
+            title: "Gemini 3.8 Flash",
             label: "gemini-3.8-flash",
-            role: "โมเดลสำรอง 2",
+            role: "Fallback 2 · Deep",
+            desc: "วิเคราะห์เชิงลึกและสังเคราะห์บทสรุปผู้บริหาร (โควต้า 20 RPD)",
             rpd_limit: 20,
             max_chunk_chars: 4500,
             max_chunk_rows: 25,
             sdk_candidates: ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3-flash-preview", "gemini-2.0-flash"]
+        }},
+        "gemini-3.5-pro-exp": {{
+            id: "gemini-3.5-pro-exp",
+            icon: "🔒",
+            title: "Gemini 3.5 Pro (Experimental)",
+            label: "gemini-3.5-pro-exp",
+            role: "Pro Tier",
+            desc: "โมเดลขนาดใหญ่พิเศษ (จำลองสถานะโควต้าเต็ม / Free Tier ไม่รองรับ)",
+            rpd_limit: 10,
+            max_chunk_chars: 4000,
+            max_chunk_rows: 20,
+            simulated_disabled: true,
+            simulated_reason: "โควต้าเต็มชั่วคราว (10/10 RPD) หรือ API Key (Free Tier) ไม่รองรับโมเดลนี้",
+            sdk_candidates: ["gemini-2.5-pro"]
         }}
     }};
     var GEMINI_FALLBACK_LIST = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    var GEMINI_SELECTOR_ORDER = ["gemini-3.5-flash-lite", "auto_fallback", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-pro-exp"];
     var cachedAiSummaryResult = null;
     var cachedAiFilterSignature = "";
     var customRowSentences = Object.create(null);
+
+    function toggleGeminiAiPanel(forceState) {{
+        var sec = document.getElementById("geminiAiSectionCard");
+        var body = document.getElementById("geminiCollapsibleBody");
+        var btn = document.getElementById("geminiCollapseBtn");
+        var lbl = document.getElementById("geminiCollapseLabel");
+        if (!sec || !body) return;
+        var shouldOpen = typeof forceState === "boolean" ? forceState : !body.classList.contains("show");
+        body.classList.toggle("show", shouldOpen);
+        sec.classList.toggle("is-open", shouldOpen);
+        if (btn) btn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+        if (lbl) lbl.textContent = shouldOpen ? "พับเก็บ ▴" : "ตั้งค่า AI ▾";
+    }}
+
+    function toggleEngineeringPromptBox() {{
+        var box = document.getElementById("engineeringPromptBox");
+        var ta = document.getElementById("geminiCustomPromptInput");
+        if (!box) return;
+        if (ta && !ta.value.trim()) {{
+            ta.value = DEFAULT_ENGINEERING_PROMPT_JS;
+        }}
+        box.classList.toggle("show");
+    }}
+
+    function resetEngineeringPromptDefault() {{
+        var ta = document.getElementById("geminiCustomPromptInput");
+        if (ta) ta.value = DEFAULT_ENGINEERING_PROMPT_JS;
+    }}
+
+    function getActiveEngineeringPrompt() {{
+        var ta = document.getElementById("geminiCustomPromptInput");
+        return (ta && ta.value.trim()) ? ta.value.trim() : DEFAULT_ENGINEERING_PROMPT_JS;
+    }}
+
+    function saveUserGeminiApiKey(val) {{
+        try {{
+            localStorage.setItem("scada_user_gemini_api_key", String(val || "").trim());
+        }} catch (e) {{}}
+    }}
+
+    function loadSavedUserGeminiApiKey() {{
+        try {{
+            var saved = localStorage.getItem("scada_user_gemini_api_key") || "";
+            var inp = document.getElementById("geminiApiKeyInput");
+            if (inp && !inp.value && saved) inp.value = saved;
+        }} catch (e) {{}}
+    }}
+
+    function toggleCustomModelMenu(e) {{
+        if (e) {{ e.preventDefault(); e.stopPropagation(); }}
+        var wrap = document.getElementById("geminiCustomModelSelector");
+        var trig = document.getElementById("geminiCustomModelTrigger");
+        if (!wrap) return;
+        var isOpen = wrap.classList.toggle("is-open");
+        if (trig) trig.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }}
+
+    function selectCustomGeminiModel(modelId) {{
+        var st = loadLocalGeminiSessionState();
+        var nowMs = Date.now();
+        if (modelId !== "auto_fallback") {{
+            var blk = evaluateModelBlockInfo(modelId, st, nowMs);
+            if (blk.isBlocked) return;
+        }}
+        var hiddenInput = document.getElementById("geminiModelSelect");
+        if (hiddenInput) hiddenInput.value = modelId;
+        var wrap = document.getElementById("geminiCustomModelSelector");
+        var trig = document.getElementById("geminiCustomModelTrigger");
+        if (wrap) wrap.classList.remove("is-open");
+        if (trig) trig.setAttribute("aria-expanded", "false");
+        onGeminiModelChange();
+    }}
+
+    document.addEventListener("click", function(e) {{
+        var wrap = document.getElementById("geminiCustomModelSelector");
+        if (wrap && wrap.classList.contains("is-open") && !wrap.contains(e.target)) {{
+            wrap.classList.remove("is-open");
+            var trig = document.getElementById("geminiCustomModelTrigger");
+            if (trig) trig.setAttribute("aria-expanded", "false");
+        }}
+    }});
 
     function getRowSentenceKey(row) {{
         return String(row.seq !== undefined ? row.seq : "") + "_" + String(row.site || "") + "_" + String(row.iso_date || "");
@@ -5399,7 +6047,7 @@ def generate_map():
         var k = getRowSentenceKey(row);
         if (customRowSentences[k] !== undefined) return customRowSentences[k];
         if (row.ai_detail) return row.ai_detail;
-        return categorizeRowDetailJS(row.detail);
+        return categorizeRowDetailJS(row.detail, row.resp, row.status);
     }}
 
     function renderSentenceManagerList() {{
@@ -5458,7 +6106,7 @@ def generate_map():
         var filteredResult = getFilteredReportResult();
         (filteredResult.rows || []).forEach(function(r) {{
             var k = getRowSentenceKey(r);
-            customRowSentences[k] = categorizeRowDetailJS(r.detail);
+            customRowSentences[k] = categorizeRowDetailJS(r.detail, r.resp, r.status);
         }});
         renderSentenceManagerList();
     }}
@@ -5498,28 +6146,37 @@ def generate_map():
         if (!raw || raw.utc_day !== utcDay || !raw.models) {{
             raw = {{ utc_day: utcDay, models: {{}}, last_used_model: "" }};
         }}
-        GEMINI_FALLBACK_LIST.forEach(function(m) {{
+        Object.keys(GEMINI_MODELS_CONFIG).forEach(function(m) {{
+            if (m === "auto_fallback") return;
+            var cfg = GEMINI_MODELS_CONFIG[m];
             if (!raw.models[m]) {{
                 raw.models[m] = {{
-                    rpd_used: 0,
-                    rpd_limit: GEMINI_MODELS_CONFIG[m].rpd_limit,
+                    rpd_used: cfg.simulated_disabled ? cfg.rpd_limit : 0,
+                    rpd_limit: cfg.rpd_limit,
                     cooldown_until_ms: 0,
-                    rpd_locked_until_ms: 0,
-                    last_error_type: "",
-                    last_error: ""
+                    rpd_locked_until_ms: cfg.simulated_disabled ? getNextUtcMidnightMs() : 0,
+                    last_error_type: cfg.simulated_disabled ? "UNSUPPORTED_OR_FULL" : "",
+                    last_error: cfg.simulated_reason || ""
                 }};
             }}
             var st = raw.models[m];
-            if (st.cooldown_until_ms && nowMs >= st.cooldown_until_ms) {{
-                st.cooldown_until_ms = 0;
-                if (st.last_error_type === "RATE_LIMIT_429" || st.last_error_type === "TOKEN_LIMIT") {{
-                    st.last_error_type = "";
+            if (cfg.simulated_disabled) {{
+                st.rpd_used = cfg.rpd_limit;
+                st.rpd_locked_until_ms = getNextUtcMidnightMs();
+                st.last_error_type = "UNSUPPORTED_OR_FULL";
+                st.last_error = cfg.simulated_reason;
+            }} else {{
+                if (st.cooldown_until_ms && nowMs >= st.cooldown_until_ms) {{
+                    st.cooldown_until_ms = 0;
+                    if (st.last_error_type === "RATE_LIMIT_429" || st.last_error_type === "TOKEN_LIMIT") {{
+                        st.last_error_type = "";
+                    }}
                 }}
-            }}
-            if (st.rpd_locked_until_ms && nowMs >= st.rpd_locked_until_ms) {{
-                st.rpd_locked_until_ms = 0;
-                st.rpd_used = 0;
-                if (st.last_error_type === "RPD_EXHAUSTED") st.last_error_type = "";
+                if (st.rpd_locked_until_ms && nowMs >= st.rpd_locked_until_ms) {{
+                    st.rpd_locked_until_ms = 0;
+                    st.rpd_used = 0;
+                    if (st.last_error_type === "RPD_EXHAUSTED") st.last_error_type = "";
+                }}
             }}
         }});
         try {{
@@ -5544,7 +6201,6 @@ def generate_map():
             m.rpd_locked_until_ms = getNextUtcMidnightMs();
             m.last_error_type = "RPD_EXHAUSTED";
         }} else {{
-            // Rolling Window 60 วินาที
             m.cooldown_until_ms = Date.now() + 60000;
             m.last_error_type = limitType === "TOKEN_LIMIT" ? "TOKEN_LIMIT" : "RATE_LIMIT_429";
         }}
@@ -5589,8 +6245,18 @@ def generate_map():
     }}
 
     function evaluateModelBlockInfo(modelName, st, nowMs) {{
+        var cfg = GEMINI_MODELS_CONFIG[modelName];
+        if (cfg && cfg.simulated_disabled) {{
+            return {{
+                isBlocked: true,
+                type: "UNSUPPORTED_OR_FULL",
+                remainSec: 0,
+                shortReason: "โควต้าเต็มชั่วคราว / API Key ไม่รองรับ",
+                tooltip: "⚠️ ไม่สามารถเลือกโมเดลนี้ได้: " + cfg.simulated_reason
+            }};
+        }}
         var m = (st.models && st.models[modelName]) ? st.models[modelName] : null;
-        if (!m) return {{ isBlocked: false, type: "READY", remainSec: 0, tooltip: "" }};
+        if (!m) return {{ isBlocked: false, type: "READY", remainSec: 0, shortReason: "พร้อมใช้งาน", tooltip: "" }};
 
         var cdRemSec = m.cooldown_until_ms > nowMs ? Math.ceil((m.cooldown_until_ms - nowMs) / 1000) : 0;
         var isRpdFull = (m.rpd_used >= m.rpd_limit) || (m.rpd_locked_until_ms > nowMs);
@@ -5601,15 +6267,17 @@ def generate_map():
                 isBlocked: true,
                 type: "RPD",
                 remainSec: rpdRemSec,
-                tooltip: "⚠️ ติดโควต้ารายวัน (RPD) โมเดล " + modelName + " (" + m.rpd_used + "/" + m.rpd_limit + " RPD) จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(rpdRemSec) + ")"
+                shortReason: "โควต้ารายวันเต็ม (" + m.rpd_used + "/" + m.rpd_limit + " RPD)",
+                tooltip: "⚠️ โควต้ารายวันเต็ม (" + m.rpd_used + "/" + m.rpd_limit + " RPD) จะรีเซ็ตเวลา 07:00 น. (อีก " + formatCountdownThaiHMS(rpdRemSec) + ")"
             }};
         }}
         if (cdRemSec > 0) {{
-            var reasonTxt = m.last_error_type === "TOKEN_LIMIT" ? "Token Limit (TPM)" : "Rate Limit (429)";
+            var reasonTxt = m.last_error_type === "TOKEN_LIMIT" ? "Token Limit (TPM)" : "โควต้าเต็มชั่วคราว (429)";
             return {{
                 isBlocked: true,
                 type: "COOLDOWN_60S",
                 remainSec: cdRemSec,
+                shortReason: "โควต้าเต็มชั่วคราว (" + cdRemSec + "s)",
                 tooltip: "⚠️ ติด " + reasonTxt + " โมเดล " + modelName + " ปลดล็อกใน " + cdRemSec + " วินาที"
             }};
         }}
@@ -5617,26 +6285,125 @@ def generate_map():
             isBlocked: false,
             type: "READY",
             remainSec: 0,
+            shortReason: "พร้อมใช้งาน (" + m.rpd_used + "/" + m.rpd_limit + " RPD)",
             tooltip: "✅ โมเดล " + modelName + " พร้อมใช้งาน (ใช้ไป " + m.rpd_used + "/" + m.rpd_limit + " RPD)"
         }};
     }}
 
+    function renderCustomModelSelectorUI(st, nowMs, selectedMode) {{
+        var menuEl = document.getElementById("geminiCustomModelMenu");
+        var trigIcon = document.getElementById("geminiTriggerIcon");
+        var trigName = document.getElementById("geminiTriggerName");
+        var trigDesc = document.getElementById("geminiTriggerDesc");
+        var trigBadge = document.getElementById("geminiTriggerBadge");
+        var summaryPill = document.getElementById("geminiCollapsedSummaryPill");
+
+        var selCfg = GEMINI_MODELS_CONFIG[selectedMode] || GEMINI_MODELS_CONFIG["gemini-3.5-flash-lite"];
+        if (trigIcon) trigIcon.textContent = selCfg.icon || "⚡";
+        if (trigName) trigName.textContent = selCfg.title || selectedMode;
+        if (trigDesc) trigDesc.textContent = selCfg.desc || "";
+        if (summaryPill) summaryPill.textContent = (selCfg.icon || "⚡") + " " + (selCfg.title || selectedMode) + " · โครงสร้างวิศวกรรม";
+
+        if (trigBadge) {{
+            if (selectedMode === "auto_fallback") {{
+                trigBadge.textContent = "Smart Auto";
+            }} else {{
+                var mSt = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: selCfg.rpd_limit }};
+                trigBadge.textContent = mSt.rpd_used + "/" + mSt.rpd_limit + " RPD";
+            }}
+        }}
+
+        if (!menuEl) return;
+        menuEl.innerHTML = "";
+
+        GEMINI_SELECTOR_ORDER.forEach(function(mId) {{
+            var cfg = GEMINI_MODELS_CONFIG[mId];
+            if (!cfg) return;
+            var isSelected = (mId === selectedMode);
+            var blkInfo = (mId === "auto_fallback")
+                ? {{ isBlocked: false, type: "READY", remainSec: 0, tooltip: "" }}
+                : evaluateModelBlockInfo(mId, st, nowMs);
+
+            var card = document.createElement("div");
+            card.className = "model-option-card" + (isSelected ? " is-selected" : "") + (blkInfo.isBlocked ? " is-disabled" : "");
+            card.setAttribute("role", "option");
+            card.setAttribute("aria-selected", isSelected ? "true" : "false");
+            card.setAttribute("aria-disabled", blkInfo.isBlocked ? "true" : "false");
+
+            var quotaText = "Auto Switch";
+            var quotaCls = "model-opt-quota";
+            if (mId !== "auto_fallback") {{
+                var mObj = st.models[mId] || {{ rpd_used: 0, rpd_limit: cfg.rpd_limit }};
+                if (blkInfo.type === "UNSUPPORTED_OR_FULL") {{
+                    quotaText = "โควต้าเต็ม / ไม่รองรับ";
+                    quotaCls += " is-full";
+                }} else if (blkInfo.type === "RPD") {{
+                    quotaText = "เต็ม " + mObj.rpd_used + "/" + mObj.rpd_limit + " RPD";
+                    quotaCls += " is-full";
+                }} else if (blkInfo.type === "COOLDOWN_60S") {{
+                    quotaText = "ติด 429 (" + blkInfo.remainSec + "s)";
+                    quotaCls += " is-warn";
+                }} else {{
+                    quotaText = mObj.rpd_used + "/" + mObj.rpd_limit + " RPD";
+                }}
+            }}
+
+            var tooltipHtml = blkInfo.isBlocked
+                ? '<div class="model-opt-tooltip">' + blkInfo.tooltip + '</div>'
+                : '';
+
+            card.innerHTML =
+                tooltipHtml +
+                '<div class="model-opt-left">' +
+                    '<span class="model-opt-icon">' + cfg.icon + '</span>' +
+                    '<div class="model-opt-info">' +
+                        '<div class="model-opt-title-row">' +
+                            '<span class="model-opt-title">' + cfg.title + '</span>' +
+                            '<span class="model-opt-role-tag">' + cfg.role + '</span>' +
+                        '</div>' +
+                        '<span class="model-opt-sub">' + cfg.desc + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="model-opt-right">' +
+                    '<span class="' + quotaCls + '">' + quotaText + '</span>' +
+                '</div>';
+
+            if (!blkInfo.isBlocked) {{
+                card.addEventListener("click", function(ev) {{
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    selectCustomGeminiModel(mId);
+                }});
+            }}
+            menuEl.appendChild(card);
+        }});
+    }}
+
     function updateGeminiUiAndButtonState() {{
+        loadSavedUserGeminiApiKey();
+        var promptTa = document.getElementById("geminiCustomPromptInput");
+        if (promptTa && !promptTa.value) promptTa.value = DEFAULT_ENGINEERING_PROMPT_JS;
+
         var st = loadLocalGeminiSessionState();
         var nowMs = Date.now();
         var selEl = document.getElementById("geminiModelSelect");
-        var selectedMode = selEl ? selEl.value : "auto_fallback";
+        var selectedMode = selEl ? selEl.value : "gemini-3.5-flash-lite";
         var statusBar = document.getElementById("geminiModelStatusBar");
         var quotaTxt = document.getElementById("geminiSelectedQuotaText");
 
+        renderCustomModelSelectorUI(st, nowMs, selectedMode);
+
         if (statusBar) {{
             var chipsHtml = "";
-            GEMINI_FALLBACK_LIST.forEach(function(mName) {{
+            GEMINI_FALLBACK_LIST.concat(["gemini-3.5-pro-exp"]).forEach(function(mName) {{
                 var info = evaluateModelBlockInfo(mName, st, nowMs);
-                var mObj = st.models[mName];
+                var mObj = st.models[mName] || {{ rpd_used: 0, rpd_limit: 0 }};
                 var cls = "gemini-model-chip ";
                 var badgeText = "";
-                if (info.type === "RPD") {{
+                if (info.type === "UNSUPPORTED_OR_FULL") {{
+                    cls += "is-rpd";
+                    badgeText = "🔒 " + mName + ": โควต้าเต็มชั่วคราว / API Key ไม่รองรับ";
+                }} else if (info.type === "RPD") {{
                     cls += "is-rpd";
                     badgeText = "⛔ " + mName + ": เต็ม RPD (รีเซ็ต 07:00 น. · " + formatCountdownThaiHMS(info.remainSec) + ")";
                 }} else if (info.type === "COOLDOWN_60S") {{
@@ -5688,9 +6455,9 @@ def generate_map():
             buttonBlocked = selInfo.isBlocked;
             activeTooltip = selInfo.isBlocked ? selInfo.tooltip : "";
             if (quotaTxt) {{
-                var mData = st.models[selectedMode];
+                var mData = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: 500 }};
                 quotaTxt.textContent = selInfo.isBlocked
-                    ? (selInfo.type === "RPD" ? "ติด RPD (รีเซ็ต 07:00 น.)" : ("ติด 429 รอ " + selInfo.remainSec + "s"))
+                    ? selInfo.shortReason
                     : ("โควต้า " + mData.rpd_used + "/" + mData.rpd_limit + " RPD");
             }}
         }}
@@ -5732,7 +6499,7 @@ def generate_map():
 
     function simulateGeminiRateLimitUI(action) {{
         var selEl = document.getElementById("geminiModelSelect");
-        var targetModel = (selEl && selEl.value !== "auto_fallback") ? selEl.value : "gemini-3.5-flash-lite";
+        var targetModel = (selEl && selEl.value !== "auto_fallback" && selEl.value !== "gemini-3.5-pro-exp") ? selEl.value : "gemini-3.5-flash-lite";
         var st = loadLocalGeminiSessionState();
 
         if (action === "reset") {{
@@ -5769,24 +6536,55 @@ def generate_map():
         }}
     }}, 1000);
 
-    function categorizeRowDetailJS(rawDetail) {{
+    function categorizeRowDetailJS(rawDetail, respStr, statusStr) {{
         var txt = String(rawDetail || "").trim();
-        if (!txt || txt === "-") return "- (ไม่มีบันทึกอาการเสียเพิ่มเติม)";
-        var lines = txt.split(/[\\n\\r]+|,\\s*(?=[❌✅•\\-])/).map(function(s) {{ return s.trim(); }}).filter(Boolean);
-        var comm = [], frtu = [], act = [];
-        lines.forEach(function(ln) {{
-            var clean = ln.replace(/^[•\\-\\s]+/, "").trim();
-            if (!clean) return;
-            var u = clean.toUpperCase();
-            if (/สื่อสาร|MODEM|SIM|3G|4G|OPTIC|FIBER|WRL|PING|สัญญาณ|ONLINE|สายอากาศ/.test(u)) comm.push(clean);
-            else if (/FRTU|RTU|BATTERY|แบต|FUSE|ฟิวส์|POWER|การ์ด|BOARD|CONTROL|RELAY|AC|DC|ตู้/.test(u)) frtu.push(clean);
-            else act.push(clean);
+        var stClean = String(statusStr || "").trim();
+        var respClean = String(respStr || "").trim();
+
+        if (!txt || txt === "-") {{
+            if (stClean && stClean !== "-") {{
+                return "ไม่พบบันทึกสาเหตุและรายละเอียดการแก้ไขในระบบ (สาเหตุ/การดำเนินการ) ปัจจุบันอุปกรณ์มีสถานะ " + stClean + " (ผลลัพธ์)";
+            }}
+            return "- (ไม่มีบันทึกข้อมูลการตรวจสอบ)";
+        }}
+
+        var tokens = txt.split(/[\\n\\r;|]+|,\\s*/).map(function(s) {{
+            return s.replace(/^[•\\-\\s✅❌☑☒✔✘]+/, "").trim();
+        }}).filter(Boolean);
+
+        var causes = [], actions = [], results = [];
+        var causeRe = /ชำรุด|เสีย|พัง|แตก|ขาด|เสื่อม|ค้าง|หลวม|ขัดข้อง|ไม่มีไฟ|NO AC|OFFLINE|ALARM|FAULT|ไม่ทำงาน|กระพริบ|ต่ำ|รั่ว|ไหม้/i;
+        var actionRe = /เปลี่ยน|แก้ไข|รีเซ็ต|RESET|RESTART|ทำความสะอาด|ขัน|ปรับ|ตั้งค่า|จูน|ตรวจสอบ|วัด|เช็ค|ทดลอง|ย้ำสาย|ซ่อม|ตัดต่อ|ดำเนินการ/i;
+        var resultRe = /ใช้งานได้|ปกติ|ONLINE|สำเร็จ|เรียบร้อย|ยังไม่ออนไลน์|รอ |ส่งต่อ|ใช้ได้แล้ว|CONNECTING/i;
+
+        tokens.forEach(function(tk) {{
+            if (actionRe.test(tk)) actions.push(tk);
+            else if (causeRe.test(tk)) causes.push(tk);
+            else if (resultRe.test(tk)) results.push(tk);
+            else if (causes.length === 0) causes.push(tk);
+            else actions.push(tk);
         }});
-        var out = [];
-        if (comm.length) out.push("[ระบบสื่อสาร] " + comm.join("; "));
-        if (frtu.length) out.push("[อุปกรณ์ FRTU/ชุดควบคุม] " + frtu.join("; "));
-        if (act.length) out.push("[ผลการตรวจสอบ/แก้ไข] " + act.join("; "));
-        return out.length ? out.join("\\n") : txt;
+
+        if (results.length === 0) {{
+            if (/ONLINE/i.test(stClean)) {{
+                results.push("ปัจจุบันอุปกรณ์สามารถออนไลน์และใช้งานได้ตามปกติ");
+            }} else if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า") {{
+                results.push("ปัจจุบันสถานะ " + (stClean || "ยังไม่ออนไลน์") + " อยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไข");
+            }} else if (stClean && stClean !== "-") {{
+                results.push("ปัจจุบันอุปกรณ์อยู่ในสถานะ " + stClean);
+            }}
+        }}
+
+        var segments = [];
+        if (causes.length) segments.push(causes.join(" และ") + " (สาเหตุ)");
+        if (actions.length) {{
+            var actTxt = actions.join(" ");
+            if (!/^จึง|^ได้ดำเนินการ/.test(actTxt)) actTxt = "จึงดำเนินการ" + actTxt;
+            segments.push(actTxt + " (การดำเนินการ)");
+        }}
+        if (results.length) segments.push(results.join(" ") + " (ผลลัพธ์)");
+
+        return segments.length ? segments.join(" ") : txt;
     }}
 
     function buildDeterministicSummaryJS(rows) {{
@@ -5874,12 +6672,16 @@ def generate_map():
     }}
 
     async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey) {{
+        if (!apiKey) {{
+            throw new Error("กรุณากรอก Gemini API Key ในหน้าต่างตั้งค่า AI ก่อนเรียกใช้งาน");
+        }}
         var st = loadLocalGeminiSessionState();
         var nowMs = Date.now();
         var order = (preferredModel === "auto_fallback" || !GEMINI_MODELS_CONFIG[preferredModel])
             ? GEMINI_FALLBACK_LIST.slice()
             : [preferredModel].concat(GEMINI_FALLBACK_LIST.filter(function(m) {{ return m !== preferredModel; }}));
 
+        var sysPrompt = getActiveEngineeringPrompt();
         var lastErr = "";
         for (var i = 0; i < order.length; i++) {{
             var logicalModel = order[i];
@@ -5890,7 +6692,7 @@ def generate_map():
                 }}
                 continue;
             }}
-            var candidates = GEMINI_MODELS_CONFIG[logicalModel].sdk_candidates;
+            var candidates = GEMINI_MODELS_CONFIG[logicalModel].sdk_candidates || [];
             for (var c = 0; c < candidates.length; c++) {{
                 var sdkId = candidates[c];
                 var url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(sdkId) + ":generateContent?key=" + encodeURIComponent(apiKey);
@@ -5899,6 +6701,7 @@ def generate_map():
                         method: "POST",
                         headers: {{ "Content-Type": "application/json" }},
                         body: JSON.stringify({{
+                            systemInstruction: {{ parts: [{{ text: sysPrompt }}] }},
                             contents: [{{ parts: [{{ text: promptText }}] }}],
                             generationConfig: {{ temperature: 0.2 }}
                         }})
@@ -5936,14 +6739,15 @@ def generate_map():
 
     async function summarizeInspectionRowsWithGeminiJS(filteredRows) {{
         var selEl = document.getElementById("geminiModelSelect");
-        var preferredModel = selEl ? selEl.value : "auto_fallback";
+        var preferredModel = selEl ? selEl.value : "gemini-3.5-flash-lite";
         var keyEl = document.getElementById("geminiApiKeyInput");
         var apiKey = keyEl ? keyEl.value.trim() : "";
+        var customPrompt = getActiveEngineeringPrompt();
 
         var baseExec = buildDeterministicSummaryJS(filteredRows);
         var workingRows = filteredRows.map(function(r) {{
             var copy = Object.assign({{}}, r);
-            copy.ai_detail = categorizeRowDetailJS(r.detail);
+            copy.ai_detail = categorizeRowDetailJS(r.detail, r.resp, r.status);
             return copy;
         }});
 
@@ -5955,7 +6759,8 @@ def generate_map():
                 body: JSON.stringify({{
                     rows: workingRows,
                     model: preferredModel,
-                    api_key: apiKey
+                    api_key: apiKey,
+                    custom_prompt: customPrompt
                 }})
             }});
             if (resp.status === 200 || resp.status === 429) {{
@@ -5987,8 +6792,9 @@ def generate_map():
             }}).join("\\n");
 
             var prompt =
-                "คุณคือวิศวกรระบบ SCADA โปรดเรียบเรียงข้อมูลการตรวจเช็คอุปกรณ์ต่อไปนี้ให้อ่านง่าย กระชับ เป็นหมวดหมู่ชัดเจน\\n" +
-                "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"...\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
+                customPrompt + "\\n\\n" +
+                "โปรดปรับแก้ข้อความแต่ละรายการต่อไปนี้ให้อยู่ในโครงสร้างวิศวกรรม [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ใน 1-2 ประโยค\\n" +
+                "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"...(สาเหตุ) จึงดำเนินการ...(การดำเนินการ) ปัจจุบัน...(ผลลัพธ์)\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
                 linesStr;
             try {{
                 var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, apiKey);
@@ -8039,6 +8845,7 @@ def api_gemini_summarize():
             rows=rows,
             preferred_model=preferred_model,
             api_key=custom_api_key,
+            custom_prompt=payload.get("custom_prompt"),
         )
         return jsonify(result)
     except Exception as exc:
@@ -8077,6 +8884,7 @@ def api_export_report():
                 rows=rows,
                 preferred_model=preferred_model,
                 api_key=custom_api_key,
+                custom_prompt=payload.get("custom_prompt"),
             )
         except Exception as exc:
             base_exec = _build_deterministic_executive_summary(rows)
