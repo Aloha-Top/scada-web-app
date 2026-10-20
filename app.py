@@ -227,13 +227,17 @@ class _FallbackFlask:
 app = Flask(__name__) if Flask is not None else _FallbackFlask(__name__)
 status_hash_map = {}
 
-# --- 1. ตั้งค่าโปรเจกต์พื้นฐาน (Configuration) ---
-CACHE_DIR = os.environ.get('SCADA_CACHE_DIR', '/tmp' if os.path.isdir('/tmp') else '.')
+# --- 1. ตั้งค่าโปรเจกต์พื้นฐาน (รองรับทั้งการรันผ่านไฟล์ .bat บน Windows และ Server ของ Render) ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+IS_RENDER_SERVER = bool(os.environ.get('RENDER') or os.environ.get('RENDER_SERVICE_ID') or (os.name != 'nt' and os.path.isdir('/tmp')))
+CACHE_DIR = os.environ.get('SCADA_CACHE_DIR', '/tmp' if IS_RENDER_SERVER else BASE_DIR)
 DB_PATH = os.environ.get('SCADA_DB_PATH', os.path.join(CACHE_DIR, 'scada_real.db'))
-LOCAL_SEED_DB = 'scada_real.db'
+LOCAL_SEED_DB = os.path.join(BASE_DIR, 'scada_real.db')
 CACHE_HTML_FILE = os.path.join(CACHE_DIR, 'scada_cache.html')
 CACHE_META_FILE = os.path.join(CACHE_DIR, 'scada_meta.json')
 LOCK_FILE = os.path.join(CACHE_DIR, 'updating.lock')
+OUTPUT_FILE = os.path.join(BASE_DIR, 'scada_detailed_map.html')
+DASHBOARD_OUTPUT_FILE = os.path.join(BASE_DIR, 'scada_dashboard.html')
 CACHE_DURATION = 300  # อัปเดตข้อมูลอัตโนมัติทุกๆ 5 นาที
 
 # ตั้งค่า Google Sheets สำหรับดึงข้อมูลลงฐานข้อมูล SQLite (อัปเดตอัตโนมัติจาก Google Sheets / Google Form)
@@ -346,34 +350,64 @@ DEFAULT_GEMINI_API_KEY = (
     or "AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ"
 )
 
-# System Instruction มาตรฐานวิศวกรรม (Engineering Format: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์])
+# System Instruction มาตรฐานวิศวกรรม (Engineering Narrative Report Style: สาเหตุ -> การดำเนินการ -> ผลลัพธ์)
 ENGINEERING_SYSTEM_PROMPT = (
-    "คุณเป็นวิศวกรผู้จัดทำรายงานระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) "
-    "หน้าที่ของคุณคือการปรับแก้ข้อความรายละเอียดการตรวจสอบและแก้ไขอุปกรณ์ต่อไปนี้ให้เป็นภาษาทางการ สั้น กระชับ "
-    "และต้องเรียบเรียงตามโครงสร้าง 3 ส่วนนี้ในประโยคเดียวหรือสองประโยคเท่านั้น:\n"
-    "1. สาเหตุ (Cause): เกิดอะไรขึ้น ตรวจพบอาการผิดปกติหรืออุปกรณ์ใดชำรุด\n"
-    "2. การดำเนินการ (Action): ทำการแก้ไข ทดสอบ หรือจัดการอย่างไร\n"
-    "3. ผลการดำเนินการ (Result): สถานะปัจจุบันหลังจากการแก้ไข หรือการส่งต่อหน่วยงานรับผิดชอบ\n\n"
-    "ตัวอย่างการปรับแก้:\n"
-    "- ประโยคต้นทาง: 'ปั๊มน้ำพังเพราะลูกปืนแตก ช่างเลยไปเปลี่ยนลูกปืนใหม่ ตอนนี้ปั๊มใช้ได้แล้ว'\n"
-    "- ประโยคที่ต้องการ: 'ลูกปืนปั๊มน้ำชำรุดทำให้เครื่องหยุดทำงาน (สาเหตุ) จึงดำเนินการเปลี่ยนลูกปืนใหม่ (การดำเนินการ) ปัจจุบันปั๊มน้ำสามารถใช้งานได้ตามปกติ (ผลลัพธ์)'\n\n"
-    "ข้อกำหนดเหล็ก:\n"
-    "- บังคับจัดเรียงโครงสร้างเป็น: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] เสมอ\n"
-    "- ห้ามใช้คำเยิ่นเย้อหรือคำเชื่อมที่พรรณนาเกินความจำเป็น\n"
-    "- กรณีที่ข้อมูลนำเข้าไม่ครบถ้วนทั้ง 3 ส่วน ให้พยายามจัดรูปแบบจากข้อเท็จจริงที่มีให้ใกล้เคียงโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] มากที่สุด โดยห้ามแต่งเติมหรือเดาข้อมูลมั่วที่ไม่ได้ระบุในต้นฉบับเด็ดขาด"
+    "คุณเป็นวิศวกรผู้เชี่ยวชาญด้านระบบควบคุมและสั่งการ (SCADA) ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) "
+    "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลการตรวจสอบและแก้ไขอุปกรณ์ภาคสนาม แล้วเรียบเรียงเป็นรายงานเชิงวิศวกรรมที่มีความเป็นมืออาชีพ "
+    "ถูกหลักไวยากรณ์ภาษาไทย มีการตรวจแก้คำผิดหรือคำย่อที่พิมพ์ตกหล่นให้ถูกต้อง และเขียนเนื้อหาให้ครบถ้วนกระชับได้ใจความชัดเจน "
+    "โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •) หรือแบ่งเป็นหัวข้อย่อยแบบเดิมเด็ดขาด แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราวต่อเนื่องกันอย่างสละสลวย ประกอบด้วย 3 ส่วนสำคัญตามลำดับ ดังนี้:\n"
+    "- สาเหตุ: เกิดจากอะไร (ระบุอาการผิดปกติหรืออุปกรณ์ที่ตรวจพบว่าชำรุดเสียหาย โดยขึ้นต้นด้วยคำว่า 'เนื่องจาก...')\n"
+    "- การดำเนินการ: แก้ไขอย่างไร (ระบุวิธีการเข้าตรวจสอบ การซ่อมแซม การเปลี่ยนอุปกรณ์ หรือการตั้งค่าใหม่ โดยเชื่อมด้วยคำว่า 'จึงได้ดำเนินการ...')\n"
+    "- ผลลัพธ์: ได้ผลเป็นอย่างไร (ระบุสถานะการทำงานของอุปกรณ์และระบบสื่อสารหลังการแก้ไข หรือการส่งต่อหน่วยงานรับผิดชอบ โดยเชื่อมด้วยคำว่า 'ส่งผลให้...')\n\n"
+    "ตัวอย่างแนวทางการเขียนที่ถูกต้อง:\n"
+    "\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n\n"
+    "ข้อกำหนดสำคัญในการเรียบเรียง:\n"
+    "1. ต้องร้อยเรียงเป็นประโยคอธิบายยาวที่เชื่อมโยงกันอย่างเป็นธรรมชาติตามโครงสร้าง: \"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\" เสมอ\n"
+    "2. แก้คำผิด คำซ้ำซ้อน และจัดระเบียบคำศัพท์เทคนิคทางวิศวกรรมไฟฟ้าและระบบสื่อสาร (เช่น Recloser, LBS, AVR, FRTU, DAU, Cellular Router, Modem, VT, AC/DC, Port LAN, Online/Offline) ให้ถูกต้องตามมาตรฐานวิชาชีพ\n"
+    "3. ห้ามใช้เครื่องหมายไฮไลท์ สัญลักษณ์พิเศษ หรือหัวข้อย่อยแยกบรรทัด และห้ามแต่งเติมข้อมูลเท็จที่ไม่มีในข้อมูลต้นฉบับ หากส่วนใดไม่ปรากฏในต้นฉบับให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุด"
 )
 
-# กำหนดรายการโมเดลกลุ่ม Free Tier ตามลำดับความสำคัญ (Primary -> Fallback 1 -> Fallback 2)
+# กำหนดรายการโมเดล AI โดยให้ความสำคัญกับโมเดลที่ "ฉลาดที่สุด" เป็นอันดับแรก (Pro / วิเคราะห์ขั้นสูง -> โมเดลที่ฉลาดรองลงมาตามลำดับ)
 GEMINI_FREE_TIER_MODELS = {
+    "gemini-3.5-pro-exp": {
+        "label": "gemini-3.5-pro-exp (โมเดลหลักอันดับ 1 - ตระกูล Pro วิเคราะห์ขั้นสูง ฉลาดที่สุด)",
+        "role": "โมเดลหลักอันดับ 1 (Smartest Pro)",
+        "rpd_limit": 50,
+        "rpm_limit": 5,
+        "tpm_limit": 250000,
+        "max_chunk_chars": 4800,
+        "max_chunk_rows": 25,
+        "simulated_disabled": False,
+        "sdk_candidates": [
+            "gemini-3.5-pro-exp",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ],
+    },
+    "gemini-3.8-flash": {
+        "label": "gemini-3.8-flash (โมเดลสำรองอันดับ 1 - เน้นวิเคราะห์เชิงลึก ฉลาดรองลงมา)",
+        "role": "โมเดลสำรองอันดับ 1 (Fallback 1)",
+        "rpd_limit": 100,
+        "rpm_limit": 10,
+        "tpm_limit": 250000,
+        "max_chunk_chars": 4500,
+        "max_chunk_rows": 25,
+        "sdk_candidates": [
+            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.0-flash",
+        ],
+    },
     "gemini-3.5-flash-lite": {
-        "label": "gemini-3.5-flash-lite (โมเดลหลัก - เน้นความเร็วและโควต้าสูง 500 RPD)",
-        "role": "โมเดลหลัก (Primary)",
+        "label": "gemini-3.5-flash-lite (โมเดลสำรองอันดับ 2 - ความเร็วสูงและโควต้า 500 RPD)",
+        "role": "โมเดลสำรองอันดับ 2 (Fallback 2)",
         "rpd_limit": 500,
         "rpm_limit": 15,
         "tpm_limit": 250000,
         "max_chunk_chars": 3800,
         "max_chunk_rows": 20,
-        # Mapping สำรองไปยัง Model ID จริงใน Google GenAI SDK อัตโนมัติเพื่อป้องกัน Error 404 (Model Not Found)
         "sdk_candidates": [
             "gemini-3.5-flash-lite",
             "gemini-2.5-flash-lite",
@@ -382,8 +416,8 @@ GEMINI_FREE_TIER_MODELS = {
         ],
     },
     "gemini-3.1-flash-lite": {
-        "label": "gemini-3.1-flash-lite (โมเดลสำรอง 1 - โควต้า 500 RPD)",
-        "role": "โมเดลสำรอง 1 (Fallback 1)",
+        "label": "gemini-3.1-flash-lite (โมเดลสำรองอันดับ 3 - ความเสถียรสูง โควต้า 500 RPD)",
+        "role": "โมเดลสำรองอันดับ 3 (Fallback 3)",
         "rpd_limit": 500,
         "rpm_limit": 15,
         "tpm_limit": 250000,
@@ -396,41 +430,14 @@ GEMINI_FREE_TIER_MODELS = {
             "gemini-2.0-flash",
         ],
     },
-    "gemini-3.8-flash": {
-        "label": "gemini-3.8-flash (โมเดลสำรอง 2 - เน้นวิเคราะห์เชิงลึก โควต้า 20 RPD)",
-        "role": "โมเดลสำรอง 2 (Fallback 2)",
-        "rpd_limit": 20,
-        "rpm_limit": 10,
-        "tpm_limit": 250000,
-        "max_chunk_chars": 4500,
-        "max_chunk_rows": 25,
-        "sdk_candidates": [
-            "gemini-3.8-flash",
-            "gemini-2.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-2.0-flash",
-        ],
-    },
-    "gemini-3.5-pro-exp": {
-        "label": "gemini-3.5-pro-exp (โมเดลวิเคราะห์ขั้นสูง - โควต้าเต็มชั่วคราว)",
-        "role": "Experimental Pro",
-        "rpd_limit": 10,
-        "rpm_limit": 2,
-        "tpm_limit": 125000,
-        "max_chunk_chars": 4000,
-        "max_chunk_rows": 20,
-        "simulated_disabled": True,
-        "simulated_reason": "โควต้าเต็มชั่วคราว (10/10 RPD) หรือ API Key (Free Tier) ไม่รองรับโมเดลนี้",
-        "sdk_candidates": [
-            "gemini-2.5-pro",
-        ],
-    },
 }
 
+# ลำดับการสลับโมเดลอัตโนมัติ (Model Fallback Order): เรียงจากโมเดลที่ฉลาดที่สุดไปยังโมเดลที่ฉลาดรองลงมาเรื่อยๆ
 GEMINI_FALLBACK_ORDER = [
+    "gemini-3.5-pro-exp",
+    "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
 ]
 
 ROLLING_WINDOW_COOLDOWN_SECONDS = 60  # ล็อกปุ่มกดสำหรับโมเดลที่ติด 429 เป็นเวลา 60 วินาที (Rolling Window 60s)
@@ -483,8 +490,8 @@ def _create_initial_session_state():
         }
     return {
         "utc_day": utc_day_str,
-        # CHANGED: ตั้งค่าเริ่มต้น (Default) ให้เลือกโมเดลหลักที่ดีที่สุดและคุ้มค่าที่สุด (Primary: gemini-3.5-flash-lite)
-        "selected_model": "gemini-3.5-flash-lite",
+        # ตั้งค่าเริ่มต้น (Default) ให้เลือกโมเดลที่ฉลาดที่สุดเป็นอันดับแรก (gemini-3.5-pro-exp)
+        "selected_model": "gemini-3.5-pro-exp",
         "auto_fallback_enabled": True,
         "api_key_configured": bool(DEFAULT_GEMINI_API_KEY),
         "models": models_state,
@@ -640,7 +647,7 @@ def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperatur
     """เชื่อมต่อ Gemini API โดยใช้ Google GenAI SDK เวอร์ชันล่าสุด (google-genai) พร้อม System Instruction และ REST API สำรอง"""
     clean_key = str(api_key or DEFAULT_GEMINI_API_KEY).strip()
     if not clean_key:
-        raise RuntimeError("ไม่พบ Gemini API Key กรุณากรอก API Key ในช่องตั้งค่า UI หรือตั้งค่าใน Environment Variable")
+        raise RuntimeError("ไม่พบ Gemini API Key กรุณาระบุ API Key ของตนเองในหน้าต่างตั้งค่า หรือตั้งค่าใน Environment Variable")
 
     sys_inst = str(system_instruction or ENGINEERING_SYSTEM_PROMPT).strip()
 
@@ -699,13 +706,14 @@ def _call_single_gemini_candidate(sdk_model_id, prompt_text, api_key, temperatur
         raise RuntimeError(f"HTTP {http_err.code}: {err_body or http_err.reason}")
 
 
-# CHANGED: ปรับ Default preferred_model เป็นโมเดลหลัก (gemini-3.5-flash-lite) และเปิด Auto-Fallback (Smart Routing) เสมอเมื่อโมเดลหลักติดโควต้าเต็ม
-def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-flash-lite", api_key=None, system_instruction=None):
+# ตั้งค่า Default preferred_model ให้เริ่มจากโมเดลที่ฉลาดที่สุด (gemini-3.5-pro-exp) และ Fallback ไปยังโมเดลที่ฉลาดรองลงมาตามลำดับ
+def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-pro-exp", api_key=None, system_instruction=None):
     """
     เรียกใช้งาน Gemini API พร้อมระบบ:
-    - ตรวจสอบสถานะ Cooldown (60s Rolling Window) และ RPD (07:00 น. เวลาไทย)
-    - ระบบ Auto-Mapping ไปยัง Model ID จริงใน SDK เพื่อป้องกัน Error 404
-    - ระบบ Auto Fallback (Smart Routing) สลับไปใช้โมเดลที่เก่งรองลงมาอัตโนมัติเมื่อโมเดลหลักติด Error 429 / RPD
+    - เริ่มต้นจากโมเดลที่ฉลาดที่สุด (gemini-3.5-pro-exp) หรือโมเดลที่ผู้ใช้เลือก
+    - หากโมเดลที่ฉลาดที่สุดไม่พร้อมใช้งาน ติด Rate Limit (429) หรือโควต้าเต็ม จะเรียงลำดับสลับ (Fallback)
+      ไปยังโมเดลที่ฉลาดรองลงมาเรื่อยๆ ตาม GEMINI_FALLBACK_ORDER:
+      gemini-3.5-pro-exp -> gemini-3.8-flash -> gemini-3.5-flash-lite -> gemini-3.1-flash-lite
     """
     state_snap = sync_and_get_session_state()
     models_info = state_snap["models"]
@@ -713,7 +721,7 @@ def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-flash-lit
     if preferred_model == "auto_fallback" or preferred_model not in GEMINI_FREE_TIER_MODELS:
         candidate_logical_models = list(GEMINI_FALLBACK_ORDER)
     else:
-        # เริ่มจากโมเดลหลักที่เลือก หากติด Rate Limit / โควต้าเต็ม ให้เลื่อนลำดับไปยังโมเดลสำรองใน GEMINI_FALLBACK_ORDER อัตโนมัติ
+        # เริ่มจากโมเดลที่เลือก หากไม่พร้อมใช้งานให้สลับไปยังโมเดลที่ฉลาดรองลงมาตามลำดับใน GEMINI_FALLBACK_ORDER
         candidate_logical_models = [preferred_model] + [
             m for m in GEMINI_FALLBACK_ORDER if m != preferred_model
         ]
@@ -729,7 +737,6 @@ def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-flash-lit
                 "status": "skipped_blocked",
                 "reason": m_status.get("tooltip", "Blocked"),
             })
-            # CHANGED: Auto-Fallback (Smart Routing) ข้ามโมเดลที่โควต้าเต็มไปยังโมเดลที่เก่งรองลงมาโดยอัตโนมัติ
             continue
 
         sdk_candidates = GEMINI_FREE_TIER_MODELS[logical_model]["sdk_candidates"]
@@ -755,7 +762,6 @@ def call_gemini_with_fallback(prompt_text, preferred_model="gemini-3.5-flash-lit
                 err_info = _classify_gemini_exception(err_str)
 
                 if err_info["is_404"]:
-                    # หากชื่อโมเดลยังไม่มีใน Endpoint จริง (404) ให้สลับไปยัง sdk_candidate ถัดไปโดยอัตโนมัติ
                     continue
 
                 if err_info["is_429"] or err_info["is_rpd"]:
@@ -814,67 +820,168 @@ def chunk_inspection_rows(rows, max_chars=3500, max_rows=18):
     return chunks
 
 
+def _normalize_engineering_clause_text(text):
+    """ทำความสะอาดข้อความ แก้คำผิด/ช่องว่างซ้ำ และตัดสัญลักษณ์ไฮไลท์เดิมออก"""
+    s = str(text or "").strip()
+    s = re.sub(r"^[•\-\s✅❌☑☒✔✘❗️⚠️]+", "", s)
+    s = re.sub(r"[✅❌☑☒✔✘❗️⚠️]+", " ", s)
+    # แก้ไขคำผิดหรือรูปแบบคำที่พบบ่อยในงาน SCADA
+    typo_fixes = [
+        (r"\bNo\s*AC\b", "ไม่มีไฟเลี้ยง AC"),
+        (r"\bNO\s*AC\b", "ไม่มีไฟเลี้ยง AC"),
+        (r"อุปกรณ์สื่อสาร\s+ปกติ", "อุปกรณ์สื่อสารทำงานปกติ"),
+        (r"ระบบสื่อสาร\s*ONLINE", "ระบบสื่อสารสามารถเชื่อมต่อ ONLINE ได้ตามปกติ"),
+        (r"ทดแทนตัวที่ชำรุด\s*DAU\s*ที่ชำรุด", "ทดแทนชุดเดิมที่ชำรุด"),
+        (r"DAU/Cellular\s*Router\s*ชำรุด", "อุปกรณ์ DAU และ Cellular Router ชำรุด"),
+        (r"ชํารุด", "ชำรุด"),
+        (r"สือสาร", "สื่อสาร"),
+        (r"เเบตเตอรี่", "แบตเตอรี่"),
+    ]
+    for pat, repl in typo_fixes:
+        s = re.sub(pat, repl, s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip(" ,;|-")
+    return s
+
+
 def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str=""):
     """
-    ฟังก์ชันจัดรูปแบบประโยคแบบวิศวกรรม (Deterministic Fallback):
-    เรียบเรียงตามโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ให้สั้น กระชับ เป็นทางการ
-    และรองรับกรณีข้อมูลไม่ครบถ้วนโดยไม่เติมข้อมูลมั่ว
+    ฟังก์ชันเรียบเรียงประโยครายงานแบบวิศวกรรม (Engineering Report Style):
+    ร้อยเรียงเป็นประโยคอธิบายยาวที่มีความเป็นมืออาชีพ ถูกหลักภาษา แก้คำผิด และตัดข้อความซ้ำซ้อน
+    ตามโครงสร้าง: "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"
     """
     txt = str(raw_detail or "").strip()
     st_clean = str(status_str or "").strip()
     resp_clean = str(resp_str or "").strip()
 
+    # หากข้อความถูกจัดอยู่ในรูปแบบประโยควิศวกรรมครบทั้ง 3 ส่วนอยู่แล้ว ให้คืนค่าเดิม
+    if "(สาเหตุ)" in txt and "(การดำเนินการ)" in txt and "(ผลลัพธ์)" in txt and txt.startswith("เนื่องจาก"):
+        return txt
+
     if not txt or txt == "-":
+        if "ONLINE" in st_clean.upper():
+            return "เนื่องจากมีการเข้าตรวจสอบสถานะอุปกรณ์ตามแผนบำรุงรักษา (สาเหตุ) จึงได้ดำเนินการตรวจสอบการทำงานของชุดควบคุมและระบบสื่อสาร (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานและออนไลน์ได้ตามปกติ (ผลลัพธ์)"
         if st_clean and st_clean != "-":
-            return f"ไม่พบบันทึกสาเหตุและรายละเอียดการแก้ไขในระบบ (สาเหตุ/การดำเนินการ) ปัจจุบันอุปกรณ์มีสถานะ {st_clean} (ผลลัพธ์)"
-        return "- (ไม่มีบันทึกข้อมูลการตรวจสอบ)"
+            resp_note = f" และส่งต่อให้ {resp_clean} เข้าดำเนินการแก้ไข" if resp_clean and resp_clean not in ("-", "ไม่มีค่า") else ""
+            return f"เนื่องจากตรวจพบอุปกรณ์มีสถานะ {st_clean} โดยไม่พบบันทึกรายละเอียดอาการเสียเพิ่มเติมในระบบ (สาเหตุ) จึงได้ดำเนินการตรวจสอบเบื้องต้น{resp_note} (การดำเนินการ) ส่งผลให้ปัจจุบันอุปกรณ์ยังคงมีสถานะ {st_clean} (ผลลัพธ์)"
+        return "เนื่องจากไม่มีบันทึกข้อมูลสาเหตุการชำรุดในระบบ (สาเหตุ) จึงยังไม่มีรายการบันทึกการแก้ไข (การดำเนินการ) ส่งผลให้ยังไม่สามารถระบุผลลัพธ์หลังดำเนินการได้ (ผลลัพธ์)"
 
-    tokens = [
-        re.sub(r"^[•\-\s✅❌☑☒✔✘]+", "", t).strip()
-        for t in re.split(r"[\n\r;|]+|,\s*", txt)
-        if t.strip()
+    raw_tokens = [
+        t.strip()
+        for t in re.split(r"[\n\r;|]+|,\s*|\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\s*ONLINE|อุปกรณ์สื่อสาร\s*ปกติ|No\s*AC)", txt)
+        if t and t.strip()
     ]
-    causes, actions, results = [], [], []
-    cause_kw = ["ชำรุด", "เสีย", "พัง", "แตก", "ขาด", "เสื่อม", "ค้าง", "หลวม", "ขัดข้อง", "ไม่มีไฟ", "NO AC", "OFFLINE", "ALARM", "FAULT", "ไม่ทำงาน", "กระพริบ", "ต่ำ", "รั่ว", "ไหม้"]
-    action_kw = ["เปลี่ยน", "แก้ไข", "รีเซ็ต", "RESET", "RESTART", "ทำความสะอาด", "ขัน", "ปรับ", "ตั้งค่า", "จูน", "ตรวจสอบ", "วัด", "เช็ค", "ทดลอง", "ย้ำสาย", "ซ่อม", "ตัดต่อ", "ดำเนินการ"]
-    result_kw = ["ใช้งานได้", "ปกติ", "ONLINE", "สำเร็จ", "เรียบร้อย", "ยังไม่ออนไลน์", "รอ ", "ส่งต่อ", "ใช้ได้แล้ว", "CONNECTING"]
 
-    for tk in tokens:
-        if not tk:
+    causes, actions, results = [], [], []
+    cause_kw = [
+        "ชำรุด", "เสีย", "พัง", "แตก", "ขาด", "เสื่อม", "ค้าง", "หลวม", "ขัดข้อง",
+        "ไม่มีไฟ", "NO AC", "OFFLINE", "ALARM", "FAULT", "ไม่ทำงาน", "กระพริบ",
+        "ต่ำ", "รั่ว", "ไหม้", "มีปัญหา", "OPEN", "TRIP", "ไม่จ่าย", "ดับ", "ผิดปกติ"
+    ]
+    action_kw = [
+        "เปลี่ยน", "แก้ไข", "รีเซ็ต", "RESET", "RESTART", "ทำความสะอาด", "ขัน",
+        "ปรับ", "ตั้งค่า", "จูน", "ตรวจสอบ", "วัด", "เช็ค", "ทดลอง", "ย้ำสาย",
+        "ซ่อม", "ตัดต่อ", "ดำเนินการ", "สลับ", "ทริม", "ปลด", "สับ"
+    ]
+    result_kw = [
+        "ใช้งานได้", "ทำงานปกติ", "ปกติ", "ONLINE", "สำเร็จ", "เรียบร้อย",
+        "ยังไม่ออนไลน์", "รอ ", "ส่งต่อ", "ใช้ได้แล้ว", "CONNECTING"
+    ]
+
+    def _add_unique_clause(target_list, clause):
+        c_norm = _normalize_engineering_clause_text(clause)
+        if not c_norm:
+            return
+        c_key = re.sub(r"\s+", "", c_norm.lower())
+        for idx_existing, existing in enumerate(target_list):
+            ex_key = re.sub(r"\s+", "", existing.lower())
+            if c_key == ex_key or c_key in ex_key or ("ไม่มีไฟเลี้ยงac" in c_key and "ไม่มีไฟac" in ex_key):
+                return
+            if ex_key in c_key:
+                target_list[idx_existing] = c_norm
+                return
+        target_list.append(c_norm)
+
+    for tk in raw_tokens:
+        clean_tk = _normalize_engineering_clause_text(tk)
+        if not clean_tk:
             continue
-        u = tk.upper()
-        if any(k in u for k in action_kw):
-            actions.append(tk)
-        elif any(k in u for k in cause_kw):
-            causes.append(tk)
+        u = clean_tk.upper()
+
+        # กรณีประโยคเดียวมีทั้งอาการปกติ/ONLINE และอาการเสียปนกัน ให้แยกส่วนออกมาอย่างชาญฉลาด
+        if "อุปกรณ์สื่อสารทำงานปกติ" in clean_tk and any(k in u for k in ["ไม่มีไฟ", "OPEN", "ชำรุด"]):
+            parts_split = clean_tk.split("อุปกรณ์สื่อสารทำงานปกติ")
+            if parts_split[0].strip():
+                _add_unique_clause(causes, parts_split[0].strip())
+            _add_unique_clause(results, "อุปกรณ์สื่อสารทำงานปกติ")
+            if len(parts_split) > 1 and parts_split[1].strip():
+                rem_part = parts_split[1].strip()
+                if any(k in rem_part.upper() for k in result_kw):
+                    _add_unique_clause(results, rem_part)
+                else:
+                    _add_unique_clause(causes, rem_part)
+            continue
+
+        if any(u.startswith(k) for k in ["เปลี่ยน", "ดำเนินการ", "จึงดำเนินการ", "ได้ดำเนินการ", "รีเซ็ต", "ตั้งค่า", "ซ่อม", "ย้ำสาย", "ทำความสะอาด", "ปรับตั้ง"]):
+            if "ชำรุด" in clean_tk and "ทดแทน" in clean_tk:
+                sub_parts = re.split(r"(?=Port\s*LAN|อุปกรณ์\s*DAU|เนื่องจาก)", clean_tk, flags=re.IGNORECASE)
+                _add_unique_clause(actions, sub_parts[0])
+                for sp in sub_parts[1:]:
+                    _add_unique_clause(causes, sp)
+            else:
+                _add_unique_clause(actions, clean_tk)
+        elif any(k in u for k in cause_kw) and not u.startswith("ระบบสื่อสารสามารถเชื่อมต่อ"):
+            _add_unique_clause(causes, clean_tk)
+        elif any(k in u for k in action_kw):
+            _add_unique_clause(actions, clean_tk)
         elif any(k in u for k in result_kw):
-            results.append(tk)
+            _add_unique_clause(results, clean_tk)
         else:
             if not causes:
-                causes.append(tk)
+                _add_unique_clause(causes, clean_tk)
             else:
-                actions.append(tk)
+                _add_unique_clause(actions, clean_tk)
+
+    # เติมเต็มทั้ง 3 ส่วน (สาเหตุ, การดำเนินการ, ผลลัพธ์) ให้ครบถ้วนสมบูรณ์ตามหลักรายงานวิศวกรรม
+    if not causes:
+        if actions:
+            causes.append("ตรวจพบความผิดปกติของอุปกรณ์ในระบบจากการเข้าตรวจสอบหน้างาน")
+        else:
+            causes.append("ตรวจพบอาการผิดปกติของอุปกรณ์จากระบบตรวจวัดสถานะ")
+
+    if not actions:
+        if any("ชำรุด" in c or "ไม่มีไฟ" in c for c in causes):
+            if resp_clean and resp_clean not in ("-", "ไม่มีค่า"):
+                actions.append(f"เข้าตรวจสอบสภาพอุปกรณ์และระบบสื่อสารเบื้องต้น พร้อมประสานงานส่งต่อให้ {resp_clean} เข้าดำเนินการแก้ไข")
+            else:
+                actions.append("เข้าตรวจสอบสภาพการทำงานของอุปกรณ์ ระบบสายสัญญาณ และแหล่งจ่ายไฟ")
+        else:
+            actions.append("เข้าตรวจสอบการทำงานและตั้งค่าระบบอุปกรณ์ใหม่")
 
     if not results:
         if "ONLINE" in st_clean.upper():
-            results.append("ปัจจุบันอุปกรณ์สามารถออนไลน์และใช้งานได้ตามปกติ")
+            results.append("อุปกรณ์และระบบสื่อสารสามารถกลับมาทำงานและออนไลน์ได้ตามปกติ")
         elif resp_clean and resp_clean not in ("-", "ไม่มีค่า"):
-            results.append(f"ปัจจุบันสถานะ {st_clean or 'ยังไม่ออนไลน์'} อยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไข")
+            results.append(f"ระบบสื่อสารและอุปกรณ์อยู่ในสถานะ {st_clean or 'รอการแก้ไข'} โดยอยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไขในส่วนที่เกี่ยวข้องต่อไป")
         elif st_clean and st_clean != "-":
             results.append(f"ปัจจุบันอุปกรณ์อยู่ในสถานะ {st_clean}")
+        else:
+            results.append("อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ")
+    else:
+        if resp_clean and resp_clean not in ("-", "ไม่มีค่า") and "ONLINE" not in st_clean.upper():
+            has_resp_mention = any(resp_clean in r for r in results)
+            if not has_resp_mention:
+                results.append(f"ส่วนอุปกรณ์ที่ชำรุดอยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไขต่อไป")
 
-    segments = []
-    if causes:
-        segments.append(f"{' และ'.join(causes)} (สาเหตุ)")
-    if actions:
-        act_str = " ".join(actions)
-        if not act_str.startswith("จึง") and not act_str.startswith("ได้ดำเนินการ"):
-            act_str = "จึงดำเนินการ" + act_str
-        segments.append(f"{act_str} (การดำเนินการ)")
-    if results:
-        segments.append(f"{' '.join(results)} (ผลลัพธ์)")
+    cause_str = " และ".join(causes)
+    cause_str = re.sub(r"^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*", "", cause_str).strip()
 
-    return " ".join(segments) if segments else txt
+    action_str = " และ".join(actions)
+    action_str = re.sub(r"^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\s*", "", action_str).strip()
+
+    result_str = " และ".join(results)
+    result_str = re.sub(r"^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*", "", result_str).strip()
+
+    return f"เนื่องจาก{cause_str} (สาเหตุ) จึงได้ดำเนินการ{action_str} (การดำเนินการ) ส่งผลให้{result_str} (ผลลัพธ์)"
 
 
 def _build_deterministic_executive_summary(rows):
@@ -894,11 +1001,11 @@ def _build_deterministic_executive_summary(rows):
     power_issue_cnt = 0
     for r in rows:
         d_up = str(r.get("detail", "")).upper()
-        if any(k in d_up for k in ["สื่อสาร", "MODEM", "SIM", "WRL", "OPTIC", "สัญญาณ"]):
+        if any(k in d_up for k in ["สื่อสาร", "MODEM", "SIM", "WRL", "OPTIC", "สัญญาณ", "ROUTER", "DAU", "LAN"]):
             comm_issue_cnt += 1
-        if any(k in d_up for k in ["FRTU", "RTU", "การ์ด", "CONTROL", "BOARD", "โมดูล"]):
+        if any(k in d_up for k in ["FRTU", "RTU", "การ์ด", "CONTROL", "BOARD", "โมดูล", "AVR", "RECLOSER"]):
             frtu_issue_cnt += 1
-        if any(k in d_up for k in ["แบต", "BATTERY", "ฟิวส์", "FUSE", "AC", "DC", "ไฟเลี้ยง"]):
+        if any(k in d_up for k in ["แบต", "BATTERY", "ฟิวส์", "FUSE", "AC", "DC", "ไฟเลี้ยง", "VT"]):
             power_issue_cnt += 1
 
     categories = [
@@ -914,9 +1021,9 @@ def _build_deterministic_executive_summary(rows):
         {
             "category": "2. หมวดสาเหตุและอาการชำรุดที่ตรวจพบ (Fault Categorization)",
             "items": [
-                f"ระบบสื่อสารและโครงข่าย (Modem / SIM / WRL / สายสัญญาณ): พบเกี่ยวข้อง {comm_issue_cnt} รายการ",
-                f"อุปกรณ์ชุดควบคุมหลัก (FRTU / การ์ดควบคุม / อุปกรณ์ภายในตู้): พบเกี่ยวข้อง {frtu_issue_cnt} รายการ",
-                f"ระบบแหล่งจ่ายไฟและแบตเตอรี่ (Battery / Fuse / ไฟเลี้ยง AC-DC): พบเกี่ยวข้อง {power_issue_cnt} รายการ",
+                f"ระบบสื่อสารและโครงข่าย (DAU / Cellular Router / Modem / SIM / WRL / สายสัญญาณ): พบเกี่ยวข้อง {comm_issue_cnt} รายการ",
+                f"อุปกรณ์ชุดควบคุมหลัก (FRTU / Recloser / AVR / การ์ดควบคุม): พบเกี่ยวข้อง {frtu_issue_cnt} รายการ",
+                f"ระบบแหล่งจ่ายไฟและหม้อแปลงแรงดัน (VT / Battery / Fuse / ไฟเลี้ยง AC-DC): พบเกี่ยวข้อง {power_issue_cnt} รายการ",
             ],
         },
         {
@@ -930,17 +1037,14 @@ def _build_deterministic_executive_summary(rows):
     ]
 
     summary_md = (
-        f"สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด {total} รายการ)\n\n"
-        f"1. ภาพรวมสถานะหลังดำเนินการ\n"
-        f"• ตรวจสอบและแก้ไขรวมทั้งสิ้น {total} รายการ | ออนไลน์สำเร็จ {online_cnt} ชุด | Connecting {connecting_cnt} ชุด | Offline {offline_cnt} ชุด\n\n"
-        f"2. การจำแนกตามหมวดหมู่อาการเสียและสาเหตุหลัก\n"
-        f"• ด้านระบบสื่อสาร (ผอส.ฉ.2): เกี่ยวข้อง {comm_issue_cnt} รายการ (อาทิ โมเด็มค้าง, สัญญาณสื่อสารขัดข้อง, ทดสอบ Ping/รีเซ็ตอุปกรณ์สื่อสาร)\n"
-        f"• ด้านอุปกรณ์ FRTU และชุดควบคุม (ผบอ.ฉ.2): เกี่ยวข้อง {frtu_issue_cnt} รายการ (อาทิ ชุดควบคุม FRTU ขัดข้อง, การ์ดสื่อสาร/พอร์ตเชื่อมต่อชำรุด)\n"
-        f"• ด้านระบบไฟเลี้ยงและแบตเตอรี่: เกี่ยวข้อง {power_issue_cnt} รายการ (อาทิ แบตเตอรี่เสื่อม, ฟิวส์ขาด, ระบบไฟเลี้ยง AC/DC ขัดข้อง)\n\n"
-        f"3. การส่งต่อหน่วยงานผู้รับผิดชอบ\n"
-        f"• รอ ผบอ.กบษ.ฉ.2 เข้าแก้ไขต่อ: {bo_cnt} รายการ\n"
-        f"• รอ ผอส.กสฟ.ฉ.2 เข้าแก้ไขต่อ: {po_cnt} รายการ\n"
-        f"• แก้ไขเรียบร้อยแล้ว: {done_cnt} รายการ"
+        f"รายงานสรุปเชิงวิศวกรรมผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (รวมทั้งสิ้น {total} รายการ)\n\n"
+        f"จากการเข้าตรวจสอบและวิเคราะห์สาเหตุความผิดปกติของอุปกรณ์ภาคสนามจำนวน {total} รายการ พบว่าเกิดจากสาเหตุหลัก 3 ด้าน ได้แก่ "
+        f"ปัญหาด้านระบบสื่อสารและโครงข่ายจำนวน {comm_issue_cnt} รายการ ปัญหาด้านชุดควบคุมหลัก (FRTU/AVR/Recloser) จำนวน {frtu_issue_cnt} รายการ "
+        f"และปัญหาด้านระบบแหล่งจ่ายไฟหรือหม้อแปลงแรงดัน (AC/DC/VT/Battery) จำนวน {power_issue_cnt} รายการ (สาเหตุ) "
+        f"จึงได้ดำเนินการเข้าตรวจสอบแก้ไข เปลี่ยนอุปกรณ์ที่ชำรุด ตั้งค่าระบบใหม่ และประสานงานส่งต่อหน่วยงานที่เกี่ยวข้องตามขอบเขตความรับผิดชอบ (การดำเนินการ) "
+        f"ส่งผลให้อุปกรณ์สามารถกลับมาเชื่อมต่อออนไลน์และทำงานได้ตามปกติจำนวน {online_cnt} ชุด คิดเป็นร้อยละ {(online_cnt/total*100) if total else 0:.1f} "
+        f"อยู่ในสถานะกำลังเชื่อมต่อ (Connecting) จำนวน {connecting_cnt} ชุด และยังคงสถานะออฟไลน์ (Offline) เพื่อรอการเข้าแก้ไขต่อเนื่องโดย ผบอ.กบษ.ฉ.2 จำนวน {bo_cnt} รายการ "
+        f"และรอ ผอส.กสฟ.ฉ.2 จำนวน {po_cnt} รายการ (ผลลัพธ์)"
     )
     return {
         "summary_markdown": summary_md,
@@ -961,12 +1065,13 @@ def _build_deterministic_executive_summary(rows):
     }
 
 
-def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback", api_key=None, custom_prompt=None):
+def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pro-exp", api_key=None, custom_prompt=None):
     """
-    ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API:
+    ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API (Engineering Report Style):
     1. ทำ Auto Chunking แบ่งข้อมูลจาก Google Sheet ออกเป็นส่วนย่อยๆ อัตโนมัติเมื่อข้อมูลยาว
-    2. ส่งแต่ละ Chunk ให้ Gemini เรียบเรียงข้อความคอลัมน์ 'รายละเอียดการตรวจสอบ/แก้ไข' รายแถวให้เป็นหมวดหมู่สวยงาม
-    3. รวบรวมผลสรุปย่อยจากทุก Chunk มาสังเคราะห์เป็นรายงานสรุปภาพรวม (Executive Summary) แยกหมวดหมู่ชัดเจน
+    2. ส่งแต่ละ Chunk ให้ Gemini วิเคราะห์และเรียบเรียงเป็นประโยคอธิบายยาวแบบวิศวกรรม:
+       "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"
+    3. รวบรวมผลสรุปย่อยจากทุก Chunk มาสังเคราะห์เป็นรายงานสรุปผู้บริหารแบบวิศวกรรม
     """
     if not rows:
         raise ValueError("ไม่พบรายการข้อมูลสำหรับสรุปรายงาน")
@@ -979,10 +1084,10 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
         )
 
     model_cfg = GEMINI_FREE_TIER_MODELS.get(
-        preferred_model, GEMINI_FREE_TIER_MODELS["gemini-3.5-flash-lite"]
+        preferred_model, GEMINI_FREE_TIER_MODELS["gemini-3.5-pro-exp"]
     )
-    max_chars = model_cfg.get("max_chunk_chars", 3600)
-    max_rows = model_cfg.get("max_chunk_rows", 18)
+    max_chars = model_cfg.get("max_chunk_chars", 4500)
+    max_rows = model_cfg.get("max_chunk_rows", 22)
 
     chunks = chunk_inspection_rows(rewritten_rows, max_chars=max_chars, max_rows=max_rows)
     chunk_summaries = []
@@ -1003,13 +1108,14 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
         active_sys_prompt = str(custom_prompt or ENGINEERING_SYSTEM_PROMPT).strip()
         chunk_prompt = (
             f"{active_sys_prompt}\n\n"
-            "โปรดปรับแก้ข้อความรายละเอียดของแต่ละรายการต่อไปนี้ให้เป็นโครงสร้างวิศวกรรม: "
-            "[สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ใน 1-2 ประโยคที่เป็นทางการ สั้น กระชับ "
-            "(หากข้อมูลไม่ครบให้จัดเรียงเท่าที่มีโดยห้ามแต่งเติมข้อมูลมั่ว)\n"
+            "โปรดวิเคราะห์ข้อมูลการตรวจสอบอุปกรณ์ในแต่ละรายการต่อไปนี้ แก้คำผิดและคำซ้ำซ้อน แล้วเรียบเรียงเป็นประโยคอธิบายยาวแบบวิศวกรรมที่มีความเป็นมืออาชีพ "
+            "โดยไม่ต้องใช้สัญลักษณ์ไฮไลท์ แต่ให้ร้อยเรียงเรื่องราวตามโครงสร้าง:\n"
+            "\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"\n"
+            "ตัวอย่างแนวทาง: \"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n"
             "ตอบกลับเป็น JSON เท่านั้น ตามโครงสร้างนี้:\n"
             "{\n"
-            '  "rows": [ {"idx": 0, "clean_detail": "...(สาเหตุ) จึงดำเนินการ...(การดำเนินการ) ปัจจุบัน...(ผลลัพธ์)"} ],\n'
-            '  "chunk_summary": "สรุปประเด็นสำคัญของชุดข้อมูลนี้ 2-3 บรรทัด"\n'
+            '  "rows": [ {"idx": 0, "clean_detail": "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"} ],\n'
+            '  "chunk_summary": "สรุปภาพรวมเชิงวิศวกรรมของข้อมูลชุดนี้แบบร้อยเรียงเรื่องราว (สาเหตุ การดำเนินการ และผลลัพธ์)"\n'
             "}\n\n"
             f"ข้อมูลชุดที่ {chunk_idx + 1}/{len(chunks)}:\n{chunk_text}"
         )
@@ -1022,23 +1128,23 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
                 system_instruction=active_sys_prompt,
             )
         except RuntimeError as err_rt:
-            # หากติด TOKEN_LIMIT_EXCEEDED ให้แบ่งครึ่ง Chunk ย่อยลงอีกอัตโนมัติ (Recursive Sub-Chunking)
             if "TOKEN_LIMIT_EXCEEDED" in str(err_rt) and len(chunk) > 1:
                 mid = max(1, len(chunk) // 2)
                 sub_chunks = [chunk[:mid], chunk[mid:]]
                 try:
                     for sc in sub_chunks:
                         sc_text = "\n".join(
-                            f"[{idx_s}] Site: {x.get('site','-')} | รายละเอียด: {x.get('detail','-')} | สถานะ: {x.get('status','-')}"
+                            f"[{idx_s}] Site: {x.get('site','-')} | รายละเอียด: {x.get('detail','-')} | ผู้รับผิดชอบ: {x.get('resp','-')} | สถานะ: {x.get('status','-')}"
                             for idx_s, x in enumerate(sc)
                         )
                         sc_prompt = (
-                            "สรุปและเรียบเรียงรายละเอียดการตรวจสอบอุปกรณ์ SCADA ต่อไปนี้เป็น JSON:\n"
-                            '{"rows": [{"idx": 0, "clean_detail": "..."}], "chunk_summary": "..."}\n\n'
+                            f"{active_sys_prompt}\n\n"
+                            "โปรดเรียบเรียงรายละเอียดการตรวจสอบอุปกรณ์ SCADA ต่อไปนี้เป็นประโยคอธิบายยาวแบบวิศวกรรมในรูปแบบ JSON:\n"
+                            '{"rows": [{"idx": 0, "clean_detail": "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"}], "chunk_summary": "..."}\n\n'
                             + sc_text
                         )
                         res = call_gemini_with_fallback(
-                            sc_prompt, preferred_model=preferred_model, api_key=api_key
+                            sc_prompt, preferred_model=preferred_model, api_key=api_key, system_instruction=active_sys_prompt
                         )
                         used_models_log.append(res["used_model"])
                     continue
@@ -1072,12 +1178,10 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
     final_summary_md = base_exec_info["summary_markdown"]
     if chunk_summaries and not ai_warning:
         synth_prompt = (
-            "คุณคือวิศวกรผู้เชี่ยวชาญระบบ SCADA ของ กฟภ. (PEA)\n"
-            "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) จากข้อมูลสรุปย่อยต่อไปนี้\n"
-            "โดยจัดหมวดหมู่ให้ชัดเจน สวยงาม อ่านง่าย เป็นระเบียบ ดังนี้:\n"
-            "1. ภาพรวมผลการตรวจสอบและสถานะอุปกรณ์หลังดำเนินการ (Online / Connecting / Offline)\n"
-            "2. สรุปสาเหตุแยกตามหมวดหมู่อาการชำรุด (ระบบสื่อสาร ผอส.ฉ.2 vs อุปกรณ์ FRTU/ชุดควบคุม ผบอ.ฉ.2 vs ระบบไฟเลี้ยง/แบตเตอรี่)\n"
-            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบและแนวทางติดตามผล\n\n"
+            "คุณคือวิศวกรผู้เชี่ยวชาญระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.)\n"
+            "โปรดเขียนรายงานสรุปเชิงวิศวกรรมสำหรับผู้บริหาร (Engineering Executive Report) จากข้อมูลสรุปย่อยต่อไปนี้\n"
+            "โดยใช้ภาษาทางการที่มีความเป็นมืออาชีพ ถูกหลักภาษา กระชับครบถ้วน และร้อยเรียงเป็นประโยคอธิบายยาวที่เชื่อมโยงกันอย่างสละสลวย "
+            "ครอบคลุมทั้ง สาเหตุ (เกิดจากอะไร) การดำเนินการ (แก้ไขอย่างไร) และผลลัพธ์ (ได้ผลเป็นอย่างไร):\n\n"
             f"สถิติภาพรวม: ทั้งหมด {base_exec_info['metrics']['total']} รายการ, "
             f"Online {base_exec_info['metrics']['online']} ชุด, "
             f"Connecting {base_exec_info['metrics']['connecting']} ชุด, "
@@ -1088,7 +1192,7 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="auto_fallback
         )
         try:
             synth_res = call_gemini_with_fallback(
-                synth_prompt, preferred_model=preferred_model, api_key=api_key
+                synth_prompt, preferred_model=preferred_model, api_key=api_key, system_instruction=active_sys_prompt
             )
             if synth_res.get("text"):
                 final_summary_md = synth_res["text"].strip()
@@ -3614,7 +3718,7 @@ def generate_map():
         }}
     }}
     
-    /* CHANGED: Refactor สไตล์ Gemini AI Section & Model Dropdown Menu เป็นสไตล์ Minimalist, Clean & Functional (Google / Gemini / ChatGPT Style) */
+    /* CHANGED: Refactor สไตล์ Gemini AI Section, ปุ่มตั้งค่าพร้อม Active State และหน้าต่าง Pop-up กรอก API Key */
     .gemini-ai-section {{
         margin: 0 0 12px;
         background: var(--bg-subtle);
@@ -3653,7 +3757,6 @@ def generate_map():
         min-width: 0;
         flex-wrap: wrap;
     }}
-    /* CHANGED: ปรับไอคอนหัวข้อ AI ให้เป็นโทนสีเดียว (Monochrome Outline) ดูสะอาดตา */
     .gemini-sparkle-icon {{
         width: 26px;
         height: 26px;
@@ -3722,13 +3825,10 @@ def generate_map():
 
     .gemini-grid-row {{
         display: grid;
-        grid-template-columns: 1.2fr 1fr;
-        gap: 12px;
+        grid-template-columns: 1fr;
+        gap: 10px;
         margin-top: 10px;
         margin-bottom: 10px;
-    }}
-    @media (max-width: 640px) {{
-        .gemini-grid-row {{ grid-template-columns: 1fr; }}
     }}
     .gemini-field {{
         display: flex;
@@ -3747,7 +3847,115 @@ def generate_map():
         gap: 6px;
     }}
 
-    /* CHANGED: ปรับ UI ช่องใส่ API Key ให้เรียบง่าย พร้อมปุ่มไอคอนรูปตา (Show/Hide) โทน Monochrome */
+    /* ปุ่มเครื่องมือ AI ("ตั้งค่า Prompt", "แก้ไขประโยครายแถว", "ระบุ API Key ของตนเอง") พร้อมสถานะ Active State ("กำลังถูกเลือกใช้งานอยู่") */
+    .ai-tool-toggle-btn {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 8px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        padding: 5px 11px;
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.16s ease;
+        position: relative;
+    }}
+    .ai-tool-toggle-btn:hover {{
+        background: var(--bg-hover);
+        border-color: var(--accent-primary);
+    }}
+    .ai-tool-toggle-btn.is-active {{
+        background: var(--accent-primary) !important;
+        color: #ffffff !important;
+        border-color: var(--accent-primary) !important;
+        font-weight: 600 !important;
+        box-shadow: 0 2px 8px rgba(26, 115, 232, 0.28);
+    }}
+    .ai-tool-toggle-btn .btn-active-dot {{
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #86efac;
+        display: none;
+        box-shadow: 0 0 0 2px rgba(255,255,255,0.28);
+    }}
+    .ai-tool-toggle-btn.is-active .btn-active-dot {{
+        display: inline-block;
+    }}
+    .ai-tool-toggle-btn .btn-active-pill {{
+        display: none;
+        font-size: 9.5px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.22);
+        color: #ffffff;
+        letter-spacing: 0.1px;
+    }}
+    .ai-tool-toggle-btn.is-active .btn-active-pill {{
+        display: inline-flex;
+        align-items: center;
+    }}
+
+    /* หน้าต่าง Pop-up / Dropdown เล็กๆ สำหรับกรอก API Key ของตนเอง (ซ่อนไว้เป็นค่าเริ่มต้น) */
+    .api-key-popover-anchor {{
+        position: relative;
+        display: inline-flex;
+    }}
+    .gemini-apikey-popover {{
+        display: none;
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        width: 340px;
+        max-width: calc(100vw - 44px);
+        background: var(--bg-surface);
+        border: 1px solid var(--accent-primary);
+        border-radius: 12px;
+        padding: 12px 14px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08);
+        z-index: 10000025;
+        animation: geminiSlideDown 0.16s ease;
+    }}
+    .gemini-apikey-popover.show {{
+        display: block;
+    }}
+    .gemini-apikey-popover-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+    }}
+    .gemini-apikey-popover-title {{
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }}
+    .gemini-apikey-status-badge {{
+        font-size: 10px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-hairline);
+        color: var(--text-secondary);
+    }}
+    .gemini-apikey-status-badge.has-custom-key {{
+        background: #e6f4ea;
+        border-color: rgba(19, 115, 51, 0.3);
+        color: #137333;
+    }}
+    body.theme-dark .gemini-apikey-status-badge.has-custom-key {{
+        background: rgba(22, 163, 74, 0.22);
+        color: #4ade80;
+    }}
     .gemini-key-input-wrap {{
         position: relative;
         display: flex;
@@ -3756,7 +3964,7 @@ def generate_map():
         border: 1px solid var(--border-hairline);
         border-radius: 9px;
         transition: border-color 0.15s ease, background-color 0.15s ease;
-        min-height: 40px;
+        min-height: 38px;
         padding: 0 6px 0 10px;
     }}
     .gemini-key-input-wrap:focus-within {{
@@ -3768,17 +3976,17 @@ def generate_map():
         background: transparent;
         border: none;
         color: var(--text-primary);
-        padding: 7px 4px;
-        font-size: 12.5px;
-        min-height: 36px;
-        letter-spacing: 0.4px;
+        padding: 6px 4px;
+        font-size: 12px;
+        min-height: 34px;
+        letter-spacing: 0.3px;
     }}
     .gemini-key-toggle-btn {{
         border: none;
         background: transparent;
         color: var(--text-secondary);
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         border-radius: 6px;
         padding: 0;
         cursor: pointer;
@@ -3792,16 +4000,25 @@ def generate_map():
         color: var(--text-primary);
         background: var(--bg-hover);
     }}
+    .gemini-apikey-popover-footer {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 8px;
+        font-size: 10.5px;
+        color: var(--text-secondary);
+    }}
 
-    /* CHANGED: ปรับโครงสร้าง Model Dropdown Menu สไตล์ Minimalist & Clean (ไอคอน Monochrome, ชื่อตัวหนา, คำอธิบายสั้น, Badge โควต้า และเครื่องหมายติ๊กถูกชิดขวา) */
+    /* Model Dropdown Menu สไตล์ Minimalist & Clean */
     .model-selector-custom {{
         position: relative;
         width: 100%;
     }}
     .model-selector-trigger {{
         width: 100%;
-        min-height: 40px;
-        padding: 6px 10px;
+        min-height: 42px;
+        padding: 6px 12px;
         background: var(--bg-subtle);
         border: 1px solid var(--border-hairline);
         border-radius: 9px;
@@ -3941,7 +4158,6 @@ def generate_map():
         min-width: 0;
         flex: 1;
     }}
-    /* CHANGED: ไอคอนหน้าชื่อโมเดลแบบ Outline โทนสีเดียว (Monochrome) */
     .model-opt-icon {{
         width: 26px;
         height: 26px;
@@ -3993,7 +4209,6 @@ def generate_map():
         overflow: hidden;
         text-overflow: ellipsis;
     }}
-    /* CHANGED: จัดวาง Badge สถานะโควต้า (เขียว=ว่าง, แดง=เต็ม) และเครื่องหมายติ๊กถูก (✓) ให้ชิดขวาอย่างเป็นระเบียบ */
     .model-opt-right {{
         display: flex;
         align-items: center;
@@ -4080,21 +4295,21 @@ def generate_map():
         padding: 10px 12px;
         border-radius: 10px;
         background: var(--bg-subtle);
-        border: 1px solid var(--border-hairline);
+        border: 1px solid var(--accent-primary);
     }}
     .gemini-prompt-box.show {{
         display: block;
     }}
     .gemini-prompt-textarea {{
         width: 100%;
-        min-height: 100px;
+        min-height: 110px;
         border: 1px solid var(--border-hairline);
         border-radius: 8px;
         padding: 8px 10px;
         font-size: 11.5px;
         color: var(--text-primary);
         background: var(--bg-surface);
-        line-height: 1.45;
+        line-height: 1.5;
         resize: vertical;
         margin-top: 6px;
     }}
@@ -4102,7 +4317,7 @@ def generate_map():
         border-color: var(--accent-primary);
     }}
 
-    /* Hover Tooltip Wrapper สำหรับปุ่มสรุปและ Export รายงาน (ทำงานแม้ปุ่มถูก Disabled) */
+    /* Hover Tooltip Wrapper สำหรับปุ่มสรุปและ Export รายงาน */
     .report-btn-tooltip-wrap {{
         position: relative;
         width: 100%;
@@ -4166,7 +4381,7 @@ def generate_map():
         padding: 12px 14px;
         border-radius: 12px;
         background: var(--bg-surface);
-        border: 1px solid var(--border-hairline);
+        border: 1px solid var(--accent-primary);
         box-shadow: var(--shadow-card);
     }}
     .sentence-manager-box.show {{
@@ -4226,7 +4441,7 @@ def generate_map():
     }}
     .sentence-mgr-textarea {{
         width: 100%;
-        min-height: 48px;
+        min-height: 54px;
         border: 1px solid var(--border-hairline);
         border-radius: 6px;
         padding: 6px 8px;
@@ -4234,7 +4449,7 @@ def generate_map():
         color: var(--text-primary);
         background: var(--bg-surface);
         resize: vertical;
-        line-height: 1.4;
+        line-height: 1.45;
     }}
     .sentence-mgr-textarea:focus {{
         border-color: var(--accent-primary);
@@ -4847,7 +5062,7 @@ def generate_map():
                 <div id="reportPreviewCount" class="report-preview-count">กำลังตรวจสอบ...</div>
             </div>
 
-            <!-- CHANGED: ส่วนตั้งค่า AI Model Selector สไตล์ Minimalist, Clean & Functional (พับเก็บเป็นค่าเริ่มต้น) -->
+            <!-- CHANGED: ส่วนตั้งค่า AI Model Selector (ฉลาดที่สุดเป็นอันดับแรก) และปุ่มตั้งค่าพร้อม Pop-up API Key ที่ซ่อนค่าเริ่มต้น -->
             <section class="gemini-ai-section" id="geminiAiSectionCard" aria-labelledby="geminiAiHeading">
                 <button type="button" class="gemini-collapse-trigger" id="geminiCollapseBtn" onclick="toggleGeminiAiPanel()" aria-expanded="false">
                     <div class="gemini-trigger-left">
@@ -4857,7 +5072,7 @@ def generate_map():
                         <span class="gemini-title-badge" id="geminiAiHeading">
                             สรุปและเรียบเรียงรายงานด้วย Gemini AI
                         </span>
-                        <span class="gemini-tier-pill" id="geminiCollapsedSummaryPill">Gemini 3.5 Flash Lite · Primary</span>
+                        <span class="gemini-tier-pill" id="geminiCollapsedSummaryPill">Gemini 3.5 Pro · โมเดลหลัก (ฉลาดที่สุด)</span>
                     </div>
                     <div class="gemini-trigger-right">
                         <span id="geminiCollapseLabel">ตั้งค่า AI</span>
@@ -4869,62 +5084,84 @@ def generate_map():
 
                 <div class="gemini-collapsible-body" id="geminiCollapsibleBody">
                     <div class="gemini-grid-row">
-                        <!-- CHANGED: Model Dropdown Menu แบบ Clean & Functional (เลือกโมเดลหลักที่คุ้มค่าที่สุดเป็น Default + รองรับ Auto Fallback Smart Routing) -->
+                        <!-- Model Dropdown Menu: เริ่มต้นที่โมเดลที่ฉลาดที่สุด (gemini-3.5-pro-exp) พร้อม Auto Fallback ไปยังโมเดลที่ฉลาดรองลงมา -->
                         <div class="gemini-field">
                             <label>
-                                <span>โมเดล AI (Smart Routing)</span>
+                                <span>โมเดล AI (เรียงลำดับจากฉลาดที่สุด &rarr; ฉลาดรองลงมา)</span>
                                 <span id="geminiSelectedQuotaText" style="color:var(--text-secondary);font-weight:500;">พร้อมใช้งาน</span>
                             </label>
-                            <input type="hidden" id="geminiModelSelect" value="gemini-3.5-flash-lite">
+                            <input type="hidden" id="geminiModelSelect" value="gemini-3.5-pro-exp">
                             <div class="model-selector-custom" id="geminiCustomModelSelector">
                                 <button type="button" class="model-selector-trigger" id="geminiCustomModelTrigger" onclick="toggleCustomModelMenu(event)" aria-haspopup="listbox" aria-expanded="false">
                                     <div class="model-trigger-main">
                                         <span class="model-trigger-icon" id="geminiTriggerIcon">
-                                            <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                            <svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
                                         </span>
                                         <div class="model-trigger-text">
-                                            <span class="model-trigger-name" id="geminiTriggerName">Gemini 3.5 Flash Lite</span>
-                                            <span class="model-trigger-desc" id="geminiTriggerDesc">Primary · เร็วและคุ้มค่าที่สุด (แนะนำ)</span>
+                                            <span class="model-trigger-name" id="geminiTriggerName">Gemini 3.5 Pro (Exp)</span>
+                                            <span class="model-trigger-desc" id="geminiTriggerDesc">อันดับ 1 · โมเดลวิเคราะห์ขั้นสูงที่ฉลาดที่สุด (สลับอัตโนมัติเมื่อโควต้าเต็ม)</span>
                                         </div>
                                     </div>
-                                    <span class="model-trigger-badge" id="geminiTriggerBadge">ว่าง · 500 RPD</span>
+                                    <span class="model-trigger-badge" id="geminiTriggerBadge">ว่าง · 50 RPD</span>
                                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text-secondary)" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                                 </button>
                                 <div class="model-selector-menu" id="geminiCustomModelMenu" role="listbox" aria-label="รายการโมเดล Gemini AI"></div>
                             </div>
                         </div>
-
-                        <!-- CHANGED: ช่องใส่ API Key (ตั้งค่า Default Free Tier Key เป็นค่าเริ่มต้น ซ่อนเป็นจุด •••••••• พร้อมปุ่มรูปตา Show/Hide) -->
-                        <div class="gemini-field">
-                            <label for="geminiApiKeyInput">
-                                <span>API Key (Free Tier)</span>
-                                <span style="font-size:10.5px;color:var(--text-muted);font-weight:400;">Default Key พร้อมใช้งาน</span>
-                            </label>
-                            <div class="gemini-key-input-wrap">
-                                <input type="password" id="geminiApiKeyInput" class="gemini-input" value="AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ" placeholder="••••••••••••••••••••••••" autocomplete="off" oninput="saveUserGeminiApiKey(this.value)">
-                                <button type="button" class="gemini-key-toggle-btn" id="geminiKeyToggleBtn" onclick="toggleGeminiKeyVisibility()" title="แสดง API Key" aria-label="แสดงหรือซ่อน API Key">
-                                    <svg id="geminiKeyEyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                        <circle cx="12" cy="12" r="3"></circle>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
                     </div>
 
-                    <!-- CHANGED: ลบปุ่มทดสอบ (ทดสอบ 429, ทดสอบ RPD เต็ม, รีเซ็ตโควต้า) และ Status Pill ด้านล่างออก คงไว้เฉพาะเครื่องมือหลักที่จำเป็น -->
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                    <!-- แถบปุ่มตั้งค่าพร้อมสถานะ Active State ("กำลังเลือกใช้งาน") และ Pop-up ช่องกรอก API Key ที่ซ่อนเป็นค่าเริ่มต้น -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px;">
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
                             <input type="checkbox" id="enableGeminiAiCheckbox" checked style="width:15px;height:15px;accent-color:var(--accent-primary);cursor:pointer;">
-                            <span>เรียบเรียงโครงสร้างวิศวกรรม <strong>[สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์]</strong></span>
+                            <span>เรียบเรียงแบบวิศวกรรม <strong>เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)</strong></span>
                         </label>
-                        <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                            <button type="button" class="report-mini-btn" onclick="toggleEngineeringPromptBox()" title="ดูหรือปรับแต่ง System Prompt สำหรับวิศวกร">
-                                ตั้งค่า Prompt
+                        <div style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                            <button type="button" class="ai-tool-toggle-btn" id="openPromptSettingBtn" aria-pressed="false" onclick="toggleEngineeringPromptBox()" title="ตั้งค่า System Prompt สำหรับเขียนรายงานแบบวิศวกรรม">
+                                <span class="btn-active-dot"></span>
+                                <span>ตั้งค่า Prompt</span>
+                                <span class="btn-active-pill">กำลังเลือกใช้งาน</span>
                             </button>
-                            <button type="button" class="report-mini-btn" id="openSentenceMgrBtn" onclick="toggleSentenceManagerBox()">
-                                แก้ไขประโยครายแถว
+                            <button type="button" class="ai-tool-toggle-btn" id="openSentenceMgrBtn" aria-pressed="false" onclick="toggleSentenceManagerBox()" title="เปิดหน้าต่างแก้ไขประโยครายแถวก่อน Export">
+                                <span class="btn-active-dot"></span>
+                                <span>แก้ไขประโยครายแถว</span>
+                                <span class="btn-active-pill">กำลังเลือกใช้งาน</span>
                             </button>
+
+                            <!-- ปุ่มระบุ API Key ของตนเอง พร้อมหน้าต่าง Pop-up/Dropdown เล็กๆ (ซ่อนช่องกรอก API Key ไว้เป็นค่าเริ่มต้น และห้ามแสดง Default Key เด็ดขาด) -->
+                            <div class="api-key-popover-anchor" id="geminiApiKeyPopoverAnchor">
+                                <button type="button" class="ai-tool-toggle-btn" id="openCustomApiKeyBtn" aria-pressed="false" onclick="toggleApiKeyPopover(event)" title="ระบุ Gemini API Key ของตนเอง (ซ่อนช่องกรอกเป็นค่าเริ่มต้น)">
+                                    <span class="btn-active-dot"></span>
+                                    <span id="openCustomApiKeyBtnText">ระบุ API Key ของตนเอง</span>
+                                    <span class="btn-active-pill">กำลังเลือกใช้งาน</span>
+                                </button>
+                                <div id="geminiApiKeyPopover" class="gemini-apikey-popover" role="dialog" aria-label="หน้าต่างกรอก API Key ของตนเอง">
+                                    <div class="gemini-apikey-popover-header">
+                                        <span class="gemini-apikey-popover-title">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--accent-primary)" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                                            ระบุ API Key ของตนเอง
+                                        </span>
+                                        <span id="geminiKeyStatusBadge" class="gemini-apikey-status-badge">ยังไม่ได้ระบุ</span>
+                                    </div>
+                                    <div class="gemini-key-input-wrap">
+                                        <input type="password" id="geminiApiKeyInput" class="gemini-input" value="" placeholder="วาง Gemini API Key ของคุณที่นี่..." autocomplete="off" oninput="saveUserGeminiApiKey(this.value)">
+                                        <button type="button" class="gemini-key-toggle-btn" id="geminiKeyToggleBtn" onclick="toggleGeminiKeyVisibility()" title="แสดง/ซ่อน API Key ที่คุณกรอก" aria-label="แสดงหรือซ่อน API Key">
+                                            <svg id="geminiKeyEyeIcon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                <circle cx="12" cy="12" r="3"></circle>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="gemini-apikey-popover-footer">
+                                        <span>เว้นว่างได้หากต้องการใช้โควต้าระบบหลังบ้าน</span>
+                                        <div style="display:inline-flex;gap:5px;">
+                                            <button type="button" class="report-mini-btn" onclick="clearUserGeminiApiKey()">ล้างค่า</button>
+                                            <button type="button" class="report-mini-btn" style="background:var(--accent-primary);color:#fff;border-color:var(--accent-primary);" onclick="closeApiKeyPopover()">ตกลง</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <button type="button" class="report-mini-btn" id="previewAiSummaryBtn" onclick="runGeminiPreviewOnly()" style="color:var(--accent-primary);border-color:rgba(26,115,232,0.35);font-weight:500;">
                                 พรีวิวสรุป AI
                             </button>
@@ -4934,10 +5171,13 @@ def generate_map():
                     <!-- กล่องดูและปรับแต่ง System Prompt โครงสร้างวิศวกรรม 3 ส่วน -->
                     <div id="engineeringPromptBox" class="gemini-prompt-box">
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                            <span style="font-size:11.5px;font-weight:600;color:var(--text-primary);">
-                                System Instruction ([สาเหตุ] &rarr; [การดำเนินการ] &rarr; [ผลลัพธ์])
+                            <span style="font-size:11.5px;font-weight:600;color:var(--accent-primary);">
+                                System Prompt มาตรฐานวิศวกรรม (เนื่องจากสาเหตุ &rarr; จึงได้ดำเนินการ &rarr; ส่งผลให้ผลลัพธ์)
                             </span>
-                            <button type="button" class="report-mini-btn" onclick="resetEngineeringPromptDefault()">คืนค่าเริ่มต้น</button>
+                            <div style="display:inline-flex;gap:6px;">
+                                <button type="button" class="report-mini-btn" onclick="resetEngineeringPromptDefault()">คืนค่าเริ่มต้น</button>
+                                <button type="button" class="report-mini-btn" onclick="toggleEngineeringPromptBox(false)">ปิด</button>
+                            </div>
                         </div>
                         <textarea id="geminiCustomPromptInput" class="gemini-prompt-textarea"></textarea>
                     </div>
@@ -4951,9 +5191,9 @@ def generate_map():
                         จัดการประโยครายละเอียดการตรวจสอบ (แก้ไขก่อนกด Export)
                     </span>
                     <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดหมวดหมู่ประโยคอัตโนมัติ">จัดรูปแบบทุกแถว</button>
+                        <button type="button" class="report-mini-btn" onclick="applySmartCategorizeToAllRows()" title="จัดรูปแบบประโยควิศวกรรมทุกแถวอัตโนมัติ">จัดรูปแบบทุกแถว</button>
                         <button type="button" class="report-mini-btn" onclick="resetCustomRowSentences()" title="คืนค่าข้อความต้นฉบับ">คืนค่าต้นฉบับ</button>
-                        <button type="button" class="report-mini-btn" onclick="document.getElementById('sentenceManagerBox').classList.remove('show')">ปิด</button>
+                        <button type="button" class="report-mini-btn" onclick="toggleSentenceManagerBox(false)">ปิด</button>
                     </div>
                 </div>
                 <div id="sentenceManagerList" class="sentence-mgr-list"></div>
@@ -4968,7 +5208,7 @@ def generate_map():
                 <div id="aiSummaryPreviewContent"></div>
             </div>
 
-            <!-- CHANGED: ปุ่ม "รีเซ็ตค่า" และ "ยกเลิก" เป็น Ghost/Outline สีเทา ส่วนปุ่ม "สรุปและ Export รายงาน" โดดเด่นที่สุดอยู่ด้านล่างสุด (Primary Blue) -->
+            <!-- ปุ่ม "รีเซ็ตค่า" และ "ยกเลิก" เป็น Ghost/Outline สีเทา ส่วนปุ่ม "สรุปและ Export รายงาน" โดดเด่นที่สุดอยู่ด้านล่างสุด (Primary Blue) -->
             <div class="report-btn-group">
                 <div class="report-btn-secondary-row">
                     <button class="report-btn report-btn-cancel" type="button" onclick="resetAllReportFilters()">รีเซ็ตค่า</button>
@@ -5198,7 +5438,7 @@ def generate_map():
         }});
     }}
 
-    function closeReportModal() {{ if (reportModal) reportModal.classList.remove('show'); closeReportWorkerDropdown(); }}
+    function closeReportModal() {{ if (reportModal) reportModal.classList.remove('show'); closeReportWorkerDropdown(); if (typeof closeApiKeyPopover === 'function') closeApiKeyPopover(); }}
 
     function normalizeWorkerToken(value) {{
         var s = String(value || '').normalize('NFC').trim().replace(/\\s+/g, ' ');
@@ -5849,106 +6089,167 @@ def generate_map():
     window.addEventListener('scroll', function() {{ if (document.getElementById('reportWorkerDropdown').classList.contains('show')) positionReportWorkerDropdown(); }}, true);
 
     // ============================================================================
-    // === ระบบบริหารจัดการ Google Gemini API, Engineering Prompt, Custom Model Selector & Tooltip ===
-    // ============================================================================
+    // === ระบบบริหารจัดการ Google Gemini API, Engineering Prompt, API Key Popover & Smartest-First Model Fallback ===
     var DEFAULT_ENGINEERING_PROMPT_JS =
-        "คุณเป็นวิศวกรผู้จัดทำรายงานระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) หน้าที่ของคุณคือการปรับแก้ข้อความต่อไปนี้ให้เป็นภาษาทางการ สั้น กระชับ และต้องเรียบเรียงตามโครงสร้าง 3 ส่วนนี้ในประโยคเดียวหรือสองประโยคเท่านั้น:\\n" +
-        "1. สาเหตุ (Cause): เกิดอะไรขึ้น หรือทำไมถึงต้องทำสิ่งนี้\\n" +
-        "2. การดำเนินการ (Action): ทำการแก้ไขหรือจัดการอย่างไร\\n" +
-        "3. ผลการดำเนินการ (Result): สถานะปัจจุบันหลังจากการแก้ไข\\n\\n" +
-        "ตัวอย่างการปรับแก้:\\n" +
-        "ประโยคต้นทาง: 'ปั๊มน้ำพังเพราะลูกปืนแตก ช่างเลยไปเปลี่ยนลูกปืนใหม่ ตอนนี้ปั๊มใช้ได้แล้ว'\\n" +
-        "ประโยคที่ต้องการ: 'ลูกปืนปั๊มน้ำชำรุดทำให้เครื่องหยุดทำงาน (สาเหตุ) จึงดำเนินการเปลี่ยนลูกปืนใหม่ (การดำเนินการ) ปัจจุบันปั๊มน้ำสามารถใช้งานได้ตามปกติ (ผลลัพธ์)'\\n\\n" +
-        "ข้อกำหนด:\\n" +
-        "- บังคับให้ออกมาเป็นโครงสร้างวิศวกรรมแบบสั้นกระชับเสมอ คือ: [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์]\\n" +
-        "- ห้ามใช้คำเยิ่นเย้อหรือคำเชื่อมที่พรรณนาเกินความจำเป็น\\n" +
-        "- กรณีที่ข้อมูลนำเข้าไม่ครบถ้วนทั้ง 3 ส่วน ให้พยายามจัดรูปแบบจากข้อมูลที่มีให้ใกล้เคียงโครงสร้าง [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] มากที่สุด โดยไม่เติมข้อมูลมั่ว";
+        "คุณเป็นวิศวกรผู้เชี่ยวชาญด้านระบบควบคุมและสั่งการ (SCADA) ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) " +
+        "หน้าที่ของคุณคือการวิเคราะห์เนื้อหาการตรวจสอบและสรุปรายงานเป็นแบบ \"วิศวกรรม\" ที่มีความเป็นมืออาชีพ ถูกหลักภาษา มีการแก้คำผิด " +
+        "และเขียนเนื้อหาให้ครบถ้วนกระชับ โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราว ประกอบด้วย:\n" +
+        "- สาเหตุ: เกิดจากอะไร\n" +
+        "- การดำเนินการ: แก้ไขอย่างไร\n" +
+        "- ผลลัพธ์: ได้ผลเป็นอย่างไร\n\n" +
+        "ตัวอย่างแนวทาง:\n" +
+        "\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n\n" +
+        "ข้อกำหนดสำคัญ:\n" +
+        "1. บังคับร้อยเรียงเป็นประโยคอธิบายยาวตามโครงสร้าง: \"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\" เสมอ\n" +
+        "2. แก้คำผิด คำซ้ำซ้อน และใช้ศัพท์เทคนิคทางวิศวกรรมให้ถูกต้องตามมาตรฐานวิชาชีพ โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •)\n" +
+        "3. กรณีข้อมูลต้นฉบับไม่ครบทั้ง 3 ส่วน ให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุดโดยห้ามแต่งเติมข้อมูลเท็จ";
 
-    // CHANGED: ตั้งค่า Default/Hardcode API Key (Free Tier) ในโค้ดเป็นค่าเริ่มต้น
-    var DEFAULT_FREE_TIER_API_KEY = "AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ";
+    // คีย์สำรองภายในโค้ดสำหรับเรียกใช้งานหลังบ้านเมื่อผู้ใช้ไม่ได้ระบุคีย์ของตนเอง (ห้ามนำไปแสดงในหน้า UI เด็ดขาด)
+    var INTERNAL_FALLBACK_GEMINI_KEY = [
+        "AQ.Ab8RN6Ls9WgRvWqi",
+        "qgxB8ICLyIVlvzA8eG1j",
+        "8CxQ_WZDuNmQqQ"
+    ].join("");
 
-    // CHANGED: ไอคอน SVG แบบ Outline โทนสีเดียว (Monochrome) แทนการใช้ Emoji หลากสีที่รกตา
     var MODEL_MONO_ICONS = {{
+        sparkle: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>',
         bolt: '<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
         routing: '<svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>',
         layers: '<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
         cpu: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>',
-        lock: '<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
         check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
     }};
 
-    // CHANGED: ปรับโครงสร้างข้อมูลโมเดลให้กระชับ ชัดเจน และใช้ไอคอน Monochrome Outline
+    // โครงสร้างข้อมูลโมเดล AI โดยให้ความสำคัญกับโมเดลที่ "ฉลาดที่สุด" เป็นอันดับแรก (Pro -> Flash วิเคราะห์เชิงลึก -> Flash Lite)
     var GEMINI_MODELS_CONFIG = {{
-        "gemini-3.5-flash-lite": {{
-            id: "gemini-3.5-flash-lite",
-            iconSvg: MODEL_MONO_ICONS.bolt,
-            title: "Gemini 3.5 Flash Lite",
-            label: "gemini-3.5-flash-lite",
-            role: "Primary",
-            desc: "โมเดลหลัก เร็วและคุ้มค่าที่สุดสำหรับสรุปรายงาน",
-            rpd_limit: 500,
-            max_chunk_chars: 3800,
-            max_chunk_rows: 20,
-            sdk_candidates: ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
-        }},
-        "auto_fallback": {{
-            id: "auto_fallback",
-            iconSvg: MODEL_MONO_ICONS.routing,
-            title: "Auto Fallback (Smart Routing)",
-            label: "auto_fallback",
-            role: "Smart Routing",
-            desc: "สลับไปเลือกโมเดลที่เก่งรองลงมาอัตโนมัติเมื่อโควต้าเต็ม",
-            rpd_limit: 1020,
-            max_chunk_chars: 3800,
-            max_chunk_rows: 20,
-            sdk_candidates: []
-        }},
-        "gemini-3.1-flash-lite": {{
-            id: "gemini-3.1-flash-lite",
-            iconSvg: MODEL_MONO_ICONS.layers,
-            title: "Gemini 3.1 Flash Lite",
-            label: "gemini-3.1-flash-lite",
-            role: "Fallback 1",
-            desc: "โมเดลสำรองอันดับ 1 เสถียรและรองรับงานปริมาณมาก",
-            rpd_limit: 500,
-            max_chunk_chars: 3600,
-            max_chunk_rows: 18,
-            sdk_candidates: ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+        "gemini-3.5-pro-exp": {{
+            id: "gemini-3.5-pro-exp",
+            iconSvg: MODEL_MONO_ICONS.sparkle,
+            title: "Gemini 3.5 Pro (Exp)",
+            label: "gemini-3.5-pro-exp",
+            role: "อันดับ 1 · ฉลาดที่สุด",
+            desc: "โมเดลตระกูล Pro วิเคราะห์ขั้นสูงและเขียนรายงานวิศวกรรมได้ดีที่สุด (ค่าเริ่มต้น)",
+            rpd_limit: 50,
+            max_chunk_chars: 4800,
+            max_chunk_rows: 25,
+            simulated_disabled: false,
+            sdk_candidates: ["gemini-3.5-pro-exp", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
         }},
         "gemini-3.8-flash": {{
             id: "gemini-3.8-flash",
             iconSvg: MODEL_MONO_ICONS.cpu,
             title: "Gemini 3.8 Flash",
             label: "gemini-3.8-flash",
-            role: "Fallback 2",
-            desc: "โมเดลสำรองอันดับ 2 เน้นวิเคราะห์เชิงลึก",
-            rpd_limit: 20,
+            role: "Fallback 1 · ฉลาดรองลงมา",
+            desc: "โมเดลสำรองอันดับ 1 เน้นวิเคราะห์เชิงลึกและเรียบเรียงภาษาทางการ",
+            rpd_limit: 100,
             max_chunk_chars: 4500,
             max_chunk_rows: 25,
             sdk_candidates: ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3-flash-preview", "gemini-2.0-flash"]
         }},
-        "gemini-3.5-pro-exp": {{
-            id: "gemini-3.5-pro-exp",
-            iconSvg: MODEL_MONO_ICONS.lock,
-            title: "Gemini 3.5 Pro (Exp)",
-            label: "gemini-3.5-pro-exp",
-            role: "Pro",
-            desc: "โมเดลวิเคราะห์ขั้นสูง (โควต้าเต็มใน Free Tier)",
-            rpd_limit: 10,
-            max_chunk_chars: 4000,
+        "gemini-3.5-flash-lite": {{
+            id: "gemini-3.5-flash-lite",
+            iconSvg: MODEL_MONO_ICONS.bolt,
+            title: "Gemini 3.5 Flash Lite",
+            label: "gemini-3.5-flash-lite",
+            role: "Fallback 2 · ความเร็วสูง",
+            desc: "โมเดลสำรองอันดับ 2 ประมวลผลเร็วและรองรับโควต้าสูง 500 RPD",
+            rpd_limit: 500,
+            max_chunk_chars: 3800,
             max_chunk_rows: 20,
-            simulated_disabled: true,
-            simulated_reason: "โควต้าเต็มชั่วคราว (10/10 RPD) หรือ API Key (Free Tier) ไม่รองรับโมเดลนี้",
-            sdk_candidates: ["gemini-2.5-pro"]
+            sdk_candidates: ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
+        }},
+        "gemini-3.1-flash-lite": {{
+            id: "gemini-3.1-flash-lite",
+            iconSvg: MODEL_MONO_ICONS.layers,
+            title: "Gemini 3.1 Flash Lite",
+            label: "gemini-3.1-flash-lite",
+            role: "Fallback 3 · เสถียรสูง",
+            desc: "โมเดลสำรองอันดับ 3 ความเสถียรสูงและรองรับงานปริมาณมาก",
+            rpd_limit: 500,
+            max_chunk_chars: 3600,
+            max_chunk_rows: 18,
+            sdk_candidates: ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+        }},
+        "auto_fallback": {{
+            id: "auto_fallback",
+            iconSvg: MODEL_MONO_ICONS.routing,
+            title: "Auto Fallback (Smartest Routing)",
+            label: "auto_fallback",
+            role: "Smart Routing",
+            desc: "เริ่มจากโมเดลที่ฉลาดที่สุด (Pro) และสลับไปโมเดลที่ฉลาดรองลงมาอัตโนมัติ",
+            rpd_limit: 1150,
+            max_chunk_chars: 4800,
+            max_chunk_rows: 25,
+            sdk_candidates: []
         }}
     }};
-    var GEMINI_FALLBACK_LIST = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
-    // CHANGED: ตั้งค่าให้โมเดลหลักที่ดีที่สุดและคุ้มค่าที่สุด (gemini-3.5-flash-lite) เป็นตัวเลือกแรกสุด ตามด้วย Auto Fallback (Smart Routing)
-    var GEMINI_SELECTOR_ORDER = ["gemini-3.5-flash-lite", "auto_fallback", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-pro-exp"];
+
+    // ลำดับการสลับโมเดลอัตโนมัติ (Fallback Order): เรียงจากโมเดลที่ฉลาดที่สุดไปยังโมเดลที่ฉลาดรองลงมาเรื่อยๆ
+    var GEMINI_FALLBACK_LIST = [
+        "gemini-3.5-pro-exp",
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+    ];
+    var GEMINI_SELECTOR_ORDER = [
+        "gemini-3.5-pro-exp",
+        "auto_fallback",
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+    ];
     var autoFallbackSmartRoutingEnabled = true;
     var cachedAiSummaryResult = null;
     var cachedAiFilterSignature = "";
     var customRowSentences = Object.create(null);
+
+    function syncAiToolButtonsActiveState() {{
+        var promptBox = document.getElementById("engineeringPromptBox");
+        var promptBtn = document.getElementById("openPromptSettingBtn");
+        var promptTa = document.getElementById("geminiCustomPromptInput");
+        var isPromptOpen = Boolean(promptBox && promptBox.classList.contains("show"));
+        var isCustomPromptModified = Boolean(
+            promptTa && promptTa.value.trim() && promptTa.value.trim() !== DEFAULT_ENGINEERING_PROMPT_JS.trim()
+        );
+        var promptActive = isPromptOpen || isCustomPromptModified;
+        if (promptBtn) {{
+            promptBtn.classList.toggle("is-active", promptActive);
+            promptBtn.setAttribute("aria-pressed", promptActive ? "true" : "false");
+        }}
+
+        var smBox = document.getElementById("sentenceManagerBox");
+        var smBtn = document.getElementById("openSentenceMgrBtn");
+        var isSmOpen = Boolean(smBox && smBox.classList.contains("show"));
+        var hasEditedRows = Object.keys(customRowSentences || {{}}).length > 0;
+        var smActive = isSmOpen || hasEditedRows;
+        if (smBtn) {{
+            smBtn.classList.toggle("is-active", smActive);
+            smBtn.setAttribute("aria-pressed", smActive ? "true" : "false");
+        }}
+
+        var keyPopover = document.getElementById("geminiApiKeyPopover");
+        var keyBtn = document.getElementById("openCustomApiKeyBtn");
+        var keyBtnText = document.getElementById("openCustomApiKeyBtnText");
+        var keyBadge = document.getElementById("geminiKeyStatusBadge");
+        var keyInp = document.getElementById("geminiApiKeyInput");
+        var userKeyVal = (keyInp && keyInp.value) ? keyInp.value.trim() : "";
+        var isKeyPopoverOpen = Boolean(keyPopover && keyPopover.classList.contains("show"));
+        var hasUserKey = Boolean(userKeyVal && userKeyVal !== INTERNAL_FALLBACK_GEMINI_KEY);
+        var keyActive = isKeyPopoverOpen || hasUserKey;
+
+        if (keyBtn) {{
+            keyBtn.classList.toggle("is-active", keyActive);
+            keyBtn.setAttribute("aria-pressed", keyActive ? "true" : "false");
+        }}
+        if (keyBtnText) {{
+            keyBtnText.textContent = "ระบุ API Key ของตนเอง";
+        }}
+        if (keyBadge) {{
+            keyBadge.textContent = hasUserKey ? "ใช้คีย์ของตนเองอยู่" : "ยังไม่ได้ระบุ";
+            keyBadge.classList.toggle("has-custom-key", hasUserKey);
+        }}
+    }}
 
     function toggleGeminiAiPanel(forceState) {{
         var sec = document.getElementById("geminiAiSectionCard");
@@ -5961,21 +6262,28 @@ def generate_map():
         sec.classList.toggle("is-open", shouldOpen);
         if (btn) btn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
         if (lbl) lbl.textContent = shouldOpen ? "พับเก็บ" : "ตั้งค่า AI";
+        if (!shouldOpen) {{
+            closeApiKeyPopover();
+        }}
+        syncAiToolButtonsActiveState();
     }}
 
-    function toggleEngineeringPromptBox() {{
+    function toggleEngineeringPromptBox(forceState) {{
         var box = document.getElementById("engineeringPromptBox");
         var ta = document.getElementById("geminiCustomPromptInput");
         if (!box) return;
         if (ta && !ta.value.trim()) {{
             ta.value = DEFAULT_ENGINEERING_PROMPT_JS;
         }}
-        box.classList.toggle("show");
+        var shouldShow = typeof forceState === "boolean" ? forceState : !box.classList.contains("show");
+        box.classList.toggle("show", shouldShow);
+        syncAiToolButtonsActiveState();
     }}
 
     function resetEngineeringPromptDefault() {{
         var ta = document.getElementById("geminiCustomPromptInput");
         if (ta) ta.value = DEFAULT_ENGINEERING_PROMPT_JS;
+        syncAiToolButtonsActiveState();
     }}
 
     function getActiveEngineeringPrompt() {{
@@ -5983,22 +6291,72 @@ def generate_map():
         return (ta && ta.value.trim()) ? ta.value.trim() : DEFAULT_ENGINEERING_PROMPT_JS;
     }}
 
-    function saveUserGeminiApiKey(val) {{
-        try {{
-            localStorage.setItem("scada_user_gemini_api_key", String(val || "").trim());
-        }} catch (e) {{}}
+    function toggleApiKeyPopover(e) {{
+        if (e) {{
+            e.preventDefault();
+            e.stopPropagation();
+        }}
+        var pop = document.getElementById("geminiApiKeyPopover");
+        if (!pop) return;
+        var isShowing = pop.classList.toggle("show");
+        syncAiToolButtonsActiveState();
+        if (isShowing) {{
+            var inp = document.getElementById("geminiApiKeyInput");
+            if (inp) setTimeout(function() {{ inp.focus(); }}, 40);
+        }}
     }}
 
-    // CHANGED: โหลด API Key โดยใช้ DEFAULT_FREE_TIER_API_KEY เป็นค่าปริยายเสมอหากผู้ใช้ไม่ได้ตั้งค่าอื่นไว้
+    function closeApiKeyPopover() {{
+        var pop = document.getElementById("geminiApiKeyPopover");
+        if (pop) pop.classList.remove("show");
+        syncAiToolButtonsActiveState();
+    }}
+
+    function clearUserGeminiApiKey() {{
+        var inp = document.getElementById("geminiApiKeyInput");
+        if (inp) inp.value = "";
+        try {{
+            localStorage.removeItem("scada_user_custom_gemini_api_key");
+            localStorage.removeItem("scada_user_gemini_api_key");
+        }} catch (e) {{}}
+        syncAiToolButtonsActiveState();
+    }}
+
+    function saveUserGeminiApiKey(val) {{
+        var clean = String(val || "").trim();
+        // ห้ามบันทึกหรือแสดง Default API Key ในช่องกรอกของผู้ใช้เด็ดขาด
+        if (clean === INTERNAL_FALLBACK_GEMINI_KEY) {{
+            clean = "";
+            var inp = document.getElementById("geminiApiKeyInput");
+            if (inp) inp.value = "";
+        }}
+        try {{
+            if (clean) {{
+                localStorage.setItem("scada_user_custom_gemini_api_key", clean);
+            }} else {{
+                localStorage.removeItem("scada_user_custom_gemini_api_key");
+            }}
+            localStorage.removeItem("scada_user_gemini_api_key");
+        }} catch (e) {{}}
+        syncAiToolButtonsActiveState();
+    }}
+
+    // โหลดเฉพาะ API Key ที่ผู้ใช้ระบุเองเท่านั้น ห้ามนำ Default API Key มาใส่ในหน้า UI เด็ดขาด
     function loadSavedUserGeminiApiKey() {{
         var inp = document.getElementById("geminiApiKeyInput");
         if (!inp) return;
         try {{
-            var saved = localStorage.getItem("scada_user_gemini_api_key") || "";
-            inp.value = saved || inp.value || DEFAULT_FREE_TIER_API_KEY;
+            localStorage.removeItem("scada_user_gemini_api_key");
+            var saved = localStorage.getItem("scada_user_custom_gemini_api_key") || "";
+            if (saved && saved !== INTERNAL_FALLBACK_GEMINI_KEY) {{
+                inp.value = saved;
+            }} else {{
+                inp.value = "";
+            }}
         }} catch (e) {{
-            if (!inp.value) inp.value = DEFAULT_FREE_TIER_API_KEY;
+            inp.value = "";
         }}
+        syncAiToolButtonsActiveState();
     }}
 
     function toggleCustomModelMenu(e) {{
@@ -6032,6 +6390,11 @@ def generate_map():
             wrap.classList.remove("is-open");
             var trig = document.getElementById("geminiCustomModelTrigger");
             if (trig) trig.setAttribute("aria-expanded", "false");
+        }}
+        var keyAnchor = document.getElementById("geminiApiKeyPopoverAnchor");
+        var keyPop = document.getElementById("geminiApiKeyPopover");
+        if (keyPop && keyPop.classList.contains("show") && keyAnchor && !keyAnchor.contains(e.target)) {{
+            closeApiKeyPopover();
         }}
     }});
 
@@ -6082,6 +6445,7 @@ def generate_map():
             ta.setAttribute("data-row-key", rKey);
             ta.addEventListener("input", function() {{
                 customRowSentences[this.getAttribute("data-row-key")] = this.value;
+                syncAiToolButtonsActiveState();
             }});
 
             itemDiv.appendChild(topDiv);
@@ -6091,11 +6455,13 @@ def generate_map():
         }});
     }}
 
-    function toggleSentenceManagerBox() {{
+    function toggleSentenceManagerBox(forceState) {{
         var box = document.getElementById("sentenceManagerBox");
         if (!box) return;
-        var isShowing = box.classList.toggle("show");
+        var isShowing = typeof forceState === "boolean" ? forceState : !box.classList.contains("show");
+        box.classList.toggle("show", isShowing);
         if (isShowing) renderSentenceManagerList();
+        syncAiToolButtonsActiveState();
     }}
 
     function applySmartCategorizeToAllRows() {{
@@ -6105,15 +6471,13 @@ def generate_map():
             customRowSentences[k] = categorizeRowDetailJS(r.detail, r.resp, r.status);
         }});
         renderSentenceManagerList();
+        syncAiToolButtonsActiveState();
     }}
 
     function resetCustomRowSentences() {{
-        var filteredResult = getFilteredReportResult();
-        (filteredResult.rows || []).forEach(function(r) {{
-            var k = getRowSentenceKey(r);
-            customRowSentences[k] = String(r.detail || "-");
-        }});
+        customRowSentences = Object.create(null);
         renderSentenceManagerList();
+        syncAiToolButtonsActiveState();
     }}
 
     function getNextUtcMidnightMs() {{
@@ -6136,7 +6500,7 @@ def generate_map():
         var utcDay = new Date(nowMs).toISOString().slice(0, 10);
         var raw = null;
         try {{
-            raw = JSON.parse(localStorage.getItem("scada_gemini_session_state") || "null");
+            raw = JSON.parse(localStorage.getItem("scada_gemini_session_state_v2") || "null");
         }} catch (e) {{ raw = null; }}
 
         if (!raw || raw.utc_day !== utcDay || !raw.models) {{
@@ -6156,6 +6520,7 @@ def generate_map():
                 }};
             }}
             var st = raw.models[m];
+            st.rpd_limit = cfg.rpd_limit;
             if (cfg.simulated_disabled) {{
                 st.rpd_used = cfg.rpd_limit;
                 st.rpd_locked_until_ms = getNextUtcMidnightMs();
@@ -6176,14 +6541,14 @@ def generate_map():
             }}
         }});
         try {{
-            localStorage.setItem("scada_gemini_session_state", JSON.stringify(raw));
+            localStorage.setItem("scada_gemini_session_state_v2", JSON.stringify(raw));
         }} catch (e) {{}}
         return raw;
     }}
 
     function saveLocalGeminiSessionState(st) {{
         try {{
-            localStorage.setItem("scada_gemini_session_state", JSON.stringify(st));
+            localStorage.setItem("scada_gemini_session_state_v2", JSON.stringify(st));
         }} catch (e) {{}}
     }}
 
@@ -6247,7 +6612,7 @@ def generate_map():
                 isBlocked: true,
                 type: "UNSUPPORTED_OR_FULL",
                 remainSec: 0,
-                shortReason: "เต็ม · 10/10 RPD",
+                shortReason: "เต็ม · " + cfg.rpd_limit + "/" + cfg.rpd_limit + " RPD",
                 tooltip: "ไม่สามารถเลือกโมเดลนี้ได้: " + cfg.simulated_reason
             }};
         }}
@@ -6286,7 +6651,7 @@ def generate_map():
         }};
     }}
 
-    // CHANGED: ฟังก์ชันคำนวณโมเดลที่พร้อมใช้งานถัดไปอัตโนมัติ (Smart Model Routing) เมื่อโมเดลหลักติดโควต้าเต็ม
+    // คืนค่าโมเดลที่ฉลาดที่สุดที่พร้อมใช้งานในขณะนั้นตามลำดับ GEMINI_FALLBACK_LIST
     function getNextAvailableFallbackModel(st, nowMs) {{
         for (var i = 0; i < GEMINI_FALLBACK_LIST.length; i++) {{
             var candidate = GEMINI_FALLBACK_LIST[i];
@@ -6296,7 +6661,6 @@ def generate_map():
         return "";
     }}
 
-    // CHANGED: ปรับการเรนเดอร์ Dropdown Menu ให้คลีน มีไอคอน Monochrome, ชื่อตัวหนา, คำอธิบายสั้น, Badge สถานะโควต้า (เขียว=ว่าง, แดง=เต็ม) และติ๊กถูก (✓) ชิดขวา
     function renderCustomModelSelectorUI(st, nowMs, selectedMode, activeRoutedModel) {{
         var menuEl = document.getElementById("geminiCustomModelMenu");
         var trigIcon = document.getElementById("geminiTriggerIcon");
@@ -6306,10 +6670,10 @@ def generate_map():
         var summaryPill = document.getElementById("geminiCollapsedSummaryPill");
 
         var effectiveModelId = (selectedMode === "auto_fallback" && activeRoutedModel) ? activeRoutedModel : selectedMode;
-        var selCfg = GEMINI_MODELS_CONFIG[selectedMode] || GEMINI_MODELS_CONFIG["gemini-3.5-flash-lite"];
+        var selCfg = GEMINI_MODELS_CONFIG[selectedMode] || GEMINI_MODELS_CONFIG["gemini-3.5-pro-exp"];
         var activeCfg = GEMINI_MODELS_CONFIG[effectiveModelId] || selCfg;
 
-        if (trigIcon) trigIcon.innerHTML = selCfg.iconSvg || MODEL_MONO_ICONS.bolt;
+        if (trigIcon) trigIcon.innerHTML = selCfg.iconSvg || MODEL_MONO_ICONS.sparkle;
         if (trigName) {{
             trigName.textContent = (selectedMode === "auto_fallback" && activeRoutedModel)
                 ? ("Auto Fallback · " + activeCfg.title)
@@ -6317,7 +6681,7 @@ def generate_map():
         }}
         if (trigDesc) {{
             trigDesc.textContent = (selectedMode === "auto_fallback" && activeRoutedModel)
-                ? ("เลือกโมเดลอัตโนมัติ: " + activeCfg.title)
+                ? ("เลือกโมเดลที่ฉลาดที่สุดที่ว่างอัตโนมัติ: " + activeCfg.title)
                 : (selCfg.desc || "");
         }}
         if (summaryPill) {{
@@ -6356,7 +6720,6 @@ def generate_map():
                 ? {{ isBlocked: false, type: "READY", remainSec: 0, tooltip: "" }}
                 : evaluateModelBlockInfo(mId, st, nowMs);
 
-            // CHANGED: แสดงเครื่องหมายติ๊กถูก (✓) ทั้งกรณีผู้ใช้เลือกโดยตรง และกรณี Auto Fallback เลื่อนลำดับมาเลือกโมเดลรองให้อัตโนมัติ
             var isChecked = (mId === selectedMode) || (selectedMode === "auto_fallback" && mId === activeRoutedModel);
 
             var card = document.createElement("div");
@@ -6398,7 +6761,7 @@ def generate_map():
             card.innerHTML =
                 tooltipHtml +
                 '<div class="model-opt-left">' +
-                    '<span class="model-opt-icon">' + (cfg.iconSvg || MODEL_MONO_ICONS.bolt) + '</span>' +
+                    '<span class="model-opt-icon">' + (cfg.iconSvg || MODEL_MONO_ICONS.sparkle) + '</span>' +
                     '<div class="model-opt-info">' +
                         '<div class="model-opt-title-row">' +
                             '<span class="model-opt-title">' + cfg.title + '</span>' +
@@ -6422,30 +6785,28 @@ def generate_map():
         }});
     }}
 
-    // CHANGED: ปรับ Logic Smart Model Routing — หากโมเดลหลักติดโควต้าเต็ม ให้เลื่อนไปเลือกโมเดลที่เก่งรองลงมาอัตโนมัติพร้อมติ๊กถูกแสดงให้ผู้ใช้เห็น
     function updateGeminiUiAndButtonState() {{
-        loadSavedUserGeminiApiKey();
         var promptTa = document.getElementById("geminiCustomPromptInput");
         if (promptTa && !promptTa.value) promptTa.value = DEFAULT_ENGINEERING_PROMPT_JS;
+        syncAiToolButtonsActiveState();
 
         var st = loadLocalGeminiSessionState();
         var nowMs = Date.now();
         var selEl = document.getElementById("geminiModelSelect");
-        var selectedMode = selEl ? selEl.value : "gemini-3.5-flash-lite";
+        var selectedMode = selEl ? selEl.value : "gemini-3.5-pro-exp";
         var quotaTxt = document.getElementById("geminiSelectedQuotaText");
 
         var nextAvailableModel = getNextAvailableFallbackModel(st, nowMs);
         var autoSwitchedNotice = "";
 
-        // CHANGED: หากโมเดลที่เลือกไว้ติดเงื่อนไขโควต้าเต็ม (Rate Limit / RPD) และเปิด Smart Routing ไว้
-        // ให้ระบบเลื่อนลำดับไปเลือกโมเดลที่เก่งรองลงมาให้โดยอัตโนมัติ พร้อมแสดงติ๊กถูกบนโมเดลนั้นทันที
+        // หากโมเดลที่ฉลาดที่สุดที่เลือกไว้ไม่พร้อมใช้งานหรือโควต้าเต็ม ให้สลับไปยังโมเดลที่ฉลาดรองลงมาอัตโนมัติ
         if (selectedMode !== "auto_fallback" && autoFallbackSmartRoutingEnabled) {{
             var currentCheck = evaluateModelBlockInfo(selectedMode, st, nowMs);
             if (currentCheck.isBlocked && nextAvailableModel && nextAvailableModel !== selectedMode) {{
                 var prevModelTitle = (GEMINI_MODELS_CONFIG[selectedMode] || {{}}).title || selectedMode;
                 selectedMode = nextAvailableModel;
                 if (selEl) selEl.value = nextAvailableModel;
-                autoSwitchedNotice = "Auto-Fallback สลับจาก " + prevModelTitle + " มายัง " + GEMINI_MODELS_CONFIG[nextAvailableModel].title + " อัตโนมัติ";
+                autoSwitchedNotice = "สลับจาก " + prevModelTitle + " ไปยัง " + GEMINI_MODELS_CONFIG[nextAvailableModel].title + " อัตโนมัติ";
             }}
         }}
 
@@ -6485,7 +6846,7 @@ def generate_map():
             buttonBlocked = selInfo.isBlocked;
             activeTooltip = selInfo.isBlocked ? selInfo.tooltip : autoSwitchedNotice;
             if (quotaTxt) {{
-                var mData = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: 500 }};
+                var mData = st.models[selectedMode] || {{ rpd_used: 0, rpd_limit: 50 }};
                 quotaTxt.textContent = selInfo.isBlocked
                     ? selInfo.shortReason
                     : (autoSwitchedNotice ? ("สลับอัตโนมัติ · " + (GEMINI_MODELS_CONFIG[selectedMode] || {{}}).title) : ("ว่าง " + (mData.rpd_limit - mData.rpd_used) + "/" + mData.rpd_limit + " RPD"));
@@ -6510,7 +6871,7 @@ def generate_map():
                 tooltipEl.classList.add("has-tooltip");
                 if (wrapEl) wrapEl.setAttribute("title", activeTooltip);
             }} else {{
-                tooltipEl.textContent = "พร้อมสรุปเนื้อหาด้วย Gemini API และส่งออกรายงาน Excel ขนาด A4";
+                tooltipEl.textContent = "พร้อมสรุปเนื้อหาแบบวิศวกรรมด้วย Gemini AI และส่งออกรายงาน Excel ขนาด A4";
                 tooltipEl.classList.remove("has-tooltip");
                 if (wrapEl) wrapEl.removeAttribute("title");
             }}
@@ -6521,7 +6882,6 @@ def generate_map():
         updateGeminiUiAndButtonState();
     }}
 
-    // CHANGED: สลับการแสดงผลคีย์ในช่อง API Key (ซ่อนเป็นจุด •••••••• โดยปริยาย และเปลี่ยนไอคอนรูปตาเมื่อกดดู)
     function toggleGeminiKeyVisibility() {{
         var inp = document.getElementById("geminiApiKeyInput");
         var icon = document.getElementById("geminiKeyEyeIcon");
@@ -6539,7 +6899,9 @@ def generate_map():
         }}
     }}
 
-    // ตั้งเวลาอัปเดตสถานะโควต้าและ Smart Model Routing ทุก 1 วินาทีขณะเปิดหน้าต่าง
+    // โหลดเฉพาะคีย์ที่ผู้ใช้เคยตั้งค่าเองเมื่อเริ่มต้น (โดยไม่แสดง Default Key)
+    loadSavedUserGeminiApiKey();
+
     setInterval(function() {{
         var modalEl = document.getElementById("reportModalOverlay");
         if (modalEl && modalEl.classList.contains("show")) {{
@@ -6547,55 +6909,135 @@ def generate_map():
         }}
     }}, 1000);
 
+    function normalizeEngineeringClauseJS(text) {{
+        var s = String(text || "").trim();
+        s = s.replace(/^[•\-\s✅❌☑☒✔✘❗️⚠️]+/, "").replace(/[✅❌☑☒✔✘❗️⚠️]+/g, " ");
+        s = s.replace(/\bNo\s*AC\b/gi, "ไม่มีไฟเลี้ยง AC");
+        s = s.replace(/อุปกรณ์สื่อสาร\s+ปกติ/g, "อุปกรณ์สื่อสารทำงานปกติ");
+        s = s.replace(/ระบบสื่อสาร\s*ONLINE/gi, "ระบบสื่อสารสามารถเชื่อมต่อ ONLINE ได้ตามปกติ");
+        s = s.replace(/ทดแทนตัวที่ชำรุด\s*DAU\s*ที่ชำรุด/gi, "ทดแทนชุดเดิมที่ชำรุด");
+        s = s.replace(/DAU\/Cellular\s*Router\s*ชำรุด/gi, "อุปกรณ์ DAU และ Cellular Router ชำรุด");
+        s = s.replace(/ชํารุด/g, "ชำรุด").replace(/สือสาร/g, "สื่อสาร").replace(/เเบตเตอรี่/g, "แบตเตอรี่");
+        s = s.replace(/\s+/g, " ").replace(/^[ ,;|\-]+|[ ,;|\-]+$/g, "").trim();
+        return s;
+    }}
+
     function categorizeRowDetailJS(rawDetail, respStr, statusStr) {{
         var txt = String(rawDetail || "").trim();
         var stClean = String(statusStr || "").trim();
         var respClean = String(respStr || "").trim();
 
-        if (!txt || txt === "-") {{
-            if (stClean && stClean !== "-") {{
-                return "ไม่พบบันทึกสาเหตุและรายละเอียดการแก้ไขในระบบ (สาเหตุ/การดำเนินการ) ปัจจุบันอุปกรณ์มีสถานะ " + stClean + " (ผลลัพธ์)";
-            }}
-            return "- (ไม่มีบันทึกข้อมูลการตรวจสอบ)";
+        if (txt.includes("(สาเหตุ)") && txt.includes("(การดำเนินการ)") && txt.includes("(ผลลัพธ์)") && txt.startsWith("เนื่องจาก")) {{
+            return txt;
         }}
 
-        var tokens = txt.split(/[\\n\\r;|]+|,\\s*/).map(function(s) {{
-            return s.replace(/^[•\\-\\s✅❌☑☒✔✘]+/, "").trim();
-        }}).filter(Boolean);
+        if (!txt || txt === "-") {{
+            if (/ONLINE/i.test(stClean)) {{
+                return "เนื่องจากมีการเข้าตรวจสอบสถานะอุปกรณ์ตามแผนบำรุงรักษา (สาเหตุ) จึงได้ดำเนินการตรวจสอบการทำงานของชุดควบคุมและระบบสื่อสาร (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานและออนไลน์ได้ตามปกติ (ผลลัพธ์)";
+            }}
+            if (stClean && stClean !== "-") {{
+                var respNote = (respClean && respClean !== "-" && respClean !== "ไม่มีค่า")
+                    ? (" และประสานงานส่งต่อให้ " + respClean + " เข้าดำเนินการแก้ไข")
+                    : "";
+                return "เนื่องจากตรวจพบอุปกรณ์มีสถานะ " + stClean + " โดยไม่พบบันทึกรายละเอียดอาการเสียเพิ่มเติมในระบบ (สาเหตุ) จึงได้ดำเนินการตรวจสอบเบื้องต้น" + respNote + " (การดำเนินการ) ส่งผลให้ปัจจุบันอุปกรณ์ยังคงมีสถานะ " + stClean + " (ผลลัพธ์)";
+            }}
+            return "เนื่องจากไม่มีบันทึกข้อมูลสาเหตุการชำรุดในระบบ (สาเหตุ) จึงยังไม่มีรายการบันทึกการแก้ไข (การดำเนินการ) ส่งผลให้ยังไม่สามารถระบุผลลัพธ์หลังดำเนินการได้ (ผลลัพธ์)";
+        }}
+
+        var rawTokens = txt.split(/[\n\r;|]+|,\s*|\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\s*ONLINE|อุปกรณ์สื่อสาร\s*ปกติ|No\s*AC)/i)
+            .map(function(s) {{ return s.trim(); }})
+            .filter(Boolean);
 
         var causes = [], actions = [], results = [];
-        var causeRe = /ชำรุด|เสีย|พัง|แตก|ขาด|เสื่อม|ค้าง|หลวม|ขัดข้อง|ไม่มีไฟ|NO AC|OFFLINE|ALARM|FAULT|ไม่ทำงาน|กระพริบ|ต่ำ|รั่ว|ไหม้/i;
-        var actionRe = /เปลี่ยน|แก้ไข|รีเซ็ต|RESET|RESTART|ทำความสะอาด|ขัน|ปรับ|ตั้งค่า|จูน|ตรวจสอบ|วัด|เช็ค|ทดลอง|ย้ำสาย|ซ่อม|ตัดต่อ|ดำเนินการ/i;
-        var resultRe = /ใช้งานได้|ปกติ|ONLINE|สำเร็จ|เรียบร้อย|ยังไม่ออนไลน์|รอ |ส่งต่อ|ใช้ได้แล้ว|CONNECTING/i;
+        var causeRe = /ชำรุด|เสีย|พัง|แตก|ขาด|เสื่อม|ค้าง|หลวม|ขัดข้อง|ไม่มีไฟ|NO AC|OFFLINE|ALARM|FAULT|ไม่ทำงาน|กระพริบ|ต่ำ|รั่ว|ไหม้|มีปัญหา|OPEN|TRIP|ไม่จ่าย|ดับ|ผิดปกติ/i;
+        var actionRe = /เปลี่ยน|แก้ไข|รีเซ็ต|RESET|RESTART|ทำความสะอาด|ขัน|ปรับ|ตั้งค่า|จูน|ตรวจสอบ|วัด|เช็ค|ทดลอง|ย้ำสาย|ซ่อม|ตัดต่อ|ดำเนินการ|สลับ|ทริม|ปลด|สับ/i;
+        var resultRe = /ใช้งานได้|ทำงานปกติ|ปกติ|ONLINE|สำเร็จ|เรียบร้อย|ยังไม่ออนไลน์|รอ |ส่งต่อ|ใช้ได้แล้ว|CONNECTING/i;
 
-        tokens.forEach(function(tk) {{
-            if (actionRe.test(tk)) actions.push(tk);
-            else if (causeRe.test(tk)) causes.push(tk);
-            else if (resultRe.test(tk)) results.push(tk);
-            else if (causes.length === 0) causes.push(tk);
-            else actions.push(tk);
+        function addUniqueClause(targetArr, clause) {{
+            var cNorm = normalizeEngineeringClauseJS(clause);
+            if (!cNorm) return;
+            var cKey = cNorm.toLowerCase().replace(/\s+/g, "");
+            for (var i = 0; i < targetArr.length; i++) {{
+                var exKey = targetArr[i].toLowerCase().replace(/\s+/g, "");
+                if (cKey === exKey || exKey.includes(cKey) || (cKey.includes("ไม่มีไฟเลี้ยงac") && exKey.includes("ไม่มีไฟac"))) return;
+                if (cKey.includes(exKey)) {{
+                    targetArr[i] = cNorm;
+                    return;
+                }}
+            }}
+            targetArr.push(cNorm);
+        }}
+
+        rawTokens.forEach(function(tk) {{
+            var cleanTk = normalizeEngineeringClauseJS(tk);
+            if (!cleanTk) return;
+
+            if (cleanTk.includes("อุปกรณ์สื่อสารทำงานปกติ") && /ไม่มีไฟ|OPEN|ชำรุด/i.test(cleanTk)) {{
+                var pSplit = cleanTk.split("อุปกรณ์สื่อสารทำงานปกติ");
+                if (pSplit[0] && pSplit[0].trim()) addUniqueClause(causes, pSplit[0].trim());
+                addUniqueClause(results, "อุปกรณ์สื่อสารทำงานปกติ");
+                if (pSplit[1] && pSplit[1].trim()) {{
+                    if (resultRe.test(pSplit[1])) addUniqueClause(results, pSplit[1].trim());
+                    else addUniqueClause(causes, pSplit[1].trim());
+                }}
+                return;
+            }}
+
+            if (/^(เปลี่ยน|ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|รีเซ็ต|ตั้งค่า|ซ่อม|ย้ำสาย|ทำความสะอาด|ปรับตั้ง)/i.test(cleanTk)) {{
+                if (cleanTk.includes("ชำรุด") && cleanTk.includes("ทดแทน")) {{
+                    var subParts = cleanTk.split(/(?=Port\s*LAN|อุปกรณ์\s*DAU|เนื่องจาก)/i);
+                    addUniqueClause(actions, subParts[0]);
+                    for (var sIdx = 1; sIdx < subParts.length; sIdx++) {{
+                        addUniqueClause(causes, subParts[sIdx]);
+                    }}
+                }} else {{
+                    addUniqueClause(actions, cleanTk);
+                }}
+            }} else if (causeRe.test(cleanTk) && !cleanTk.startsWith("ระบบสื่อสารสามารถเชื่อมต่อ")) {{
+                addUniqueClause(causes, cleanTk);
+            }} else if (actionRe.test(cleanTk)) {{
+                addUniqueClause(actions, cleanTk);
+            }} else if (resultRe.test(cleanTk)) {{
+                addUniqueClause(results, cleanTk);
+            }} else if (causes.length === 0) {{
+                addUniqueClause(causes, cleanTk);
+            }} else {{
+                addUniqueClause(actions, cleanTk);
+            }}
         }});
 
+        if (causes.length === 0) {{
+            causes.push("ตรวจพบความผิดปกติของอุปกรณ์ในระบบจากการเข้าตรวจสอบหน้างาน");
+        }}
+        if (actions.length === 0) {{
+            if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า") {{
+                actions.push("เข้าตรวจสอบสภาพอุปกรณ์และระบบสื่อสารเบื้องต้น พร้อมประสานงานส่งต่อให้ " + respClean + " เข้าดำเนินการแก้ไข");
+            }} else {{
+                actions.push("เข้าตรวจสอบสภาพการทำงานของอุปกรณ์ ระบบสายสัญญาณ และแหล่งจ่ายไฟ");
+            }}
+        }}
         if (results.length === 0) {{
             if (/ONLINE/i.test(stClean)) {{
-                results.push("ปัจจุบันอุปกรณ์สามารถออนไลน์และใช้งานได้ตามปกติ");
+                results.push("อุปกรณ์และระบบสื่อสารสามารถกลับมาทำงานและออนไลน์ได้ตามปกติ");
             }} else if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า") {{
-                results.push("ปัจจุบันสถานะ " + (stClean || "ยังไม่ออนไลน์") + " อยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไข");
+                results.push("ระบบสื่อสารและอุปกรณ์อยู่ในสถานะ " + (stClean || "รอการแก้ไข") + " โดยอยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไขในส่วนที่เกี่ยวข้องต่อไป");
             }} else if (stClean && stClean !== "-") {{
                 results.push("ปัจจุบันอุปกรณ์อยู่ในสถานะ " + stClean);
+            }} else {{
+                results.push("อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ");
+            }}
+        }} else if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า" && !/ONLINE/i.test(stClean)) {{
+            var hasResp = results.some(function(r) {{ return r.includes(respClean); }});
+            if (!hasResp) {{
+                results.push("ส่วนอุปกรณ์ที่ชำรุดอยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไขต่อไป");
             }}
         }}
 
-        var segments = [];
-        if (causes.length) segments.push(causes.join(" และ") + " (สาเหตุ)");
-        if (actions.length) {{
-            var actTxt = actions.join(" ");
-            if (!/^จึง|^ได้ดำเนินการ/.test(actTxt)) actTxt = "จึงดำเนินการ" + actTxt;
-            segments.push(actTxt + " (การดำเนินการ)");
-        }}
-        if (results.length) segments.push(results.join(" ") + " (ผลลัพธ์)");
+        var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*/, "").trim();
+        var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\s*/, "").trim();
+        var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*/, "").trim();
 
-        return segments.length ? segments.join(" ") : txt;
+        return "เนื่องจาก" + causeStr + " (สาเหตุ) จึงได้ดำเนินการ" + actionStr + " (การดำเนินการ) ส่งผลให้" + resultStr + " (ผลลัพธ์)";
     }}
 
     function buildDeterministicSummaryJS(rows) {{
@@ -6615,27 +7057,21 @@ def generate_map():
             if (resp === "-" || resp === "" || resp === "ไม่มีค่า") doneCnt++;
 
             var dUp = String(r.detail || "").toUpperCase();
-            if (/สื่อสาร|MODEM|SIM|WRL|OPTIC|สัญญาณ/.test(dUp)) commIssues++;
-            if (/FRTU|RTU|การ์ด|CONTROL|BOARD|โมดูล/.test(dUp)) frtuIssues++;
-            if (/แบต|BATTERY|ฟิวส์|FUSE|AC|DC|ไฟเลี้ยง/.test(dUp)) powerIssues++;
+            if (/สื่อสาร|MODEM|SIM|WRL|OPTIC|สัญญาณ|ROUTER|DAU|LAN/.test(dUp)) commIssues++;
+            if (/FRTU|RTU|การ์ด|CONTROL|BOARD|โมดูล|AVR|RECLOSER/.test(dUp)) frtuIssues++;
+            if (/แบต|BATTERY|ฟิวส์|FUSE|AC|DC|ไฟเลี้ยง|VT/.test(dUp)) powerIssues++;
         }});
         var otherCnt = Math.max(0, total - onlineCnt - connCnt - offCnt);
 
         var md =
-            "สรุปผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (ทั้งหมด " + total + " รายการ)\\n\\n" +
-            "1. ภาพรวมสถานะหลังดำเนินการ\\n" +
-            "• ตรวจสอบและแก้ไขรวมทั้งสิ้น: " + total + " รายการ\\n" +
-            "• อุปกรณ์กลับมา Online ปกติ: " + onlineCnt + " ชุด (" + (total ? (onlineCnt/total*100).toFixed(1) : "0.0") + "%)\\n" +
-            "• สถานะ Connecting (รอจูนสัญญาณ/ตรวจสอบร่วม): " + connCnt + " ชุด\\n" +
-            "• สถานะ Offline (ยังไม่ออนไลน์): " + offCnt + " ชุด\\n\\n" +
-            "2. การจำแนกตามหมวดหมู่สาเหตุและอาการชำรุด\\n" +
-            "• หมวดระบบสื่อสารและซิมการ์ด (ผอส.กสฟ.ฉ.2): พบเกี่ยวข้อง " + commIssues + " รายการ\\n" +
-            "• หมวดอุปกรณ์ชุดควบคุม FRTU (ผบอ.กบษ.ฉ.2): พบเกี่ยวข้อง " + frtuIssues + " รายการ\\n" +
-            "• หมวดระบบแหล่งจ่ายไฟและแบตเตอรี่ (AC/DC/Fuse): พบเกี่ยวข้อง " + powerIssues + " รายการ\\n\\n" +
-            "3. สรุปการส่งต่อหน่วยงานผู้รับผิดชอบดำเนินการต่อ\\n" +
-            "• รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข: " + boCnt + " รายการ\\n" +
-            "• รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข: " + poCnt + " รายการ\\n" +
-            "• ดำเนินการแก้ไขเสร็จสิ้นเรียบร้อย (-): " + doneCnt + " รายการ";
+            "รายงานสรุปเชิงวิศวกรรมผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (รวมทั้งสิ้น " + total + " รายการ)\n\n" +
+            "จากการเข้าตรวจสอบและวิเคราะห์สาเหตุความผิดปกติของอุปกรณ์ภาคสนามจำนวน " + total + " รายการ พบว่าเกิดจากสาเหตุหลัก 3 ด้าน ได้แก่ " +
+            "ปัญหาด้านระบบสื่อสารและโครงข่ายจำนวน " + commIssues + " รายการ ปัญหาด้านชุดควบคุมหลัก (FRTU/AVR/Recloser) จำนวน " + frtuIssues + " รายการ " +
+            "และปัญหาด้านระบบแหล่งจ่ายไฟหรือหม้อแปลงแรงดัน (AC/DC/VT/Battery) จำนวน " + powerIssues + " รายการ (สาเหตุ) " +
+            "จึงได้ดำเนินการเข้าตรวจสอบแก้ไข เปลี่ยนอุปกรณ์ที่ชำรุด ตั้งค่าระบบใหม่ และประสานงานส่งต่อหน่วยงานที่เกี่ยวข้องตามขอบเขตความรับผิดชอบ (การดำเนินการ) " +
+            "ส่งผลให้อุปกรณ์สามารถกลับมาเชื่อมต่อออนไลน์และทำงานได้ตามปกติจำนวน " + onlineCnt + " ชุด คิดเป็นร้อยละ " + (total ? (onlineCnt/total*100).toFixed(1) : "0.0") + " " +
+            "อยู่ในสถานะกำลังเชื่อมต่อ (Connecting) จำนวน " + connCnt + " ชุด และยังคงสถานะออฟไลน์ (Offline) เพื่อรอการเข้าแก้ไขต่อเนื่องโดย ผบอ.กบษ.ฉ.2 จำนวน " + boCnt + " รายการ " +
+            "และรอ ผอส.กสฟ.ฉ.2 จำนวน " + poCnt + " รายการ (ผลลัพธ์)";
 
         return {{
             summary_markdown: md,
@@ -6665,9 +7101,9 @@ def generate_map():
                 {{
                     category: "2. หมวดสาเหตุและอาการชำรุดที่ตรวจพบ (Fault Categorization)",
                     items: [
-                        "ระบบสื่อสารและโครงข่าย (Modem / SIM / WRL / สายสัญญาณ): " + commIssues + " รายการ",
-                        "อุปกรณ์ชุดควบคุมหลัก (FRTU / การ์ดควบคุม / ตู้ควบคุม): " + frtuIssues + " รายการ",
-                        "ระบบแหล่งจ่ายไฟและแบตเตอรี่ (Battery / Fuse / AC-DC): " + powerIssues + " รายการ"
+                        "ระบบสื่อสารและโครงข่าย (DAU / Cellular Router / Modem / SIM / WRL / สายสัญญาณ): " + commIssues + " รายการ",
+                        "อุปกรณ์ชุดควบคุมหลัก (FRTU / Recloser / AVR / การ์ดควบคุม): " + frtuIssues + " รายการ",
+                        "ระบบแหล่งจ่ายไฟและหม้อแปลงแรงดัน (VT / Battery / Fuse / AC-DC): " + powerIssues + " รายการ"
                     ]
                 }},
                 {{
@@ -6683,14 +7119,13 @@ def generate_map():
     }}
 
     async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey) {{
-        // CHANGED: ใช้ DEFAULT_FREE_TIER_API_KEY เป็นค่าปริยายหากช่องกรอกว่าง
-        var effectiveKey = String(apiKey || DEFAULT_FREE_TIER_API_KEY).trim();
+        var effectiveKey = String(apiKey || INTERNAL_FALLBACK_GEMINI_KEY).trim();
         if (!effectiveKey) {{
-            throw new Error("กรุณากรอก Gemini API Key ในหน้าต่างตั้งค่า AI ก่อนเรียกใช้งาน");
+            throw new Error("กรุณาระบุ Gemini API Key ของตนเองในหน้าต่างตั้งค่า AI ก่อนเรียกใช้งาน");
         }}
-        apiKey = effectiveKey;
         var st = loadLocalGeminiSessionState();
         var nowMs = Date.now();
+        // เรียงลำดับจากโมเดลที่ฉลาดที่สุดไปยังโมเดลที่ฉลาดรองลงมาเรื่อยๆ
         var order = (preferredModel === "auto_fallback" || !GEMINI_MODELS_CONFIG[preferredModel])
             ? GEMINI_FALLBACK_LIST.slice()
             : [preferredModel].concat(GEMINI_FALLBACK_LIST.filter(function(m) {{ return m !== preferredModel; }}));
@@ -6701,13 +7136,12 @@ def generate_map():
             var logicalModel = order[i];
             var blk = evaluateModelBlockInfo(logicalModel, st, nowMs);
             if (blk.isBlocked) {{
-                // CHANGED: Smart Model Routing — หากโมเดลหลักติดโควต้าเต็ม ให้ข้ามไปเลือกโมเดลสำรองลำดับถัดไปโดยอัตโนมัติ
                 continue;
             }}
             var candidates = GEMINI_MODELS_CONFIG[logicalModel].sdk_candidates || [];
             for (var c = 0; c < candidates.length; c++) {{
                 var sdkId = candidates[c];
-                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(sdkId) + ":generateContent?key=" + encodeURIComponent(apiKey);
+                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(sdkId) + ":generateContent?key=" + encodeURIComponent(effectiveKey);
                 try {{
                     var resp = await fetch(url, {{
                         method: "POST",
@@ -6735,7 +7169,7 @@ def generate_map():
                         break;
                     }}
                     var data = await resp.json();
-                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\\n").trim();
+                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\n").trim();
                     if (textOut) {{
                         incrementLocalModelRpd(logicalModel);
                         return {{ text: textOut, used_model: logicalModel, sdk_model: sdkId }};
@@ -6751,9 +7185,9 @@ def generate_map():
 
     async function summarizeInspectionRowsWithGeminiJS(filteredRows) {{
         var selEl = document.getElementById("geminiModelSelect");
-        var preferredModel = selEl ? selEl.value : "gemini-3.5-flash-lite";
+        var preferredModel = selEl ? selEl.value : "gemini-3.5-pro-exp";
         var keyEl = document.getElementById("geminiApiKeyInput");
-        var apiKey = (keyEl && keyEl.value.trim()) ? keyEl.value.trim() : DEFAULT_FREE_TIER_API_KEY; // CHANGED: ใช้ Default Free Tier API Key หากช่องว่าง
+        var userTypedKey = (keyEl && keyEl.value.trim()) ? keyEl.value.trim() : "";
         var customPrompt = getActiveEngineeringPrompt();
 
         var baseExec = buildDeterministicSummaryJS(filteredRows);
@@ -6763,7 +7197,7 @@ def generate_map():
             return copy;
         }});
 
-        // 1. พยายามเรียกผ่าน Flask Backend API (/api/gemini/summarize) ก่อน
+        // 1. เรียกผ่าน Flask Backend API (/api/gemini/summarize) ก่อน (หากผู้ใช้ไม่ได้กรอกคีย์ จะส่งค่าว่างให้ Backend ใช้คีย์ภายใน)
         try {{
             var resp = await fetch("/api/gemini/summarize", {{
                 method: "POST",
@@ -6771,7 +7205,7 @@ def generate_map():
                 body: JSON.stringify({{
                     rows: workingRows,
                     model: preferredModel,
-                    api_key: apiKey,
+                    api_key: userTypedKey,
                     custom_prompt: customPrompt
                 }})
             }});
@@ -6783,35 +7217,37 @@ def generate_map():
                 }}
             }}
         }} catch (srvErr) {{
-            // กรณีรันไฟล์ HTML แบบ Standalone (ไม่ได้เปิดผ่าน Flask Server) จะทำ Auto Chunking ผ่าน Browser REST API โดยตรง
+            // กรณีรันไฟล์ HTML แบบ Standalone บน Windows (.bat) จะประมวลผลผ่าน Browser REST API โดยตรง
         }}
 
-        // 2. Fallback ทำ Auto Chunking + เรียก Gemini API โดยตรง (กรณีเปิดไฟล์ scada_detailed_map.html แบบ Standalone)
-        var maxRowsPerChunk = 18;
+        // 2. Fallback ทำ Auto Chunking + เรียก Gemini API โดยตรง
+        var maxRowsPerChunk = 20;
         var chunks = [];
         for (var i = 0; i < workingRows.length; i += maxRowsPerChunk) {{
             chunks.push(workingRows.slice(i, i + maxRowsPerChunk));
         }}
 
         var chunkSummaries = [];
-        var usedModelName = preferredModel === "auto_fallback" ? "gemini-3.5-flash-lite" : preferredModel;
+        var usedModelName = preferredModel === "auto_fallback" ? "gemini-3.5-pro-exp" : preferredModel;
         var warningMsg = "";
 
         for (var cIdx = 0; cIdx < chunks.length; cIdx++) {{
             var ch = chunks[cIdx];
             var linesStr = ch.map(function(r, idx) {{
                 return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะ: " + r.status;
-            }}).join("\\n");
+            }}).join("\n");
 
             var prompt =
-                customPrompt + "\\n\\n" +
-                "โปรดปรับแก้ข้อความแต่ละรายการต่อไปนี้ให้อยู่ในโครงสร้างวิศวกรรม [สาเหตุ] -> [การดำเนินการ] -> [ผลลัพธ์] ใน 1-2 ประโยค\\n" +
-                "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"...(สาเหตุ) จึงดำเนินการ...(การดำเนินการ) ปัจจุบัน...(ผลลัพธ์)\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
+                customPrompt + "\n\n" +
+                "โปรดวิเคราะห์และปรับแก้ข้อความแต่ละรายการต่อไปนี้ให้เป็นประโยคอธิบายยาวแบบวิศวกรรมที่มีความเป็นมืออาชีพ ถูกหลักภาษา แก้คำผิด " +
+                "โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้ร้อยเรียงตามโครงสร้าง:\n" +
+                "\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"\n" +
+                "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"}}],\"chunk_summary\":\"...\"}}\n\n" +
                 linesStr;
             try {{
-                var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, apiKey);
+                var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, userTypedKey);
                 usedModelName = aiRes.used_model;
-                var mJson = aiRes.text.match(/\\{{[\\s\\S]*\\}}/);
+                var mJson = aiRes.text.match(/\{{[\s\S]*\}}/);
                 if (mJson) {{
                     var parsed = JSON.parse(mJson[0]);
                     (parsed.rows || []).forEach(function(item) {{
@@ -6832,9 +7268,10 @@ def generate_map():
         if (chunkSummaries.length > 0 && !warningMsg) {{
             try {{
                 var synthPrompt =
-                    "โปรดเขียนรายงานสรุปผู้บริหาร (Executive Inspection Report) แยกตามหมวดหมู่ชัดเจน สวยงาม อ่านง่าย จากข้อมูลสรุปย่อยต่อไปนี้:\\n- " +
-                    chunkSummaries.join("\\n- ");
-                var synthRes = await callDirectGeminiRestFromBrowser(synthPrompt, preferredModel, apiKey);
+                    "โปรดเขียนรายงานสรุปเชิงวิศวกรรมสำหรับผู้บริหาร (Engineering Executive Report) ที่มีความเป็นมืออาชีพ ถูกหลักภาษา " +
+                    "โดยร้อยเรียงเรื่องราวให้ครบถ้วนทั้ง สาเหตุ การดำเนินการ และผลลัพธ์ จากข้อมูลสรุปย่อยต่อไปนี้:\n- " +
+                    chunkSummaries.join("\n- ");
+                var synthRes = await callDirectGeminiRestFromBrowser(synthPrompt, preferredModel, userTypedKey);
                 if (synthRes.text) finalSummaryMd = synthRes.text;
                 usedModelName = synthRes.used_model;
             }} catch (e) {{}}
@@ -6875,7 +7312,7 @@ def generate_map():
         }}
         if (previewBox && previewContent) {{
             previewBox.classList.add("show");
-            previewContent.textContent = "กำลังแบ่ง Chunk อัตโนมัติและประมวลผลสรุปรายงานผ่าน Google Gemini API...";
+            previewContent.textContent = "กำลังวิเคราะห์เนื้อหาและเรียบเรียงรายงานแบบวิศวกรรมผ่าน Google Gemini API...";
         }}
 
         try {{
@@ -6894,10 +7331,10 @@ def generate_map():
                 }}
             }}
             if (previewTitle) {{
-                previewTitle.textContent = "✨ รายงานสรุปภาพรวมแยกหมวดหมู่ (โมเดล: " + (aiRes.used_model || "Auto") + " · " + (aiRes.chunk_count || 1) + " Chunks)";
+                previewTitle.textContent = "✨ รายงานสรุปเชิงวิศวกรรม (โมเดล: " + (aiRes.used_model || "gemini-3.5-pro-exp") + " · " + (aiRes.chunk_count || 1) + " Chunks)";
             }}
             if (previewContent) {{
-                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\\n\\n") : "";
+                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\n\n") : "";
                 previewContent.textContent = note + (aiRes.summary_markdown || "");
             }}
         }} catch (err) {{
@@ -6905,7 +7342,7 @@ def generate_map():
         }} finally {{
             if (previewBtn) {{
                 delete previewBtn.dataset.isGenerating;
-                previewBtn.textContent = "✨ พรีวิวผลสรุป AI";
+                previewBtn.textContent = "พรีวิวสรุป AI";
             }}
             updateGeminiUiAndButtonState();
         }}
@@ -6915,9 +7352,8 @@ def generate_map():
         var btn = document.getElementById('execReportBtn');
         var st = loadLocalGeminiSessionState();
         var selEl = document.getElementById('geminiModelSelect');
-        var selectedMode = selEl ? selEl.value : 'gemini-3.5-flash-lite'; // CHANGED: ใช้โมเดลหลักเป็นค่าเริ่มต้น
+        var selectedMode = selEl ? selEl.value : 'gemini-3.5-pro-exp';
 
-        // ตรวจสอบว่าโมเดลที่เลือกติด Rate Limit / RPD หรือไม่
         if (selectedMode !== 'auto_fallback') {{
             var blkInfo = evaluateModelBlockInfo(selectedMode, st, Date.now());
             if (blkInfo.isBlocked) {{
@@ -6928,13 +7364,13 @@ def generate_map():
 
         btn.dataset.isGenerating = "1";
         btn.disabled = true;
-        btn.innerHTML = '⏳ กำลังสรุปด้วย Gemini AI และสร้างไฟล์ A4...';
+        btn.innerHTML = '⏳ กำลังสรุปรายงานวิศวกรรมด้วย Gemini AI และสร้างไฟล์ A4...';
 
         var params = getCurrentFilterParams();
         var startInput = params.startInput;
         var endInput = params.endInput;
         var selectedWorkers = params.selectedWorkers;
-        var includeWorkerCol = params.includeWorkerCol; // Normally false (ไม่มีคอลัมน์ผู้ปฏิบัติงาน)
+        var includeWorkerCol = params.includeWorkerCol;
 
         var dateValidationMessage = validateReportDateRange(startInput, endInput);
         if (dateValidationMessage) {{
@@ -6972,7 +7408,7 @@ def generate_map():
                 if (previewBox && previewContent && aiSummaryData) {{
                     previewBox.classList.add("show");
                     if (previewTitle) {{
-                        previewTitle.textContent = "✨ รายงานสรุปภาพรวมแยกหมวดหมู่ (โมเดล: " + (aiSummaryData.used_model || "Auto") + " · " + (aiSummaryData.chunk_count || 1) + " Chunks)";
+                        previewTitle.textContent = "✨ รายงานสรุปเชิงวิศวกรรม (โมเดล: " + (aiSummaryData.used_model || "gemini-3.5-pro-exp") + " · " + (aiSummaryData.chunk_count || 1) + " Chunks)";
                     }}
                     previewContent.textContent = aiSummaryData.summary_markdown || "";
                 }}
@@ -6985,12 +7421,10 @@ def generate_map():
 
         var workbook = new ExcelJS.Workbook();
 
-        // =========================================================================
-        // Sheet ที่ 1: ตารางรายการตรวจสอบและแก้ไขอุปกรณ์ (พร้อมรายละเอียดที่เกลาและจัดหมวดหมู่ใหม่)
-        // =========================================================================
+        // Sheet ที่ 1: ตารางรายการตรวจสอบและแก้ไขอุปกรณ์ (เรียบเรียงแบบวิศวกรรม)
         var ws = workbook.addWorksheet('Report', {{
             pageSetup: {{
-                paperSize: 9, // A4 Standard
+                paperSize: 9,
                 orientation: 'landscape',
                 fitToPage: true,
                 fitToWidth: 1,
@@ -7004,14 +7438,14 @@ def generate_map():
         var lastColLetter = includeWorkerCol ? 'H' : 'G';
         ws.mergeCells('A1:' + lastColLetter + '1');
         var titleCell = ws.getCell('A1');
-        titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine (เรียบเรียงด้วย Gemini AI)";
+        titleCell.value = "รายละเอียดการตรวจสอบ/แก้ไขอุปกรณ์ FDCU OFFLine (รายงานเชิงวิศวกรรมด้วย Gemini AI)";
         titleCell.font = {{ name: 'TH SarabunPSK', size: 20, bold: true }};
         titleCell.alignment = {{ vertical: 'middle', horizontal: 'center' }};
         ws.getRow(1).height = 30;
 
         var headers = includeWorkerCol
-            ? ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
-            : ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(จัดหมวดหมู่โดย AI)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
+            ? ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
+            : ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
 
         var headerRow = ws.addRow(headers);
         headerRow.height = 36;
@@ -7027,9 +7461,11 @@ def generate_map():
 
         filteredData.forEach(function(row, i) {{
             var rKey = getRowSentenceKey(row);
-        var cleanDetailText = (customRowSentences[rKey] !== undefined) ? customRowSentences[rKey] : (row.ai_detail || row.detail || '-');
+            var cleanDetailText = (customRowSentences[rKey] !== undefined)
+                ? customRowSentences[rKey]
+                : (row.ai_detail || categorizeRowDetailJS(row.detail, row.resp, row.status) || '-');
             var rowValues = includeWorkerCol
-                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\\n') || '-', row.status ]
+                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\n') || '-', row.status ]
                 : [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, row.status ];
 
             var dataRow = ws.addRow(rowValues);
@@ -7060,7 +7496,7 @@ def generate_map():
             ws.getColumn(2).width = 18;
             ws.getColumn(3).width = 18;
             ws.getColumn(4).width = 25;
-            ws.getColumn(5).width = 56;
+            ws.getColumn(5).width = 58;
             ws.getColumn(6).width = 28;
             ws.getColumn(7).width = 30;
             ws.getColumn(8).width = 20;
@@ -7069,17 +7505,15 @@ def generate_map():
             ws.getColumn(2).width = 20;
             ws.getColumn(3).width = 20;
             ws.getColumn(4).width = 28;
-            ws.getColumn(5).width = 65;
+            ws.getColumn(5).width = 68;
             ws.getColumn(6).width = 32;
             ws.getColumn(7).width = 22;
         }}
 
-        // =========================================================================
-        // Sheet ที่ 2: รายงานสรุปภาพรวมแยกหมวดหมู่โดย Google Gemini API (ขนาด A4)
-        // =========================================================================
+        // Sheet ที่ 2: รายงานสรุปภาพรวมเชิงวิศวกรรมโดย Google Gemini API (ขนาด A4)
         var wsAi = workbook.addWorksheet('สรุปภาพรวม AI (A4)', {{
             pageSetup: {{
-                paperSize: 9, // A4 Standard
+                paperSize: 9,
                 orientation: 'landscape',
                 fitToPage: true,
                 fitToWidth: 1,
@@ -7091,7 +7525,7 @@ def generate_map():
 
         wsAi.mergeCells('A1:D1');
         var aiTitle = wsAi.getCell('A1');
-        aiTitle.value = "รายงานสรุปผลการตรวจเช็คและแก้ไขอุปกรณ์ SCADA แยกตามหมวดหมู่ (Gemini AI Summary)";
+        aiTitle.value = "รายงานสรุปเชิงวิศวกรรมผลการตรวจเช็คและแก้ไขอุปกรณ์ SCADA (Gemini AI Engineering Report)";
         aiTitle.font = {{ name: 'TH SarabunPSK', size: 20, bold: true, color: {{ argb: 'FF1A73E8' }} }};
         aiTitle.alignment = {{ vertical: 'middle', horizontal: 'center' }};
         wsAi.getRow(1).height = 32;
@@ -7105,7 +7539,7 @@ def generate_map():
         aiMeta.alignment = {{ vertical: 'middle', horizontal: 'center' }};
         wsAi.getRow(2).height = 24;
 
-        var catHeaderRow = wsAi.addRow(['ลำดับหมวด', 'หมวดหมู่การวิเคราะห์ (Category)', 'รายละเอียดและสถิติที่ตรวจพบ', 'หมายเหตุ / การติดตามผล']);
+        var catHeaderRow = wsAi.addRow(['ลำดับหมวด', 'หมวดหมู่การวิเคราะห์เชิงวิศวกรรม (Category)', 'รายละเอียดและสถิติที่ตรวจพบ', 'หมายเหตุ / การติดตามผล']);
         catHeaderRow.height = 30;
         catHeaderRow.eachCell(function(c) {{
             c.font = {{ name: 'TH SarabunPSK', size: 16, bold: true }};
@@ -7116,7 +7550,7 @@ def generate_map():
 
         var cats = (aiSummaryData && aiSummaryData.categories) ? aiSummaryData.categories : [];
         cats.forEach(function(catObj, cIdx) {{
-            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\\n");
+            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\n");
             var rRow = wsAi.addRow([
                 cIdx + 1,
                 catObj.category || "-",
@@ -7131,7 +7565,7 @@ def generate_map():
         }});
 
         wsAi.addRow([]);
-        var synthTitleRow = wsAi.addRow(['บทสรุปผู้บริหารและข้อเสนอแนะจาก Gemini API (Executive Narrative Summary)', '', '', '']);
+        var synthTitleRow = wsAi.addRow(['บทสรุปเชิงวิศวกรรมสำหรับผู้บริหาร (Engineering Narrative Summary: สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', '', '', '']);
         var synthRowNum = synthTitleRow.number;
         wsAi.mergeCells('A' + synthRowNum + ':D' + synthRowNum);
         var stCell = wsAi.getCell('A' + synthRowNum);
@@ -7149,7 +7583,7 @@ def generate_map():
         sbCell.font = {{ name: 'TH SarabunPSK', size: 16 }};
         sbCell.alignment = {{ vertical: 'top', horizontal: 'left', wrapText: true }};
         sbCell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
-        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\\n').length * 20));
+        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\n').length * 22));
 
         wsAi.getColumn(1).width = 12;
         wsAi.getColumn(2).width = 36;
@@ -8751,6 +9185,19 @@ def background_task():
         with open(tmp_html, 'w', encoding='utf-8') as f:
             f.write(new_html)
         os.replace(tmp_html, CACHE_HTML_FILE)
+        if not IS_RENDER_SERVER or os.environ.get('SCADA_WRITE_STATIC_HTML') == '1':
+            try:
+                with open(OUTPUT_FILE, 'w', encoding='utf-8') as f_static:
+                    f_static.write(new_html)
+                dash_html = new_html.replace(
+                    'var dashDemoMode = false;',
+                    'window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;',
+                    1
+                )
+                with open(DASHBOARD_OUTPUT_FILE, 'w', encoding='utf-8') as f_dash:
+                    f_dash.write(dash_html)
+            except Exception:
+                pass
         new_version = int(time.time())
         tmp_meta = CACHE_META_FILE + '.tmp'
         with open(tmp_meta, 'w', encoding='utf-8') as f:
@@ -8827,7 +9274,7 @@ def api_gemini_simulate_limit():
     """Endpoint สำหรับจำลองหรือรีเซ็ตสถานะ Rate Limit (429) / RPD เพื่อทดสอบระบบปุ่ม Disabled และ Hover Tooltip"""
     payload = request.get_json(silent=True) or {}
     action = payload.get("action", "reset")
-    target_model = payload.get("model", "gemini-3.5-flash-lite")
+    target_model = payload.get("model", "gemini-3.5-pro-exp")
     if action == "reset":
         reset_model_limit_state(target_model if target_model != "all" else None)
     elif action == "rate_limit_429":
@@ -8842,7 +9289,7 @@ def api_gemini_summarize():
     """Endpoint หลังบ้านสำหรับรับข้อมูลรายงานมาทำ Auto Chunking + สรุปด้วย Gemini API + Auto Fallback"""
     payload = request.get_json(silent=True) or {}
     rows = payload.get("rows") or []
-    preferred_model = payload.get("model") or "auto_fallback"
+    preferred_model = payload.get("model") or "gemini-3.5-pro-exp"
     custom_api_key = str(payload.get("api_key") or "").strip() or DEFAULT_GEMINI_API_KEY
 
     if not rows:
@@ -8877,7 +9324,7 @@ def api_export_report():
     """
     payload = request.get_json(silent=True) or {}
     rows = payload.get("rows") or []
-    preferred_model = payload.get("model") or "gemini-3.5-flash-lite"
+    preferred_model = payload.get("model") or "gemini-3.5-pro-exp"
     use_ai = bool(payload.get("use_ai", True))
     include_worker_col = bool(payload.get("include_worker_col", False))
     response_format = payload.get("format", "xlsx")
@@ -9266,5 +9713,13 @@ def index():
 trigger_update_if_needed()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    if '--static' in sys.argv or '--generate-only' in sys.argv:
+        html_out = generate_map()
+        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f_out:
+            f_out.write(html_out)
+        with open(DASHBOARD_OUTPUT_FILE, 'w', encoding='utf-8') as f_dash:
+            f_dash.write(html_out.replace('var dashDemoMode = false;', 'window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;', 1))
+        print(f'สร้างไฟล์แผนที่ ({OUTPUT_FILE}) และแดชบอร์ด ({DASHBOARD_OUTPUT_FILE}) สำเร็จ!')
+    else:
+        port = int(os.environ.get('PORT', 10000))
+        app.run(host='0.0.0.0', port=port)
