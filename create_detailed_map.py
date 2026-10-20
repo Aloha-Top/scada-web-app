@@ -3163,42 +3163,100 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         .dash-ctrl-group {{
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            background: var(--bg-subtle);
-            border: 1px solid var(--border-hairline);
-            border-radius: 8px;
-            padding: 5px 10px;
+            gap: 7px;
+            background: #ffffff;
+            border: 1.5px solid #94a3b8;
+            border-radius: 9px;
+            padding: 6px 12px;
             max-width: 100%;
             min-width: 0;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            transition: all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }}
+        body.theme-dark .dash-ctrl-group {{
+            background: #2b3038;
+            border-color: #4b5563;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }}
+        .dash-ctrl-group:hover,
+        .dash-ctrl-group:focus-within {{
+            border-color: #2563eb;
+            background: #f8fafc;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.14);
+        }}
+        body.theme-dark .dash-ctrl-group:hover,
+        body.theme-dark .dash-ctrl-group:focus-within {{
+            border-color: #60a5fa;
+            background: #323842;
+            box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
+        }}
+        /* สถานะสีเน้น (Highlight) เมื่อตัวกรองกำลังถูกเลือกใช้งาน */
+        .dash-ctrl-group.is-filter-active {{
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
+            border-color: #1d4ed8 !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 2px 6px rgba(29, 78, 216, 0.15) !important;
+        }}
+        body.theme-dark .dash-ctrl-group.is-filter-active {{
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.34) 0%, rgba(29, 78, 216, 0.48) 100%) !important;
+            border-color: #60a5fa !important;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.24), 0 2px 8px rgba(0, 0, 0, 0.35) !important;
         }}
         .dash-ctrl-group label {{
             font-size: 12px;
-            color: var(--text-secondary);
-            font-weight: 500;
+            color: #334155;
+            font-weight: 600;
             white-space: nowrap;
             flex-shrink: 0;
+            letter-spacing: 0.1px;
+        }}
+        body.theme-dark .dash-ctrl-group label {{
+            color: #cbd5e1;
+        }}
+        .dash-ctrl-group.is-filter-active label {{
+            color: #1e40af !important;
+            font-weight: 700 !important;
+        }}
+        body.theme-dark .dash-ctrl-group.is-filter-active label {{
+            color: #bfdbfe !important;
         }}
         .dash-select {{
             background: transparent;
             border: none;
-            color: var(--text-primary);
-            font-size: 12px;
-            font-weight: 600;
+            color: #0f172a;
+            font-size: 12.5px;
+            font-weight: 700;
             cursor: pointer;
             min-width: 0;
             max-width: 100%;
             text-overflow: ellipsis;
+            padding-right: 4px;
+        }}
+        body.theme-dark .dash-select {{
+            color: #f8fafc;
+        }}
+        .dash-ctrl-group.is-filter-active .dash-select,
+        .dash-ctrl-group.is-filter-active .hier-brand-trigger {{
+            color: #1d4ed8 !important;
+            font-weight: 700 !important;
+        }}
+        body.theme-dark .dash-ctrl-group.is-filter-active .dash-select,
+        body.theme-dark .dash-ctrl-group.is-filter-active .hier-brand-trigger {{
+            color: #ffffff !important;
         }}
         .dash-select option {{
             background: var(--bg-surface);
             color: var(--text-primary);
+            font-weight: 500;
         }}
         .dash-static-label {{
-            color: var(--text-primary);
-            font-size: 12px;
-            font-weight: 600;
+            color: #0f172a;
+            font-size: 12.5px;
+            font-weight: 700;
             padding: 1px 2px;
             white-space: nowrap;
+        }}
+        body.theme-dark .dash-static-label {{
+            color: #f8fafc;
         }}
         /* Hierarchical Brand Filter Popover */
         .hier-brand-filter {{
@@ -3209,15 +3267,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         .hier-brand-trigger {{
             background: transparent;
             border: none;
-            color: var(--text-primary);
-            font-size: 12px;
-            font-weight: 600;
+            color: #0f172a;
+            font-size: 12.5px;
+            font-weight: 700;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
             padding: 0 2px;
             white-space: nowrap;
+        }}
+        body.theme-dark .hier-brand-trigger {{
+            color: #f8fafc;
         }}
         .hier-brand-trigger:hover {{
             color: var(--accent-primary);
@@ -3419,28 +3480,94 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             border-color: var(--accent-primary);
         }}
         .dash-action-btn {{
-            border: 1px solid var(--border-hairline);
-            background: var(--bg-surface);
-            color: var(--text-primary);
-            border-radius: 8px;
-            padding: 6px 12px;
+            border: 1.5px solid #94a3b8;
+            background: #ffffff;
+            color: #1e293b;
+            border-radius: 9px;
+            padding: 6px 13px;
             font-size: 12px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            transition: background-color 0.15s, border-color 0.15s;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            transition: all 0.16s ease;
             white-space: nowrap;
         }}
-        .dash-action-btn:hover {{ background: var(--bg-hover); }}
+        body.theme-dark .dash-action-btn {{
+            background: #2b3038;
+            border-color: #4b5563;
+            color: #f1f5f9;
+        }}
+        .dash-action-btn:hover {{
+            background: #eff6ff;
+            border-color: #2563eb;
+            color: #1d4ed8;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.14);
+        }}
+        body.theme-dark .dash-action-btn:hover {{
+            background: #374151;
+            border-color: #60a5fa;
+            color: #93c5fd;
+        }}
+        .dash-action-btn.is-active {{
+            background: #dbeafe !important;
+            border-color: #1d4ed8 !important;
+            color: #1e40af !important;
+            font-weight: 700 !important;
+        }}
+        body.theme-dark .dash-action-btn.is-active {{
+            background: rgba(37, 99, 235, 0.35) !important;
+            border-color: #60a5fa !important;
+            color: #ffffff !important;
+        }}
+        /* ปุ่มล้างตัวกรอง (Clear Filter Button) สีสันและ Contrast ชัดเจน */
+        .dash-action-btn.btn-clear-filter {{
+            background: #fff1f2;
+            border: 1.5px solid #fb7185;
+            color: #be123c;
+            font-weight: 700;
+        }}
+        body.theme-dark .dash-action-btn.btn-clear-filter {{
+            background: rgba(225, 29, 72, 0.18);
+            border-color: #fb7185;
+            color: #fda4af;
+        }}
+        .dash-action-btn.btn-clear-filter:hover {{
+            background: #ffe4e6;
+            border-color: #e11d48;
+            color: #9f1239;
+            box-shadow: 0 2px 8px rgba(225, 29, 72, 0.22);
+        }}
+        body.theme-dark .dash-action-btn.btn-clear-filter:hover {{
+            background: rgba(225, 29, 72, 0.32);
+            border-color: #f43f5e;
+            color: #ffffff;
+        }}
+        /* เมื่อมีตัวกรองกำลังถูกใช้งาน ให้ปุ่มล้างตัวกรองสว่างเด่นชัดเป็นพิเศษ */
+        .dash-action-btn.btn-clear-filter.has-active-filters {{
+            background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+            border-color: #9f1239 !important;
+            color: #ffffff !important;
+            box-shadow: 0 2px 8px rgba(225, 29, 72, 0.35) !important;
+        }}
+        .dash-action-btn.btn-clear-filter.has-active-filters:hover {{
+            background: linear-gradient(135deg, #be123c 0%, #9f1239 100%) !important;
+            transform: translateY(-1px);
+        }}
         .dash-action-btn.btn-primary {{
             background: var(--accent-primary);
             border-color: var(--accent-primary);
             color: #ffffff;
             font-weight: 600;
         }}
-        .dash-action-btn.btn-primary:hover {{ background: var(--accent-hover); }}
+        .dash-action-btn.btn-primary:hover {{
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+            color: #ffffff;
+        }}
 
         /* Formula & Legend Banner */
         .dash-formula-banner {{
@@ -3664,37 +3791,120 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            background: var(--bg-active);
-            border-radius: 8px;
-            font-size: 12px;
-            color: var(--accent-primary);
+            gap: 8px;
+            padding: 10px 14px;
+            background: linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%);
+            border: 1.5px solid #60a5fa;
+            border-radius: 10px;
+            font-size: 12.5px;
+            color: #1e40af;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.1);
+        }}
+        body.theme-dark .explorer-active-filters {{
+            background: linear-gradient(90deg, rgba(30, 64, 175, 0.35) 0%, rgba(29, 78, 216, 0.25) 100%);
+            border-color: #60a5fa;
+            color: #bfdbfe;
         }}
         .filter-chip-badge {{
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            background: var(--bg-surface);
-            border: 1px solid rgba(26,115,232,0.3);
-            color: var(--text-primary);
-            padding: 2px 8px;
+            gap: 6px;
+            background: #1d4ed8;
+            border: 1px solid #1e40af;
+            color: #ffffff;
+            padding: 3px 10px;
             border-radius: 999px;
-            font-size: 11.5px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 1px 3px rgba(29, 78, 216, 0.25);
         }}
-        .filter-chip-badge button {{ border: none; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }}
+        body.theme-dark .filter-chip-badge {{
+            background: #2563eb;
+            border-color: #60a5fa;
+            color: #ffffff;
+        }}
+        .filter-chip-badge button {{
+            border: none;
+            background: rgba(255, 255, 255, 0.22);
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            transition: background-color 0.15s;
+        }}
+        .filter-chip-badge button:hover {{
+            background: #ef4444;
+            color: #ffffff;
+        }}
+        .filter-chip-clear-all {{
+            margin-left: auto;
+            border: 1px solid #fb7185;
+            background: #fff1f2;
+            color: #be123c;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 11.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .filter-chip-clear-all:hover {{
+            background: #e11d48;
+            border-color: #be123c;
+            color: #ffffff;
+        }}
+        body.theme-dark .filter-chip-clear-all {{
+            background: rgba(225, 29, 72, 0.25);
+            border-color: #fb7185;
+            color: #fecdd3;
+        }}
         .explorer-toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }}
         .explorer-search-input {{
             flex: 1 1 240px;
             min-width: 0;
-            background: var(--bg-subtle);
-            border: 1px solid var(--border-hairline);
-            border-radius: 8px;
+            background: #ffffff;
+            border: 1.5px solid #94a3b8;
+            border-radius: 9px;
             padding: 7px 12px;
-            color: var(--text-primary);
+            color: #0f172a;
             font-size: 12.5px;
+            font-weight: 500;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            transition: all 0.18s ease;
         }}
-        .explorer-search-input:focus {{ border-color: var(--accent-primary); background: var(--bg-surface); }}
+        body.theme-dark .explorer-search-input {{
+            background: #2b3038;
+            border-color: #4b5563;
+            color: #f8fafc;
+        }}
+        .explorer-search-input::placeholder {{
+            color: #64748b;
+            font-weight: 400;
+        }}
+        body.theme-dark .explorer-search-input::placeholder {{
+            color: #94a3b8;
+        }}
+        .explorer-search-input:focus,
+        .explorer-search-input.is-filter-active {{
+            border-color: #1d4ed8 !important;
+            background: #eff6ff !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+            font-weight: 600;
+        }}
+        body.theme-dark .explorer-search-input:focus,
+        body.theme-dark .explorer-search-input.is-filter-active {{
+            border-color: #60a5fa !important;
+            background: rgba(37, 99, 235, 0.28) !important;
+            color: #ffffff !important;
+        }}
 
         /* === RESPONSIVE MULTI-DEVICE BREAKPOINTS (Apple / Google Maps World-Class Layout: Phone, Tablet, Laptop, PC) === */
         /* 1. Laptop & Medium Desktop (1025px - 1366px) */
@@ -4774,7 +4984,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                             <label>สถานะอ้างอิง:</label>
                             <span id="dashStateBasis" class="dash-static-label">State SCADA</span>
                         </div>
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="topEqScopeGroup">
                             <label for="dashEqScope">กลุ่มอุปกรณ์:</label>
                             <select id="dashEqScope" class="dash-select" onchange="window.renderScadaDashboard()">
                                 <option value="all">ทั้งหมดในระบบ (1,571 ชุด)</option>
@@ -4782,9 +4992,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                 <option value="mapped">เฉพาะที่มีพิกัด GIS (1,495 ชุด)</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="topPeaFilterGroup">
                             <label for="dashPeaFilter">การไฟฟ้า:</label>
-                            <select id="dashPeaFilter" class="dash-select" onchange="window.renderScadaDashboard()">
+                            <select id="dashPeaFilter" class="dash-select" onchange="window.onTopPeaFilterChange(this.value)">
                                 <option value="all">ทุกการไฟฟ้า</option>
                             </select>
                         </div>
@@ -4798,6 +5008,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         </div>
                     </div>
                     <div class="dash-controls-bar">
+                        <button type="button" id="topResetFilterBtn" class="dash-action-btn btn-clear-filter" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมดให้กลับเป็นค่าเริ่มต้น">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6h18M6 12h12m-9 6h6"/></svg>
+                            <span class="btn-clear-filter-text">ล้างตัวกรอง</span>
+                        </button>
                         <button type="button" class="dash-action-btn btn-primary" onclick="window.openDashExportModal()">
                             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg>
                             Export ข้อมูล (.xlsx)
@@ -5084,8 +5298,11 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                             <span class="dash-card-hint" id="dashExplorerSubtitle">แสดงรายการอุปกรณ์ตามตัวกรองที่เลือก</span>
                         </div>
                         <div class="dash-controls-bar">
-                            <button type="button" class="dash-action-btn" onclick="window.showAllExplorerRows()">แสดงครบทุกแถว</button>
-                            <button type="button" class="dash-action-btn" onclick="window.resetDashExplorerFilters()">ล้างตัวกรอง</button>
+                            <button type="button" id="showAllExplorerRowsBtn" class="dash-action-btn" onclick="window.showAllExplorerRows()">แสดงครบทุกแถว</button>
+                            <button type="button" id="expResetFilterBtn" class="dash-action-btn btn-clear-filter" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมด (รวมถึงตัวกรองการไฟฟ้า และตัวกรองทุกส่วน)">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6h18M6 12h12m-9 6h6"/></svg>
+                                <span class="btn-clear-filter-text">ล้างตัวกรอง</span>
+                            </button>
                             <button type="button" class="dash-action-btn" onclick="document.getElementById('scadaDashboardView').scrollTo({{top: 0, behavior: 'smooth'}})">↑ บนสุด</button>
                         </div>
                     </div>
@@ -5094,7 +5311,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
                     <div class="explorer-toolbar">
                         <input type="search" id="dashExplorerSearch" class="explorer-search-input" placeholder="ค้นหา Site ID, รหัสสั่งการ, สถานที่, การไฟฟ้า, IP, DNP, ผลิตภัณฑ์, Commu., Item, WRL Master..." oninput="window.renderDashExplorerTable()">
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="expPeaFilterGroup">
+                            <label for="dashExplorerPea">การไฟฟ้า:</label>
+                            <select id="dashExplorerPea" class="dash-select" onchange="window.onExplorerPeaDropdownChange(this.value)">
+                                <option value="all">ทุกการไฟฟ้า</option>
+                            </select>
+                        </div>
+                        <div class="dash-ctrl-group" id="expStatusFilterGroup">
                             <label for="dashExplorerStatus">State SCADA:</label>
                             <select id="dashExplorerStatus" class="dash-select" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกสถานะ</option>
@@ -5106,7 +5329,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                 <option value="Telemetry Failure">Telemetry Failure</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="expEqFilterGroup">
                             <label for="dashExplorerEq">ชนิดอุปกรณ์:</label>
                             <select id="dashExplorerEq" class="dash-select" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกชนิดอุปกรณ์</option>
@@ -5123,13 +5346,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                 <option value="all">ทุกผลิตภัณฑ์</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="expCommFilterGroup">
                             <label for="dashExplorerComm">Commu./Item:</label>
                             <select id="dashExplorerComm" class="dash-select" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกประเภทสื่อสาร</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group">
+                        <div class="dash-ctrl-group" id="expWrlFilterGroup">
                             <label for="dashExplorerWrl">WRL Master:</label>
                             <select id="dashExplorerWrl" class="dash-select" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกแม่ข่าย</option>
@@ -8677,6 +8900,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         var dashExplorerLimit = 250;
 
         var explorerFilterState = {{
+            pea: 'all',
             status: 'all',
             eq: 'all',
             prod: 'all',
@@ -8958,6 +9182,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
         function populateDashboardDropdownsOnce() {{
             var peaSelect = document.getElementById('dashPeaFilter');
+            var expPeaSelect = document.getElementById('dashExplorerPea');
             if (!peaSelect || peaSelect.dataset.initialized === '1') return;
 
             var peaSet = new Set();
@@ -8965,14 +9190,44 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 var p = dashAllRecords[i]["การไฟฟ้า"];
                 if (p && p !== 'ไม่มีค่า') peaSet.add(p);
             }}
-            Array.from(peaSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).forEach(function(p) {{
+            var sortedPeas = Array.from(peaSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }});
+            sortedPeas.forEach(function(p) {{
                 var opt = document.createElement('option');
                 opt.value = p;
                 opt.textContent = p;
                 peaSelect.appendChild(opt);
+                if (expPeaSelect) {{
+                    var opt2 = document.createElement('option');
+                    opt2.value = p;
+                    opt2.textContent = p;
+                    expPeaSelect.appendChild(opt2);
+                }}
             }});
             peaSelect.dataset.initialized = '1';
+            if (expPeaSelect) expPeaSelect.dataset.initialized = '1';
         }}
+
+        window.onTopPeaFilterChange = function(val) {{
+            var v = val || 'all';
+            explorerFilterState.pea = v;
+            var topSel = document.getElementById('dashPeaFilter');
+            var expSel = document.getElementById('dashExplorerPea');
+            if (topSel && topSel.value !== v) topSel.value = v;
+            if (expSel && expSel.value !== v) expSel.value = v;
+            dashExplorerLimit = 250;
+            window.renderScadaDashboard();
+        }};
+
+        window.onExplorerPeaDropdownChange = function(val) {{
+            var v = val || 'all';
+            explorerFilterState.pea = v;
+            var topSel = document.getElementById('dashPeaFilter');
+            var expSel = document.getElementById('dashExplorerPea');
+            if (topSel && topSel.value !== v) topSel.value = v;
+            if (expSel && expSel.value !== v) expSel.value = v;
+            dashExplorerLimit = 250;
+            window.renderScadaDashboard();
+        }};
 
         function syncExplorerFilterDropdowns(rows) {{
             var eqSel = document.getElementById('dashExplorerEq');
@@ -9030,6 +9285,11 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             rebuildSelect(commSel, 'ทุกประเภทสื่อสาร', commSet, explorerFilterState.comm);
             rebuildSelect(wrlSel, 'ทุกแม่ข่าย', wrlSet, explorerFilterState.wrl);
             if (stSel) stSel.value = explorerFilterState.status || 'all';
+            var topPeaSel = document.getElementById('dashPeaFilter');
+            var expPeaSel = document.getElementById('dashExplorerPea');
+            var currentPeaVal = explorerFilterState.pea || (topPeaSel ? topPeaSel.value : 'all') || 'all';
+            if (topPeaSel && topPeaSel.value !== currentPeaVal) topPeaSel.value = currentPeaVal;
+            if (expPeaSel && expPeaSel.value !== currentPeaVal) expPeaSel.value = currentPeaVal;
             renderHierBrandFilterMenus(rows);
         }}
 
@@ -9279,8 +9539,14 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
         window.renderScadaDashboard = function() {{
             populateDashboardDropdownsOnce();
-            var eqScope = (document.getElementById('dashEqScope') || {{}}).value || 'all';
-            var peaFilter = (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
+            var eqScopeEl = document.getElementById('dashEqScope');
+            var peaFilterEl = document.getElementById('dashPeaFilter');
+            var expPeaFilterEl = document.getElementById('dashExplorerPea');
+            var eqScope = (eqScopeEl && eqScopeEl.value) ? eqScopeEl.value : 'all';
+            var peaFilter = (peaFilterEl && peaFilterEl.value) ? peaFilterEl.value : (explorerFilterState.pea || 'all');
+            explorerFilterState.pea = peaFilter;
+            if (peaFilterEl && peaFilterEl.value !== peaFilter) peaFilterEl.value = peaFilter;
+            if (expPeaFilterEl && expPeaFilterEl.value !== peaFilter) expPeaFilterEl.value = peaFilter;
 
             // [BUG FIX 1.1] แยกข้อมูลเป็น 2 ชุดอย่างชัดเจน:
             // 1) allSystemRows: ข้อมูลรวมของทั้งระบบ (ใช้คำนวณ overall_summary สำหรับแสดงบน Summary Cards ด้านบนสุดเสมอ ไม่ถูกกรองตามยี่ห้อ/รุ่น FRTU)
@@ -9744,11 +10010,12 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 var offSum = d['Telemetry Failure'] + d.Offline + d.Initializing + d.Connecting;
                 var pAva = d.total > 0 ? (d.Online / d.total) * 100 : 0;
                 cachedSummaryExports.pea.push([k, d.total, d.Online, offSum, d['Telemetry Failure'], d.Offline, d.Initializing, d.Connecting, pAva.toFixed(2) + '%']);
+                var isPeaSelected = (peaFilter === k);
                 var tr = document.createElement('tr');
-                tr.className = 'clickable-row';
+                tr.className = 'clickable-row' + (isPeaSelected ? ' is-active-filter' : '');
                 tr.onclick = function() {{
-                    var pSel = document.getElementById('dashPeaFilter');
-                    if (pSel) {{ pSel.value = (pSel.value === k ? 'all' : k); window.renderScadaDashboard(); }}
+                    var nextPea = (explorerFilterState.pea === k) ? 'all' : k;
+                    window.onTopPeaFilterChange(nextPea);
                 }};
                 tr.innerHTML =
                     '<td><strong>' + k + '</strong>' +
@@ -9804,12 +10071,20 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         }};
 
         window.onExplorerDropdownChange = function() {{
+            var peaSel = document.getElementById('dashExplorerPea');
+            var topPeaSel = document.getElementById('dashPeaFilter');
             var stSel = document.getElementById('dashExplorerStatus');
             var eqSel = document.getElementById('dashExplorerEq');
             var prodSel = document.getElementById('dashExplorerProd');
             var commSel = document.getElementById('dashExplorerComm');
             var wrlSel = document.getElementById('dashExplorerWrl');
 
+            if (peaSel) {{
+                explorerFilterState.pea = peaSel.value || 'all';
+                if (topPeaSel && topPeaSel.value !== explorerFilterState.pea) {{
+                    topPeaSel.value = explorerFilterState.pea;
+                }}
+            }}
             explorerFilterState.status = stSel ? stSel.value : 'all';
             explorerFilterState.eq = eqSel ? eqSel.value : 'all';
             explorerFilterState.prod = prodSel ? prodSel.value : 'all';
@@ -9820,17 +10095,40 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         }};
 
         window.clearSingleExplorerFilter = function(filterKey) {{
-            if (filterKey === 'resp') explorerFilterState.resp = '';
-            else if (filterKey === 'search') {{
+            if (filterKey === 'pea') {{
+                explorerFilterState.pea = 'all';
+                var topPea = document.getElementById('dashPeaFilter');
+                var expPea = document.getElementById('dashExplorerPea');
+                if (topPea) topPea.value = 'all';
+                if (expPea) expPea.value = 'all';
+            }} else if (filterKey === 'scope') {{
+                var scopeSel = document.getElementById('dashEqScope');
+                if (scopeSel) scopeSel.value = 'all';
+            }} else if (filterKey === 'resp') {{
+                explorerFilterState.resp = '';
+            }} else if (filterKey === 'search') {{
                 var s = document.getElementById('dashExplorerSearch');
                 if (s) s.value = '';
             }} else {{
                 explorerFilterState[filterKey] = 'all';
+                var domIdMap = {{
+                    status: 'dashExplorerStatus',
+                    eq: 'dashExplorerEq',
+                    prod: 'dashExplorerProd',
+                    comm: 'dashExplorerComm',
+                    wrl: 'dashExplorerWrl'
+                }};
+                if (domIdMap[filterKey]) {{
+                    var selEl = document.getElementById(domIdMap[filterKey]);
+                    if (selEl) selEl.value = 'all';
+                }}
             }}
             window.renderScadaDashboard();
         }};
 
+        // [BUG FIX] ฟังก์ชันปุ่มล้างตัวกรอง (Clear Filter): รีเซ็ตค่า Dropdown "การไฟฟ้า" และตัวกรองทุกตัวในหน้าเว็บกลับเป็นค่า Default อย่างสมบูรณ์
         window.resetDashExplorerFilters = function() {{
+            explorerFilterState.pea = 'all';
             explorerFilterState.status = 'all';
             explorerFilterState.eq = 'all';
             explorerFilterState.prod = 'all';
@@ -9838,20 +10136,128 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             explorerFilterState.wrl = 'all';
             explorerFilterState.resp = '';
             dashExplorerLimit = 250;
+
+            // รีเซ็ตค่า Dropdown ทุกตัวในหน้า Dashboard และตาราง Explorer
+            var selectDefaults = {{
+                'dashPeaFilter': 'all',
+                'dashExplorerPea': 'all',
+                'dashEqScope': 'all',
+                'dashExplorerStatus': 'all',
+                'dashExplorerEq': 'all',
+                'dashExplorerProd': 'all',
+                'dashExplorerComm': 'all',
+                'dashExplorerWrl': 'all'
+            }};
+            Object.keys(selectDefaults).forEach(function(id) {{
+                var el = document.getElementById(id);
+                if (el) el.value = selectDefaults[id];
+            }});
+
+            // ล้างช่องค้นหาหลักและช่องค้นหาในเมนูยี่ห้อผลิตภัณฑ์
             var s = document.getElementById('dashExplorerSearch');
             if (s) s.value = '';
+            brandSearchQueryByMode = {{ top: '', exp: '' }};
+
+            // ปิดเมนู Popover ยี่ห้อผลิตภัณฑ์และรีเซ็ตข้อความปุ่มกลับเป็นค่าเริ่มต้น
+            var topMenu = document.getElementById('topHierBrandMenu');
+            var expMenu = document.getElementById('expHierBrandMenu');
+            if (topMenu) topMenu.classList.remove('show');
+            if (expMenu) expMenu.classList.remove('show');
+            var topLbl = document.getElementById('topHierBrandLabel');
+            var expLbl = document.getElementById('expHierBrandLabel');
+            if (topLbl) topLbl.textContent = 'ทุกยี่ห้อ (ทั้งหมด)';
+            if (expLbl) expLbl.textContent = 'ทุกผลิตภัณฑ์';
+
+            // รีเซ็ตสถานะการกางตารางย่อย (Collapse/Expand)
+            expandedBrandGroupsInMenu = Object.create(null);
+            expandedBrandGroupsInTable = Object.create(null);
+            expandedCommGroupsInTable = Object.create(null);
+
             window.renderScadaDashboard();
         }};
 
         window.showAllExplorerRows = function() {{
-            dashExplorerLimit = 99999;
+            dashExplorerLimit = (dashExplorerLimit > 250) ? 250 : 99999;
             window.renderDashExplorerTable();
         }};
 
+        function syncFilterControlHighlights(activeChipCount, q) {{
+            function toggleCtrlGroupActive(selectOrGroupId, isActive) {{
+                var el = document.getElementById(selectOrGroupId);
+                if (!el) return;
+                var grp = el.classList.contains('dash-ctrl-group') ? el : el.closest('.dash-ctrl-group');
+                if (grp) grp.classList.toggle('is-filter-active', Boolean(isActive));
+            }}
+
+            var eqScopeVal = (document.getElementById('dashEqScope') || {{}}).value || 'all';
+            var peaVal = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
+
+            toggleCtrlGroupActive('dashEqScope', eqScopeVal !== 'all');
+            toggleCtrlGroupActive('dashPeaFilter', peaVal !== 'all');
+            toggleCtrlGroupActive('dashExplorerPea', peaVal !== 'all');
+            toggleCtrlGroupActive('topHierBrandFilterWrap', explorerFilterState.prod && explorerFilterState.prod !== 'all');
+            toggleCtrlGroupActive('expHierBrandFilterWrap', explorerFilterState.prod && explorerFilterState.prod !== 'all');
+            toggleCtrlGroupActive('dashExplorerStatus', explorerFilterState.status && explorerFilterState.status !== 'all');
+            toggleCtrlGroupActive('dashExplorerEq', explorerFilterState.eq && explorerFilterState.eq !== 'all');
+            toggleCtrlGroupActive('dashExplorerComm', explorerFilterState.comm && explorerFilterState.comm !== 'all');
+            toggleCtrlGroupActive('dashExplorerWrl', explorerFilterState.wrl && explorerFilterState.wrl !== 'all');
+
+            var searchInp = document.getElementById('dashExplorerSearch');
+            if (searchInp) {{
+                searchInp.classList.toggle('is-filter-active', Boolean(q));
+            }}
+
+            // ไฮไลท์การ์ด KPI ด้านบนเมื่อคลิกกรองตามสถานะ
+            var kpiMap = {{
+                'Online': 'kpiCardOnline',
+                'Connecting': 'kpiCardConnecting',
+                'Offline': 'kpiCardOffline',
+                'Initializing': 'kpiCardInitializing',
+                'Telemetry Failure': 'kpiCardTelemetry'
+            }};
+            Object.keys(kpiMap).forEach(function(stKey) {{
+                var cardEl = document.getElementById(kpiMap[stKey]);
+                if (cardEl) {{
+                    cardEl.classList.toggle('is-selected', explorerFilterState.status === stKey);
+                }}
+            }});
+
+            // อัปเดตสถานะปุ่ม "ล้างตัวกรอง" ทั้งด้านบนและในหัวข้อที่ 6 ให้เด่นชัดเมื่อมีตัวกรองทำงานอยู่
+            var hasActive = activeChipCount > 0;
+            ['topResetFilterBtn', 'expResetFilterBtn'].forEach(function(btnId) {{
+                var btn = document.getElementById(btnId);
+                if (!btn) return;
+                btn.classList.toggle('has-active-filters', hasActive);
+                var txtSpan = btn.querySelector('.btn-clear-filter-text');
+                if (txtSpan) {{
+                    txtSpan.textContent = hasActive ? ('ล้างตัวกรอง (' + activeChipCount + ')') : 'ล้างตัวกรอง';
+                }}
+            }});
+
+            // อัปเดตสถานะปุ่ม "แสดงครบทุกแถว"
+            var showAllBtn = document.getElementById('showAllExplorerRowsBtn');
+            if (showAllBtn) {{
+                var isShowingAll = dashExplorerLimit > 250;
+                showAllBtn.classList.toggle('is-active', isShowingAll);
+                showAllBtn.textContent = isShowingAll ? 'แสดง 250 แถวแรก' : 'แสดงครบทุกแถว';
+            }}
+        }}
+
         function renderActiveFilterChips(q) {{
             var bar = document.getElementById('dashActiveFilterBar');
-            if (!bar) return;
             var chips = [];
+
+            var eqScopeEl = document.getElementById('dashEqScope');
+            var eqScopeVal = (eqScopeEl && eqScopeEl.value) ? eqScopeEl.value : 'all';
+            if (eqScopeVal !== 'all') {{
+                var scopeText = eqScopeEl.options[eqScopeEl.selectedIndex] ? eqScopeEl.options[eqScopeEl.selectedIndex].text : eqScopeVal;
+                chips.push({{ key: 'scope', label: 'กลุ่มอุปกรณ์: ' + scopeText }});
+            }}
+
+            var peaVal = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
+            if (peaVal && peaVal !== 'all') {{
+                chips.push({{ key: 'pea', label: 'การไฟฟ้า: ' + peaVal }});
+            }}
 
             if (explorerFilterState.eq && explorerFilterState.eq !== 'all') {{
                 chips.push({{ key: 'eq', label: 'ชนิดอุปกรณ์: ' + explorerFilterState.eq }});
@@ -9882,6 +10288,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 chips.push({{ key: 'search', label: 'ค้นหา: "' + q + '"' }});
             }}
 
+            syncFilterControlHighlights(chips.length, q);
+
+            if (!bar) return;
             if (chips.length === 0) {{
                 bar.style.display = 'none';
                 bar.innerHTML = '';
@@ -9889,11 +10298,12 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }}
 
             bar.style.display = 'flex';
-            var html = '<strong>ตัวกรอง:</strong>';
+            var html = '<strong>ตัวกรองที่เลือก (' + chips.length + '):</strong>';
             chips.forEach(function(c) {{
                 html += '<span class="filter-chip-badge">' + c.label +
-                        '<button type="button" data-k="' + c.key + '" onclick="window.clearSingleExplorerFilter(this.getAttribute(&quot;data-k&quot;))" title="ลบตัวกรอง">×</button></span>';
+                        '<button type="button" data-k="' + c.key + '" onclick="window.clearSingleExplorerFilter(this.getAttribute(&quot;data-k&quot;))" title="ลบตัวกรองนี้">×</button></span>';
             }});
+            html += '<button type="button" class="filter-chip-clear-all" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมด">ล้างทั้งหมด ×</button>';
             bar.innerHTML = html;
         }}
 
@@ -9908,7 +10318,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
             renderActiveFilterChips(q);
 
+            var peaFilter = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
             var matched = cachedDashboardRows.filter(function(r) {{
+                if (peaFilter !== 'all' && r.pea !== peaFilter) return false;
                 if (stFilter === 'ALL_OFFLINE' && r.parent_state === 'Online') return false;
                 else if (stFilter !== 'all' && stFilter !== 'ALL_OFFLINE' && r.parent_state !== stFilter) return false;
 
