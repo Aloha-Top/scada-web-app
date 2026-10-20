@@ -215,14 +215,109 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 class _FallbackFlask:
+    """เซิร์ฟเวอร์สำรองมาตรฐาน (Built-in HTTP Server) กรณีเครื่อง Local ยังไม่ได้ติดตั้งไลบรารี Flask"""
     def __init__(self, name):
         self.name = name
-    def route(self, *args, **kwargs):
+        self._routes = {}
+
+    def route(self, path, **kwargs):
         def decorator(fn):
+            self._routes[path] = fn
             return fn
         return decorator
-    def run(self, *args, **kwargs):
-        pass
+
+    def run(self, host='0.0.0.0', port=10000, **kwargs):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from urllib.parse import urlparse, parse_qs
+        print(f"[WARNING] ไม่พบไลบรารี Flask ในระบบ กำลังรันด้วย Built-in HTTP Server สำรองที่พอร์ต {port}...")
+        print("[TIP] แนะนำให้รันคำสั่ง: pip install -r requirements.txt เพื่อใช้งานโหมด Flask เต็มรูปแบบ")
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self_req):
+                parsed = urlparse(self_req.path)
+                path = parsed.path
+                qs = parse_qs(parsed.query)
+                if path == '/healthz':
+                    body = json.dumps({"status": "ok", "time": time.time()}).encode('utf-8')
+                    self_req.send_response(200)
+                    self_req.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self_req.end_headers()
+                    self_req.wfile.write(body)
+                elif path == '/api/version':
+                    trigger_update_if_needed()
+                    meta = get_meta()
+                    body = json.dumps({"version": meta['version']}).encode('utf-8')
+                    self_req.send_response(200)
+                    self_req.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self_req.end_headers()
+                    self_req.wfile.write(body)
+                elif path == '/api/gemini/status':
+                    body = json.dumps(sync_and_get_session_state(), ensure_ascii=False).encode('utf-8')
+                    self_req.send_response(200)
+                    self_req.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self_req.end_headers()
+                    self_req.wfile.write(body)
+                elif path in ('/', '/dashboard', '/ai-report', '/map-data'):
+                    if not os.path.exists(CACHE_HTML_FILE):
+                        background_task()
+                    try:
+                        with open(CACHE_HTML_FILE, 'r', encoding='utf-8') as f_in:
+                            html_txt = f_in.read()
+                        if path == '/dashboard' or qs.get('view', [''])[0] == 'dashboard':
+                            html_txt = html_txt.replace(
+                                'var dashDemoMode = false;',
+                                'window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;',
+                                1
+                            )
+                        if path == '/ai-report' or qs.get('ai', [''])[0] == '1':
+                            html_txt = html_txt.replace(
+                                'var dashDemoMode = false;',
+                                'window.DEFAULT_OPEN_AI_MODAL = true;\nvar dashDemoMode = false;',
+                                1
+                            )
+                        body = html_txt.encode('utf-8')
+                        self_req.send_response(200)
+                        self_req.send_header('Content-Type', 'text/html; charset=utf-8')
+                        self_req.end_headers()
+                        self_req.wfile.write(body)
+                    except Exception as err:
+                        self_req.send_response(503)
+                        self_req.end_headers()
+                        self_req.wfile.write(str(err).encode('utf-8'))
+                else:
+                    self_req.send_response(404)
+                    self_req.end_headers()
+
+            def do_POST(self_req):
+                parsed = urlparse(self_req.path)
+                length = int(self_req.headers.get('Content-Length', 0))
+                raw_body = self_req.rfile.read(length) if length > 0 else b'{}'
+                try:
+                    payload = json.loads(raw_body.decode('utf-8', errors='replace'))
+                except Exception:
+                    payload = {}
+                if parsed.path == '/api/gemini/summarize':
+                    try:
+                        res = summarize_inspection_report_with_gemini(
+                            rows=payload.get("rows") or [],
+                            preferred_model=payload.get("model") or "gemini-3.5-pro-exp",
+                            api_key=str(payload.get("api_key") or "").strip() or DEFAULT_GEMINI_API_KEY,
+                            custom_prompt=payload.get("custom_prompt"),
+                        )
+                        body = json.dumps(res, ensure_ascii=False).encode('utf-8')
+                        self_req.send_response(200)
+                    except Exception as exc:
+                        body = json.dumps({"success": False, "error": str(exc), "session_state": sync_and_get_session_state()}, ensure_ascii=False).encode('utf-8')
+                        self_req.send_response(429)
+                    self_req.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self_req.end_headers()
+                    self_req.wfile.write(body)
+                else:
+                    self_req.send_response(404)
+                    self_req.end_headers()
+
+        srv = ThreadingHTTPServer((host, port), _Handler)
+        srv.serve_forever()
 
 app = Flask(__name__) if Flask is not None else _FallbackFlask(__name__)
 status_hash_map = {}
@@ -4545,6 +4640,10 @@ def generate_map():
                     </div>
                 </div>
                 <div class="dash-controls-bar">
+                    <button type="button" class="dash-action-btn" onclick="window.openReportModal(true)" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
+                        สรุปรายงานตรวจสอบด้วย AI
+                    </button>
                     <button type="button" class="dash-action-btn btn-primary" onclick="window.exportDashboardExcel()">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg>
                         ส่งออก Excel ขนาด A4 (.xlsx)
@@ -5409,32 +5508,36 @@ def generate_map():
     var reportModal = document.getElementById('reportModalOverlay');
     var reportBtn = document.getElementById('standaloneReportBtn');
 
+    window.openReportModal = function(expandAi) {{
+        var fw = document.getElementById('customFilterWrapper'); if (fw) fw.classList.remove('show');
+        var alertEl = document.getElementById('customAlertOverlay'); if (alertEl) alertEl.classList.remove('show');
+        var srEl = document.getElementById('searchResults'); if (srEl) srEl.style.display = 'none';
+        var glEl = document.getElementById('gLayerPanel'); if (glEl) glEl.classList.remove('show');
+        closeReportWorkerDropdown();
+        hideCustomPanel();
+        var sd = document.getElementById('reportStartDate');
+        var ed = document.getElementById('reportEndDate');
+        if (sd) {{ sd.value = ''; sd.type = 'text'; }}
+        if (ed) {{ ed.value = ''; ed.type = 'text'; }}
+        var drawer = document.getElementById('advFilterDrawer');
+        var container = document.getElementById('advFilterContainer');
+        var expandBtn = document.getElementById('advExpandBtn');
+        if (drawer) drawer.classList.remove('show');
+        if (container) container.classList.remove('is-open');
+        if (expandBtn) expandBtn.setAttribute('aria-expanded', 'false');
+        var workerColSel = document.getElementById('advWorkerColToggle');
+        if (workerColSel) workerColSel.value = 'hide';
+        toggleGeminiAiPanel(expandAi !== false);
+        if (reportModal) reportModal.classList.add('show');
+        initializeReportWorkerFilter();
+        updateGeminiUiAndButtonState();
+        fetch('/api/gemini/status').then(function(r){{return r.json();}}).then(function(s){{syncBackendStatusToLocal(s);}}).catch(function(){{}});
+    }};
+
     if (reportBtn) {{
         reportBtn.addEventListener('click', function(e) {{
             e.preventDefault(); e.stopPropagation();
-            var fw = document.getElementById('customFilterWrapper'); if (fw) fw.classList.remove('show');
-            document.getElementById('customAlertOverlay').classList.remove('show');
-            document.getElementById('searchResults').style.display = 'none';
-            document.getElementById('gLayerPanel').classList.remove('show');
-            closeReportWorkerDropdown();
-            hideCustomPanel();
-            var sd = document.getElementById('reportStartDate');
-            var ed = document.getElementById('reportEndDate');
-            sd.value = ''; sd.type = 'text';
-            ed.value = ''; ed.type = 'text';
-            var drawer = document.getElementById('advFilterDrawer');
-            var container = document.getElementById('advFilterContainer');
-            var expandBtn = document.getElementById('advExpandBtn');
-            if (drawer) drawer.classList.remove('show');
-            if (container) container.classList.remove('is-open');
-            if (expandBtn) expandBtn.setAttribute('aria-expanded', 'false');
-            var workerColSel = document.getElementById('advWorkerColToggle');
-            if (workerColSel) workerColSel.value = 'hide';
-            toggleGeminiAiPanel(false);
-            reportModal.classList.add('show');
-            initializeReportWorkerFilter();
-            updateGeminiUiAndButtonState();
-            fetch('/api/gemini/status').then(function(r){{return r.json();}}).then(function(s){{syncBackendStatusToLocal(s);}}).catch(function(){{}});
+            window.openReportModal(true);
         }});
     }}
 
@@ -6092,16 +6195,16 @@ def generate_map():
     // === ระบบบริหารจัดการ Google Gemini API, Engineering Prompt, API Key Popover & Smartest-First Model Fallback ===
     var DEFAULT_ENGINEERING_PROMPT_JS =
         "คุณเป็นวิศวกรผู้เชี่ยวชาญด้านระบบควบคุมและสั่งการ (SCADA) ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) " +
-        "หน้าที่ของคุณคือการวิเคราะห์เนื้อหาการตรวจสอบและสรุปรายงานเป็นแบบ \"วิศวกรรม\" ที่มีความเป็นมืออาชีพ ถูกหลักภาษา มีการแก้คำผิด " +
-        "และเขียนเนื้อหาให้ครบถ้วนกระชับ โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราว ประกอบด้วย:\n" +
-        "- สาเหตุ: เกิดจากอะไร\n" +
-        "- การดำเนินการ: แก้ไขอย่างไร\n" +
-        "- ผลลัพธ์: ได้ผลเป็นอย่างไร\n\n" +
-        "ตัวอย่างแนวทาง:\n" +
-        "\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n\n" +
-        "ข้อกำหนดสำคัญ:\n" +
-        "1. บังคับร้อยเรียงเป็นประโยคอธิบายยาวตามโครงสร้าง: \"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\" เสมอ\n" +
-        "2. แก้คำผิด คำซ้ำซ้อน และใช้ศัพท์เทคนิคทางวิศวกรรมให้ถูกต้องตามมาตรฐานวิชาชีพ โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •)\n" +
+        "หน้าที่ของคุณคือการวิเคราะห์เนื้อหาการตรวจสอบและสรุปรายงานเป็นแบบ \\"วิศวกรรม\\" ที่มีความเป็นมืออาชีพ ถูกหลักภาษา มีการแก้คำผิด " +
+        "และเขียนเนื้อหาให้ครบถ้วนกระชับ โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราว ประกอบด้วย:\\n" +
+        "- สาเหตุ: เกิดจากอะไร\\n" +
+        "- การดำเนินการ: แก้ไขอย่างไร\\n" +
+        "- ผลลัพธ์: ได้ผลเป็นอย่างไร\\n\\n" +
+        "ตัวอย่างแนวทาง:\\n" +
+        "\\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\\"\\n\\n" +
+        "ข้อกำหนดสำคัญ:\\n" +
+        "1. บังคับร้อยเรียงเป็นประโยคอธิบายยาวตามโครงสร้าง: \\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\" เสมอ\\n" +
+        "2. แก้คำผิด คำซ้ำซ้อน และใช้ศัพท์เทคนิคทางวิศวกรรมให้ถูกต้องตามมาตรฐานวิชาชีพ โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •)\\n" +
         "3. กรณีข้อมูลต้นฉบับไม่ครบทั้ง 3 ส่วน ให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุดโดยห้ามแต่งเติมข้อมูลเท็จ";
 
     // คีย์สำรองภายในโค้ดสำหรับเรียกใช้งานหลังบ้านเมื่อผู้ใช้ไม่ได้ระบุคีย์ของตนเอง (ห้ามนำไปแสดงในหน้า UI เด็ดขาด)
@@ -6911,14 +7014,14 @@ def generate_map():
 
     function normalizeEngineeringClauseJS(text) {{
         var s = String(text || "").trim();
-        s = s.replace(/^[•\-\s✅❌☑☒✔✘❗️⚠️]+/, "").replace(/[✅❌☑☒✔✘❗️⚠️]+/g, " ");
-        s = s.replace(/\bNo\s*AC\b/gi, "ไม่มีไฟเลี้ยง AC");
-        s = s.replace(/อุปกรณ์สื่อสาร\s+ปกติ/g, "อุปกรณ์สื่อสารทำงานปกติ");
-        s = s.replace(/ระบบสื่อสาร\s*ONLINE/gi, "ระบบสื่อสารสามารถเชื่อมต่อ ONLINE ได้ตามปกติ");
-        s = s.replace(/ทดแทนตัวที่ชำรุด\s*DAU\s*ที่ชำรุด/gi, "ทดแทนชุดเดิมที่ชำรุด");
-        s = s.replace(/DAU\/Cellular\s*Router\s*ชำรุด/gi, "อุปกรณ์ DAU และ Cellular Router ชำรุด");
+        s = s.replace(/^[•\\-\\s✅❌☑☒✔✘❗️⚠️]+/, "").replace(/[✅❌☑☒✔✘❗️⚠️]+/g, " ");
+        s = s.replace(/\\bNo\\s*AC\\b/gi, "ไม่มีไฟเลี้ยง AC");
+        s = s.replace(/อุปกรณ์สื่อสาร\\s+ปกติ/g, "อุปกรณ์สื่อสารทำงานปกติ");
+        s = s.replace(/ระบบสื่อสาร\\s*ONLINE/gi, "ระบบสื่อสารสามารถเชื่อมต่อ ONLINE ได้ตามปกติ");
+        s = s.replace(/ทดแทนตัวที่ชำรุด\\s*DAU\\s*ที่ชำรุด/gi, "ทดแทนชุดเดิมที่ชำรุด");
+        s = s.replace(/DAU\\/Cellular\\s*Router\\s*ชำรุด/gi, "อุปกรณ์ DAU และ Cellular Router ชำรุด");
         s = s.replace(/ชํารุด/g, "ชำรุด").replace(/สือสาร/g, "สื่อสาร").replace(/เเบตเตอรี่/g, "แบตเตอรี่");
-        s = s.replace(/\s+/g, " ").replace(/^[ ,;|\-]+|[ ,;|\-]+$/g, "").trim();
+        s = s.replace(/\\s+/g, " ").replace(/^[ ,;|\\-]+|[ ,;|\\-]+$/g, "").trim();
         return s;
     }}
 
@@ -6944,7 +7047,7 @@ def generate_map():
             return "เนื่องจากไม่มีบันทึกข้อมูลสาเหตุการชำรุดในระบบ (สาเหตุ) จึงยังไม่มีรายการบันทึกการแก้ไข (การดำเนินการ) ส่งผลให้ยังไม่สามารถระบุผลลัพธ์หลังดำเนินการได้ (ผลลัพธ์)";
         }}
 
-        var rawTokens = txt.split(/[\n\r;|]+|,\s*|\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\s*ONLINE|อุปกรณ์สื่อสาร\s*ปกติ|No\s*AC)/i)
+        var rawTokens = txt.split(/[\\n\\r;|]+|,\\s*|\\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\\s*ONLINE|อุปกรณ์สื่อสาร\\s*ปกติ|No\\s*AC)/i)
             .map(function(s) {{ return s.trim(); }})
             .filter(Boolean);
 
@@ -6956,9 +7059,9 @@ def generate_map():
         function addUniqueClause(targetArr, clause) {{
             var cNorm = normalizeEngineeringClauseJS(clause);
             if (!cNorm) return;
-            var cKey = cNorm.toLowerCase().replace(/\s+/g, "");
+            var cKey = cNorm.toLowerCase().replace(/\\s+/g, "");
             for (var i = 0; i < targetArr.length; i++) {{
-                var exKey = targetArr[i].toLowerCase().replace(/\s+/g, "");
+                var exKey = targetArr[i].toLowerCase().replace(/\\s+/g, "");
                 if (cKey === exKey || exKey.includes(cKey) || (cKey.includes("ไม่มีไฟเลี้ยงac") && exKey.includes("ไม่มีไฟac"))) return;
                 if (cKey.includes(exKey)) {{
                     targetArr[i] = cNorm;
@@ -6985,7 +7088,7 @@ def generate_map():
 
             if (/^(เปลี่ยน|ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|รีเซ็ต|ตั้งค่า|ซ่อม|ย้ำสาย|ทำความสะอาด|ปรับตั้ง)/i.test(cleanTk)) {{
                 if (cleanTk.includes("ชำรุด") && cleanTk.includes("ทดแทน")) {{
-                    var subParts = cleanTk.split(/(?=Port\s*LAN|อุปกรณ์\s*DAU|เนื่องจาก)/i);
+                    var subParts = cleanTk.split(/(?=Port\\s*LAN|อุปกรณ์\\s*DAU|เนื่องจาก)/i);
                     addUniqueClause(actions, subParts[0]);
                     for (var sIdx = 1; sIdx < subParts.length; sIdx++) {{
                         addUniqueClause(causes, subParts[sIdx]);
@@ -7033,9 +7136,9 @@ def generate_map():
             }}
         }}
 
-        var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*/, "").trim();
-        var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\s*/, "").trim();
-        var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*/, "").trim();
+        var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\\s*/, "").trim();
+        var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\\s*/, "").trim();
+        var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\\s*/, "").trim();
 
         return "เนื่องจาก" + causeStr + " (สาเหตุ) จึงได้ดำเนินการ" + actionStr + " (การดำเนินการ) ส่งผลให้" + resultStr + " (ผลลัพธ์)";
     }}
@@ -7064,7 +7167,7 @@ def generate_map():
         var otherCnt = Math.max(0, total - onlineCnt - connCnt - offCnt);
 
         var md =
-            "รายงานสรุปเชิงวิศวกรรมผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (รวมทั้งสิ้น " + total + " รายการ)\n\n" +
+            "รายงานสรุปเชิงวิศวกรรมผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (รวมทั้งสิ้น " + total + " รายการ)\\n\\n" +
             "จากการเข้าตรวจสอบและวิเคราะห์สาเหตุความผิดปกติของอุปกรณ์ภาคสนามจำนวน " + total + " รายการ พบว่าเกิดจากสาเหตุหลัก 3 ด้าน ได้แก่ " +
             "ปัญหาด้านระบบสื่อสารและโครงข่ายจำนวน " + commIssues + " รายการ ปัญหาด้านชุดควบคุมหลัก (FRTU/AVR/Recloser) จำนวน " + frtuIssues + " รายการ " +
             "และปัญหาด้านระบบแหล่งจ่ายไฟหรือหม้อแปลงแรงดัน (AC/DC/VT/Battery) จำนวน " + powerIssues + " รายการ (สาเหตุ) " +
@@ -7169,7 +7272,7 @@ def generate_map():
                         break;
                     }}
                     var data = await resp.json();
-                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\n").trim();
+                    var textOut = ((((data.candidates || [])[0] || {{}}).content || {{}}).parts || []).map(function(p) {{ return p.text || ""; }}).join("\\n").trim();
                     if (textOut) {{
                         incrementLocalModelRpd(logicalModel);
                         return {{ text: textOut, used_model: logicalModel, sdk_model: sdkId }};
@@ -7235,19 +7338,19 @@ def generate_map():
             var ch = chunks[cIdx];
             var linesStr = ch.map(function(r, idx) {{
                 return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะ: " + r.status;
-            }}).join("\n");
+            }}).join("\\n");
 
             var prompt =
-                customPrompt + "\n\n" +
+                customPrompt + "\\n\\n" +
                 "โปรดวิเคราะห์และปรับแก้ข้อความแต่ละรายการต่อไปนี้ให้เป็นประโยคอธิบายยาวแบบวิศวกรรมที่มีความเป็นมืออาชีพ ถูกหลักภาษา แก้คำผิด " +
-                "โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้ร้อยเรียงตามโครงสร้าง:\n" +
-                "\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"\n" +
-                "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"}}],\"chunk_summary\":\"...\"}}\n\n" +
+                "โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้ร้อยเรียงตามโครงสร้าง:\\n" +
+                "\\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\"\\n" +
+                "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
                 linesStr;
             try {{
                 var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, userTypedKey);
                 usedModelName = aiRes.used_model;
-                var mJson = aiRes.text.match(/\{{[\s\S]*\}}/);
+                var mJson = aiRes.text.match(/\\{{[\\s\\S]*\\}}/);
                 if (mJson) {{
                     var parsed = JSON.parse(mJson[0]);
                     (parsed.rows || []).forEach(function(item) {{
@@ -7269,8 +7372,8 @@ def generate_map():
             try {{
                 var synthPrompt =
                     "โปรดเขียนรายงานสรุปเชิงวิศวกรรมสำหรับผู้บริหาร (Engineering Executive Report) ที่มีความเป็นมืออาชีพ ถูกหลักภาษา " +
-                    "โดยร้อยเรียงเรื่องราวให้ครบถ้วนทั้ง สาเหตุ การดำเนินการ และผลลัพธ์ จากข้อมูลสรุปย่อยต่อไปนี้:\n- " +
-                    chunkSummaries.join("\n- ");
+                    "โดยร้อยเรียงเรื่องราวให้ครบถ้วนทั้ง สาเหตุ การดำเนินการ และผลลัพธ์ จากข้อมูลสรุปย่อยต่อไปนี้:\\n- " +
+                    chunkSummaries.join("\\n- ");
                 var synthRes = await callDirectGeminiRestFromBrowser(synthPrompt, preferredModel, userTypedKey);
                 if (synthRes.text) finalSummaryMd = synthRes.text;
                 usedModelName = synthRes.used_model;
@@ -7334,7 +7437,7 @@ def generate_map():
                 previewTitle.textContent = "✨ รายงานสรุปเชิงวิศวกรรม (โมเดล: " + (aiRes.used_model || "gemini-3.5-pro-exp") + " · " + (aiRes.chunk_count || 1) + " Chunks)";
             }}
             if (previewContent) {{
-                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\n\n") : "";
+                var note = aiRes.warning ? ("⚠️ หมายเหตุ: " + aiRes.warning + "\\n\\n") : "";
                 previewContent.textContent = note + (aiRes.summary_markdown || "");
             }}
         }} catch (err) {{
@@ -7444,8 +7547,8 @@ def generate_map():
         ws.getRow(1).height = 30;
 
         var headers = includeWorkerCol
-            ? ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
-            : ['ลำดับ', 'รหัสสั่งการ\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
+            ? ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'ผู้ปฏิบัติงาน (ผอส.ฉ.2)', 'สถานะหลังดำเนินการ']
+            : ['ลำดับ', 'รหัสสั่งการ\\n(ข้อมูล GIS)', 'Site ID', 'สถานที่\\n(ข้อมูล GIS)', 'รายละเอียดการตรวจสอบ/แก้ไข\\n(สาเหตุ -> การดำเนินการ -> ผลลัพธ์)', 'ผู้รับผิดชอบและดำเนินการแก้ไขต่อไป', 'สถานะหลังดำเนินการ'];
 
         var headerRow = ws.addRow(headers);
         headerRow.height = 36;
@@ -7465,7 +7568,7 @@ def generate_map():
                 ? customRowSentences[rKey]
                 : (row.ai_detail || categorizeRowDetailJS(row.detail, row.resp, row.status) || '-');
             var rowValues = includeWorkerCol
-                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\n') || '-', row.status ]
+                ? [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, splitOperatorNames(row.workers).join('\\n') || '-', row.status ]
                 : [ i+1, row.cmd, row.site, row.loc, cleanDetailText, row.resp, row.status ];
 
             var dataRow = ws.addRow(rowValues);
@@ -7550,7 +7653,7 @@ def generate_map():
 
         var cats = (aiSummaryData && aiSummaryData.categories) ? aiSummaryData.categories : [];
         cats.forEach(function(catObj, cIdx) {{
-            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\n");
+            var itemsJoined = (catObj.items || []).map(function(it) {{ return "• " + it; }}).join("\\n");
             var rRow = wsAi.addRow([
                 cIdx + 1,
                 catObj.category || "-",
@@ -7583,7 +7686,7 @@ def generate_map():
         sbCell.font = {{ name: 'TH SarabunPSK', size: 16 }};
         sbCell.alignment = {{ vertical: 'top', horizontal: 'left', wrapText: true }};
         sbCell.border = {{ top: {{style:'thin'}}, left: {{style:'thin'}}, bottom: {{style:'thin'}}, right: {{style:'thin'}} }};
-        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\n').length * 22));
+        synthBodyRow.height = Math.max(140, Math.min(360, mdBody.split('\\n').length * 22));
 
         wsAi.getColumn(1).width = 12;
         wsAi.getColumn(2).width = 36;
@@ -8241,6 +8344,15 @@ function hideCustomPanel() {{
         applyScadaTheme(saved);
     }})();
 
+    if (typeof DISPLAY_FIELD_NAMES === 'undefined') {{
+        window.DISPLAY_FIELD_NAMES = [
+            "รหัสสั่งการ", "สถานที่", "State SCADA", "State SCADA (หลังตรวจสอบ)",
+            "ชนิดอุปกรณ์", "ประเภทผลิตภัณฑ์", "อุปกรณ์สื่อสาร (Commu.)",
+            "ประเภทย่อยสื่อสาร (Item)", "เชื่อมกับ WRL Master", "IP", "DNP",
+            "รายละเอียดการแก้ไขข้อขัดข้อง", "รายละเอียดการเข้าแก้ไข", "LAT/LONG",
+            "รอ ผอส. เข้าแก้ไข", "รอ ผบอ. เข้าแก้ไข", "การไฟฟ้า", "วันที่เข้าตรวจสอบ"
+        ];
+    }}
     var dashAllCompact = {dash_all_json};
     var dashAllRecords = dashAllCompact.map(function(arr) {{
         var obj = {{ "_layerName": arr[0] || "", "Site ID": arr[1] || "", "_safeId": arr[2] || "" }};
@@ -9171,6 +9283,11 @@ function hideCustomPanel() {{
         if (window.DEFAULT_START_DASHBOARD === true || urlParams.get('view') === 'dashboard' || window.location.pathname.toLowerCase().includes('dashboard')) {{
             window.switchMainView('dashboard');
         }}
+        if (window.DEFAULT_OPEN_AI_MODAL === true || urlParams.get('ai') === '1' || urlParams.get('open_ai') === '1' || window.location.pathname.toLowerCase().includes('ai-report')) {{
+            setTimeout(function() {{
+                if (typeof window.openReportModal === 'function') window.openReportModal(true);
+            }}, 350);
+        }}
     }})();
     </script>
     """
@@ -9256,6 +9373,12 @@ def map_data():
             content = content.replace(
                 'var dashDemoMode = false;',
                 'window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;',
+                1
+            )
+        if request.args.get('ai') == '1' or request.args.get('open_ai') == '1':
+            content = content.replace(
+                'var dashDemoMode = false;',
+                'window.DEFAULT_OPEN_AI_MODAL = true;\nvar dashDemoMode = false;',
                 1
             )
         return content
@@ -9528,9 +9651,11 @@ def api_version():
 
 @app.route('/')
 @app.route('/dashboard')
+@app.route('/ai-report')
 def index():
     trigger_update_if_needed()
     default_view = 'dashboard' if request.path.endswith('/dashboard') or request.args.get('view') == 'dashboard' else 'map'
+    open_ai_flag = '1' if (request.path.endswith('/ai-report') or request.args.get('ai') == '1' or request.args.get('open_ai') == '1') else '0'
     html_wrapper = f"""
     <!DOCTYPE html>
     <html lang="th">
@@ -9542,9 +9667,9 @@ def index():
         <style>
             body, html {{ margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #f0f2f5; font-family: 'Prompt', 'Inter', sans-serif; }}
             .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }}
-            .layer-active {{ z-index: 2; opacity: 1; transition: opacity 0.45s ease-in-out; }}
-            .layer-hidden {{ z-index: 1; opacity: 0; pointer-events: none; }}
-            #loader {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #1c1e21; z-index: 0; text-align: center; transition: opacity 0.35s; background: #ffffff; padding: 24px 32px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #dadce0; }}
+            .layer-active {{ z-index: 2; opacity: 1; pointer-events: auto !important; transition: opacity 0.45s ease-in-out; }}
+            .layer-hidden {{ z-index: 1; opacity: 0; pointer-events: none !important; }}
+            #loader {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #1c1e21; z-index: 0; pointer-events: none; text-align: center; transition: opacity 0.35s; background: #ffffff; padding: 24px 32px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #dadce0; }}
             #loader h2 {{ margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #1a73e8; }}
             #loader p {{ margin: 0; font-size: 13px; color: #5f6368; }}
         </style>
@@ -9560,6 +9685,7 @@ def index():
             var activeLayer = 1;
             var isSwapping = false;
             var initialDefaultView = "{default_view}";
+            var initialOpenAi = "{open_ai_flag}" === "1";
 
             var dotCount = 0;
             setInterval(() => {{
@@ -9631,6 +9757,25 @@ def index():
                 swapMap();
             }}
 
+            function activateNextLayer(nextIframe, activeIframe, nextLayer) {{
+                var newMap = getMapInstance(nextIframe);
+                var oldMap = getMapInstance(activeIframe);
+                if (oldMap && newMap) {{
+                    try {{ newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {{animate: false}}); }} catch(e) {{}}
+                }}
+                nextIframe.className = 'map-layer layer-active';
+                activeIframe.className = 'map-layer layer-hidden';
+                activeLayer = nextLayer;
+                isSwapping = false;
+
+                var loader = document.getElementById('loader');
+                if (loader) {{
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.style.display = 'none', 400);
+                }}
+                setTimeout(function() {{ activeIframe.src = 'about:blank'; }}, 1200);
+            }}
+
             function swapMap() {{
                 isSwapping = true;
                 var nextLayer = activeLayer === 1 ? 2 : 1;
@@ -9648,38 +9793,35 @@ def index():
                 }} catch(e) {{
                     if (initialDefaultView === 'dashboard') viewParam = '&view=dashboard';
                 }}
+                if (initialOpenAi) {{
+                    viewParam += '&ai=1';
+                    initialOpenAi = false;
+                }}
 
                 nextIframe.src = '/map-data?v=' + currentVersion + viewParam + '&t=' + new Date().getTime();
 
                 nextIframe.onload = function() {{
+                    var attempts = 0;
                     var checkReady = setInterval(function() {{
+                        attempts++;
                         var newMap = getMapInstance(nextIframe);
-                        var oldMap = getMapInstance(activeIframe);
-
+                        var hasDomUI = false;
                         var hasErrorPage = false;
-                        try {{ hasErrorPage = nextIframe.contentWindow.document.body.innerHTML.includes('เกิดข้อผิดพลาด'); }} catch(e) {{}}
+                        try {{
+                            var doc = nextIframe.contentWindow.document;
+                            hasErrorPage = doc.body.innerHTML.includes('เกิดข้อผิดพลาด');
+                            hasDomUI = Boolean(doc.getElementById('topNavSwitcher') || doc.querySelector('.folium-map'));
+                        }} catch(e) {{}}
 
-                        if (newMap || hasErrorPage) {{
+                        if (newMap || hasErrorPage || (hasDomUI && attempts >= 10)) {{
                             clearInterval(checkReady);
-                            if (oldMap && newMap) {{
-                                newMap.setView(oldMap.getCenter(), oldMap.getZoom(), {{animate: false}});
-                            }}
-
-                            nextIframe.className = 'map-layer layer-active';
-                            activeIframe.className = 'map-layer layer-hidden';
-                            activeLayer = nextLayer;
-                            isSwapping = false;
-
-                            var loader = document.getElementById('loader');
-                            if (loader) {{
-                                loader.style.opacity = '0';
-                                setTimeout(() => loader.style.display = 'none', 400);
-                            }}
-
-                            setTimeout(function() {{ activeIframe.src = 'about:blank'; }}, 1200);
+                            activateNextLayer(nextIframe, activeIframe, nextLayer);
                         }}
                     }}, 150);
-                    setTimeout(() => {{ clearInterval(checkReady); isSwapping = false; }}, 10000);
+                    setTimeout(() => {{
+                        clearInterval(checkReady);
+                        if (isSwapping) activateNextLayer(nextIframe, activeIframe, nextLayer);
+                    }}, 8000);
                 }};
             }}
 
@@ -9713,6 +9855,9 @@ def index():
 trigger_update_if_needed()
 
 if __name__ == '__main__':
+    import webbrowser
+    import pathlib
+
     if '--static' in sys.argv or '--generate-only' in sys.argv:
         html_out = generate_map()
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f_out:
@@ -9720,6 +9865,16 @@ if __name__ == '__main__':
         with open(DASHBOARD_OUTPUT_FILE, 'w', encoding='utf-8') as f_dash:
             f_dash.write(html_out.replace('var dashDemoMode = false;', 'window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;', 1))
         print(f'สร้างไฟล์แผนที่ ({OUTPUT_FILE}) และแดชบอร์ด ({DASHBOARD_OUTPUT_FILE}) สำเร็จ!')
+        if '--no-browser' not in sys.argv and not IS_RENDER_SERVER:
+            try:
+                webbrowser.open(pathlib.Path(OUTPUT_FILE).as_uri())
+            except Exception as e:
+                print(f'ไม่สามารถเปิดเบราว์เซอร์อัตโนมัติได้: {e}')
     else:
         port = int(os.environ.get('PORT', 10000))
+        # เปิดเบราว์เซอร์อัตโนมัติเมื่อรันผ่าน .bat บนเครื่อง Local (ไม่รันบน Render Server)
+        if not IS_RENDER_SERVER and '--no-browser' not in sys.argv and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+            local_url = f'http://127.0.0.1:{port}'
+            print(f'กำลังเปิดเว็บเบราว์เซอร์อัตโนมัติไปที่: {local_url} ...')
+            threading.Timer(1.5, lambda: webbrowser.open(local_url)).start()
         app.run(host='0.0.0.0', port=port)
