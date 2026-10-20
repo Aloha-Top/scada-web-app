@@ -162,7 +162,7 @@ except ImportError:
                 '<!DOCTYPE html>\n<html lang="th">\n<head>\n'
                 '    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />\n'
                 '    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />\n'
-                '    <title>รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA)</title>\n'
+                '    <title>รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA NE2 (%AVA)</title>\n'
                 '    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>\n'
                 '    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>\n'
                 '    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>\n'
@@ -278,6 +278,10 @@ SHEET1_GID = '639012274'
 DATA_CHECK_GID = '2024067511'
 UPDATE_STATE_GID = '0'
 RTU_SUMMARY_GID = '747048278'
+USER_REPORT_GID = '1800640563'
+USER_REPORT_SHEET_NAME = 'User_Report'
+USER_REPORT_SHEET_URL = f'https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit?gid={USER_REPORT_GID}#gid={USER_REPORT_GID}'
+USER_REPORT_GAS_WEBHOOK_URL = os.environ.get('SCADA_USER_REPORT_WEBHOOK_URL', '')
 FORM_SOURCE_ID = '1Qp-T7x891juPqp8co-dv7bV1pnPeeHFVQtE8JZpAqvg'
 
 SHEET1_CANONICAL_COLS = [
@@ -3892,6 +3896,418 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         body.theme-dark .explorer-search-input::placeholder {{
             color: #94a3b8;
         }}
+        /* === NEW: Minimalist Top Bar, Plain Reference Text, Filtered Summary Badges, Cascading Disabled State & User Report Modal === */
+        .dash-ref-plain-text {{
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            user-select: text;
+            cursor: default;
+        }}
+        .dash-ref-plain-text strong {{
+            color: var(--text-primary);
+            font-weight: 700;
+        }}
+        .dash-action-btn.btn-report-issue {{
+            background: #fff7ed;
+            border: 1.5px solid #f97316;
+            color: #c2410c;
+            font-weight: 600;
+        }}
+        body.theme-dark .dash-action-btn.btn-report-issue {{
+            background: rgba(249, 115, 22, 0.16);
+            border-color: #fb923c;
+            color: #fdba74;
+        }}
+        .dash-action-btn.btn-report-issue:hover {{
+            background: #ea580c;
+            border-color: #c2410c;
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(234, 88, 12, 0.25);
+        }}
+
+        /* Filtered Summary Badge Bar in Section 6 */
+        .filtered-summary-strip {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px 12px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-hairline);
+            margin-bottom: 2px;
+            transition: all 0.2s ease;
+        }}
+        .filtered-summary-strip.is-filtered-mode {{
+            background: linear-gradient(90deg, rgba(26, 115, 232, 0.06) 0%, rgba(26, 115, 232, 0.02) 100%);
+            border-color: rgba(26, 115, 232, 0.38);
+        }}
+        body.theme-dark .filtered-summary-strip.is-filtered-mode {{
+            background: linear-gradient(90deg, rgba(69, 153, 255, 0.14) 0%, rgba(69, 153, 255, 0.05) 100%);
+            border-color: rgba(96, 165, 250, 0.45);
+        }}
+        .filtered-summary-lead {{
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-primary);
+            white-space: nowrap;
+        }}
+        .filtered-summary-tag {{
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            background: #e8f0fe;
+            color: #1967d2;
+            border: 1px solid rgba(25, 103, 210, 0.25);
+        }}
+        body.theme-dark .filtered-summary-tag {{
+            background: rgba(69, 153, 255, 0.2);
+            color: #93c5fd;
+            border-color: rgba(147, 197, 253, 0.3);
+        }}
+        .filtered-summary-badges {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }}
+        .fs-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 11.5px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }}
+        .fs-badge-dot {{
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }}
+        .fs-badge.fs-total {{
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-hairline);
+        }}
+        .fs-badge.fs-online {{
+            background: #e6f4ea;
+            color: #137333;
+            border-color: rgba(19, 115, 51, 0.22);
+        }}
+        .fs-badge.fs-offline-all {{
+            background: #fce8e6;
+            color: #c5221f;
+            border-color: rgba(197, 34, 31, 0.22);
+        }}
+        .fs-badge.fs-connecting {{
+            background: #fef0e6;
+            color: #c25100;
+            border-color: rgba(194, 81, 0, 0.22);
+        }}
+        .fs-badge.fs-offline {{
+            background: #fce8e6;
+            color: #c5221f;
+            border-color: rgba(197, 34, 31, 0.22);
+        }}
+        .fs-badge.fs-init {{
+            background: #ecfccb;
+            color: #3f6212;
+            border-color: rgba(63, 98, 18, 0.22);
+        }}
+        .fs-badge.fs-tele {{
+            background: #fef3c7;
+            color: #b45309;
+            border-color: rgba(180, 83, 9, 0.22);
+        }}
+        body.theme-dark .fs-badge.fs-online {{ background: rgba(22, 163, 74, 0.2); color: #4ade80; }}
+        body.theme-dark .fs-badge.fs-offline-all {{ background: rgba(220, 38, 38, 0.2); color: #f87171; }}
+        body.theme-dark .fs-badge.fs-connecting {{ background: rgba(234, 88, 12, 0.2); color: #fb923c; }}
+        body.theme-dark .fs-badge.fs-offline {{ background: rgba(220, 38, 38, 0.2); color: #f87171; }}
+        body.theme-dark .fs-badge.fs-init {{ background: rgba(101, 163, 13, 0.2); color: #a3e635; }}
+        body.theme-dark .fs-badge.fs-tele {{ background: rgba(217, 119, 6, 0.2); color: #fbbf24; }}
+
+        /* Cascading Cross-Filter Disabled State (Opacity 0.4 & Unclickable) */
+        .is-zero-match,
+        tr.clickable-row.is-zero-match,
+        .hier-brand-group.is-zero-match,
+        .hier-brand-subitem.is-zero-match,
+        .casc-menu-item.is-zero-match,
+        .dash-select option:disabled {{
+            opacity: 0.4 !important;
+            pointer-events: none !important;
+            cursor: not-allowed !important;
+            user-select: none !important;
+        }}
+        .hier-brand-group.is-zero-match > .hier-brand-header {{
+            pointer-events: none !important;
+            cursor: not-allowed !important;
+        }}
+
+        /* Custom Cascading Dropdown Popover for Section 6 Filters */
+        .casc-filter-wrap {{
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }}
+        .casc-filter-trigger {{
+            background: transparent;
+            border: none;
+            color: #0f172a;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 2px;
+            white-space: nowrap;
+            max-width: 220px;
+        }}
+        body.theme-dark .casc-filter-trigger {{
+            color: #f8fafc;
+        }}
+        .casc-filter-trigger span.casc-label-txt {{
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        .dash-ctrl-group.is-filter-active .casc-filter-trigger {{
+            color: #1d4ed8 !important;
+        }}
+        body.theme-dark .dash-ctrl-group.is-filter-active .casc-filter-trigger {{
+            color: #ffffff !important;
+        }}
+        .casc-filter-menu {{
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            width: 300px;
+            max-width: calc(100vw - 32px);
+            max-height: 360px;
+            overflow-y: auto;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            border-radius: 12px;
+            box-shadow: var(--shadow-float);
+            padding: 8px;
+            z-index: 100055;
+            flex-direction: column;
+            gap: 3px;
+        }}
+        .casc-filter-menu.align-right {{
+            left: auto;
+            right: 0;
+        }}
+        .casc-filter-menu.show {{
+            display: flex;
+        }}
+        .casc-menu-item {{
+            width: 100%;
+            text-align: left;
+            padding: 6px 10px;
+            border-radius: 7px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            transition: background-color 0.12s;
+        }}
+        .casc-menu-item:hover:not(.is-zero-match) {{
+            background: var(--bg-hover);
+        }}
+        .casc-menu-item.is-active {{
+            background: var(--bg-active);
+            color: var(--accent-primary);
+            font-weight: 700;
+            border-color: rgba(26, 115, 232, 0.3);
+        }}
+
+        /* User Report Incorrect Data Modal */
+        .ur-modal-box {{
+            width: min(96vw, 760px) !important;
+            max-height: calc(100dvh - 24px);
+        }}
+        .ur-step-badge {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            color: #ffffff;
+            font-size: 11.5px;
+            font-weight: 700;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }}
+        .ur-device-info-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 6px;
+            margin-top: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            max-height: 195px;
+            overflow-y: auto;
+        }}
+        .ur-info-cell {{
+            padding: 5px 8px;
+            border-radius: 6px;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+        }}
+        .ur-info-cell span {{
+            font-size: 10.5px;
+            color: var(--text-secondary);
+        }}
+        .ur-info-cell strong {{
+            font-size: 11.5px;
+            color: var(--text-primary);
+            word-break: break-word;
+        }}
+        .ur-fields-checklist {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+            gap: 7px;
+            max-height: 240px;
+            overflow-y: auto;
+            padding: 4px 2px;
+        }}
+        .ur-field-check-card {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px 10px;
+            border-radius: 9px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            transition: all 0.14s ease;
+        }}
+        .ur-field-check-card.is-checked {{
+            border-color: #ea580c;
+            background: #fff7ed;
+            box-shadow: 0 1px 4px rgba(234, 88, 12, 0.14);
+        }}
+        body.theme-dark .ur-field-check-card.is-checked {{
+            border-color: #fb923c;
+            background: rgba(234, 88, 12, 0.15);
+        }}
+        .ur-field-check-top {{
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            cursor: pointer;
+        }}
+        .ur-field-check-top input[type="checkbox"] {{
+            width: 16px;
+            height: 16px;
+            margin-top: 2px;
+            accent-color: #ea580c;
+            cursor: pointer;
+            flex-shrink: 0;
+        }}
+        .ur-field-name {{
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }}
+        .ur-field-curval {{
+            font-size: 11px;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }}
+        .ur-field-inline-input {{
+            display: none;
+            width: 100%;
+            padding: 6px 9px;
+            font-size: 12px;
+            border-radius: 7px;
+            border: 1px solid #fb923c;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }}
+        .ur-field-check-card.is-checked .ur-field-inline-input {{
+            display: block;
+        }}
+        .ur-text-input {{
+            width: 100%;
+            padding: 9px 12px;
+            border-radius: 9px;
+            border: 1.5px solid var(--border-hairline);
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            font-size: 13px;
+            transition: border-color 0.15s;
+        }}
+        .ur-text-input:focus {{
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+        }}
+        .ur-status-banner {{
+            display: none;
+            padding: 10px 12px;
+            border-radius: 9px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 8px;
+            line-height: 1.45;
+        }}
+        .ur-status-banner.show {{
+            display: block;
+        }}
+        .ur-status-banner.is-success {{
+            background: #e6f4ea;
+            color: #137333;
+            border: 1px solid rgba(19, 115, 51, 0.3);
+        }}
+        .ur-status-banner.is-error {{
+            background: #fce8e6;
+            color: #c5221f;
+            border: 1px solid rgba(197, 34, 31, 0.3);
+        }}
+        .ur-status-banner.is-warn {{
+            background: #fef7e0;
+            color: #b06000;
+            border: 1px solid rgba(176, 96, 0, 0.3);
+        }}
+
         .explorer-search-input:focus,
         .explorer-search-input.is-filter-active {{
             border-color: #1d4ed8 !important;
@@ -4969,48 +5385,23 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             </button>
         </div>
 
-        <!-- หน้า Dashboard ภาพรวมระบบ SCADA (%AVA) -->
+        <!-- หน้า Dashboard ภาพรวมระบบ SCADA NE2 (%AVA) -->
         <div id="scadaDashboardView" class="scada-dashboard-view" aria-label="SCADA Availability Dashboard">
             <div class="dash-sticky-topbar">
                 <div class="dash-sticky-inner">
-                    <h1 class="dash-sticky-title">รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA)</h1>
+                    <h1 class="dash-sticky-title">รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA NE2 (%AVA)</h1>
                 </div>
             </div>
 
             <div class="dash-container">
                 <div class="dash-toolbar-card">
                     <div class="dash-controls-bar">
-                        <div class="dash-ctrl-group">
-                            <label>สถานะอ้างอิง:</label>
-                            <span id="dashStateBasis" class="dash-static-label">State SCADA</span>
-                        </div>
-                        <div class="dash-ctrl-group" id="topEqScopeGroup">
-                            <label for="dashEqScope">กลุ่มอุปกรณ์:</label>
-                            <select id="dashEqScope" class="dash-select" onchange="window.renderScadaDashboard()">
-                                <option value="all">ทั้งหมดในระบบ (1,571 ชุด)</option>
-                                <option value="core4">เฉพาะ 4 ชนิดหลัก (Recloser, LBS, CS)</option>
-                                <option value="mapped">เฉพาะที่มีพิกัด GIS (1,495 ชุด)</option>
-                            </select>
-                        </div>
-                        <div class="dash-ctrl-group" id="topPeaFilterGroup">
-                            <label for="dashPeaFilter">การไฟฟ้า:</label>
-                            <select id="dashPeaFilter" class="dash-select" onchange="window.onTopPeaFilterChange(this.value)">
-                                <option value="all">ทุกการไฟฟ้า</option>
-                            </select>
-                        </div>
-                        <div class="dash-ctrl-group hier-brand-filter" id="topHierBrandFilterWrap">
-                            <label>ยี่ห้อผลิตภัณฑ์:</label>
-                            <button type="button" class="hier-brand-trigger" id="topHierBrandTrigger" onclick="window.toggleHierBrandMenu('top', event)">
-                                <span id="topHierBrandLabel">ทุกยี่ห้อ (ทั้งหมด)</span>
-                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
-                            </button>
-                            <div class="hier-brand-menu" id="topHierBrandMenu" onclick="event.stopPropagation()"></div>
-                        </div>
+                        <p class="dash-ref-plain-text">สถานะอ้างอิง: <strong id="dashStateBasis">State SCADA</strong></p>
                     </div>
                     <div class="dash-controls-bar">
-                        <button type="button" id="topResetFilterBtn" class="dash-action-btn btn-clear-filter" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมดให้กลับเป็นค่าเริ่มต้น">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6h18M6 12h12m-9 6h6"/></svg>
-                            <span class="btn-clear-filter-text">ล้างตัวกรอง</span>
+                        <button type="button" class="dash-action-btn btn-report-issue" id="openUserReportModalBtn" onclick="window.openUserReportModal()">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                            Report ข้อมูลไม่ถูกต้อง
                         </button>
                         <button type="button" class="dash-action-btn btn-primary" onclick="window.openDashExportModal()">
                             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg>
@@ -5299,7 +5690,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         </div>
                         <div class="dash-controls-bar">
                             <button type="button" id="showAllExplorerRowsBtn" class="dash-action-btn" onclick="window.showAllExplorerRows()">แสดงครบทุกแถว</button>
-                            <button type="button" id="expResetFilterBtn" class="dash-action-btn btn-clear-filter" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมด (รวมถึงตัวกรองการไฟฟ้า และตัวกรองทุกส่วน)">
+                            <button type="button" id="expResetFilterBtn" class="dash-action-btn btn-clear-filter" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมดให้กลับเป็นค่าเริ่มต้น">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6h18M6 12h12m-9 6h6"/></svg>
                                 <span class="btn-clear-filter-text">ล้างตัวกรอง</span>
                             </button>
@@ -5307,19 +5698,40 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         </div>
                     </div>
 
+                    <!-- ค่าสรุปผลจากการกรอง (Filtered Summary Badges) แสดงเฉพาะตรงหัวข้อที่ 6 -->
+                    <div id="dashFilteredSummaryBar" class="filtered-summary-strip">
+                        <div class="filtered-summary-lead">
+                            <span class="filtered-summary-tag" id="filteredSummaryModeTag">ค่าตามเงื่อนไข Filter</span>
+                            <span id="filteredSummaryAvaBadge"></span>
+                        </div>
+                        <div class="filtered-summary-badges" id="filteredSummaryBadgesWrap"></div>
+                    </div>
+
                     <div id="dashActiveFilterBar" class="explorer-active-filters" style="display:none;"></div>
 
                     <div class="explorer-toolbar">
-                        <input type="search" id="dashExplorerSearch" class="explorer-search-input" placeholder="ค้นหา Site ID, รหัสสั่งการ, สถานที่, การไฟฟ้า, IP, DNP, ผลิตภัณฑ์, Commu., Item, WRL Master..." oninput="window.renderDashExplorerTable()">
-                        <div class="dash-ctrl-group" id="expPeaFilterGroup">
-                            <label for="dashExplorerPea">การไฟฟ้า:</label>
-                            <select id="dashExplorerPea" class="dash-select" onchange="window.onExplorerPeaDropdownChange(this.value)">
+                        <input type="search" id="dashExplorerSearch" class="explorer-search-input" placeholder="ค้นหา Site ID, รหัสสั่งการ, สถานที่, การไฟฟ้า, IP, DNP, ผลิตภัณฑ์, Commu., Item, WRL Master..." oninput="window.onExplorerSearchInput()">
+
+                        <div class="dash-ctrl-group casc-filter-wrap" id="expPeaFilterGroup">
+                            <label>การไฟฟ้า:</label>
+                            <button type="button" class="casc-filter-trigger" id="expPeaTrigger" onclick="window.toggleCascFilterMenu('pea', event)">
+                                <span class="casc-label-txt" id="expPeaTriggerLabel">ทุกการไฟฟ้า</span>
+                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
+                            </button>
+                            <div class="casc-filter-menu" id="expPeaCascMenu" onclick="event.stopPropagation()"></div>
+                            <select id="dashExplorerPea" class="dash-select" style="display:none;" onchange="window.onExplorerPeaDropdownChange(this.value)">
                                 <option value="all">ทุกการไฟฟ้า</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group" id="expStatusFilterGroup">
-                            <label for="dashExplorerStatus">State SCADA:</label>
-                            <select id="dashExplorerStatus" class="dash-select" onchange="window.onExplorerDropdownChange()">
+
+                        <div class="dash-ctrl-group casc-filter-wrap" id="expStatusFilterGroup">
+                            <label>State SCADA:</label>
+                            <button type="button" class="casc-filter-trigger" id="expStatusTrigger" onclick="window.toggleCascFilterMenu('status', event)">
+                                <span class="casc-label-txt" id="expStatusTriggerLabel">ทุกสถานะ</span>
+                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
+                            </button>
+                            <div class="casc-filter-menu" id="expStatusCascMenu" onclick="event.stopPropagation()"></div>
+                            <select id="dashExplorerStatus" class="dash-select" style="display:none;" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกสถานะ</option>
                                 <option value="ALL_OFFLINE">ไม่ออนไลน์ทั้งหมด</option>
                                 <option value="Online">Online</option>
@@ -5329,12 +5741,19 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                 <option value="Telemetry Failure">Telemetry Failure</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group" id="expEqFilterGroup">
-                            <label for="dashExplorerEq">ชนิดอุปกรณ์:</label>
-                            <select id="dashExplorerEq" class="dash-select" onchange="window.onExplorerDropdownChange()">
+
+                        <div class="dash-ctrl-group casc-filter-wrap" id="expEqFilterGroup">
+                            <label>ชนิดอุปกรณ์:</label>
+                            <button type="button" class="casc-filter-trigger" id="expEqTrigger" onclick="window.toggleCascFilterMenu('eq', event)">
+                                <span class="casc-label-txt" id="expEqTriggerLabel">ทุกชนิดอุปกรณ์</span>
+                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
+                            </button>
+                            <div class="casc-filter-menu" id="expEqCascMenu" onclick="event.stopPropagation()"></div>
+                            <select id="dashExplorerEq" class="dash-select" style="display:none;" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกชนิดอุปกรณ์</option>
                             </select>
                         </div>
+
                         <div class="dash-ctrl-group hier-brand-filter" id="expHierBrandFilterWrap">
                             <label>ผลิตภัณฑ์ (ยี่ห้อ):</label>
                             <button type="button" class="hier-brand-trigger" id="expHierBrandTrigger" onclick="window.toggleHierBrandMenu('exp', event)">
@@ -5346,15 +5765,27 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                 <option value="all">ทุกผลิตภัณฑ์</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group" id="expCommFilterGroup">
-                            <label for="dashExplorerComm">Commu./Item:</label>
-                            <select id="dashExplorerComm" class="dash-select" onchange="window.onExplorerDropdownChange()">
+
+                        <div class="dash-ctrl-group casc-filter-wrap" id="expCommFilterGroup">
+                            <label>Commu./Item:</label>
+                            <button type="button" class="casc-filter-trigger" id="expCommTrigger" onclick="window.toggleCascFilterMenu('comm', event)">
+                                <span class="casc-label-txt" id="expCommTriggerLabel">ทุกประเภทสื่อสาร</span>
+                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
+                            </button>
+                            <div class="casc-filter-menu align-right" id="expCommCascMenu" onclick="event.stopPropagation()"></div>
+                            <select id="dashExplorerComm" class="dash-select" style="display:none;" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกประเภทสื่อสาร</option>
                             </select>
                         </div>
-                        <div class="dash-ctrl-group" id="expWrlFilterGroup">
-                            <label for="dashExplorerWrl">WRL Master:</label>
-                            <select id="dashExplorerWrl" class="dash-select" onchange="window.onExplorerDropdownChange()">
+
+                        <div class="dash-ctrl-group casc-filter-wrap" id="expWrlFilterGroup">
+                            <label>WRL Master:</label>
+                            <button type="button" class="casc-filter-trigger" id="expWrlTrigger" onclick="window.toggleCascFilterMenu('wrl', event)">
+                                <span class="casc-label-txt" id="expWrlTriggerLabel">ทุกแม่ข่าย</span>
+                                <span style="font-size:10px;color:var(--text-secondary);">▾</span>
+                            </button>
+                            <div class="casc-filter-menu align-right" id="expWrlCascMenu" onclick="event.stopPropagation()"></div>
+                            <select id="dashExplorerWrl" class="dash-select" style="display:none;" onchange="window.onExplorerDropdownChange()">
                                 <option value="all">ทุกแม่ข่าย</option>
                             </select>
                         </div>
@@ -5377,7 +5808,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                                     <th class="hide-on-mobile">IP</th>
                                     <th class="hide-on-mobile">DNP</th>
                                     <th>State SCADA</th>
-                                    <th>แผนที่</th>
+                                    <th>แผนที่ / แจ้งแก้ไข</th>
                                 </tr>
                             </thead>
                             <tbody id="dashExplorerTbody"></tbody>
@@ -5859,6 +6290,112 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             </div>
         </div>
 
+        <!-- หน้าต่าง Popup/Modal แจ้งข้อมูลไม่ถูกต้อง (Report Incorrect Data) ส่งเข้า Google Sheets (User_Report) -->
+        <div id="userReportModalOverlay" class="report-modal-overlay">
+            <div class="report-modal ur-modal-box" role="dialog" aria-modal="true" aria-labelledby="userReportModalTitle">
+                <button class="report-close-btn" type="button" onclick="window.closeUserReportModal()" aria-label="ปิดหน้าต่าง">×</button>
+                <div class="report-modal-top">
+                    <div class="report-modal-icon" style="background:#fff7ed;">
+                        <svg viewBox="0 0 24 24" style="stroke:#ea580c;"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <div class="report-eyebrow-row">
+                            <p class="report-eyebrow" style="color:#ea580c;">REPORT INCORRECT DATA</p>
+                            <a href="https://docs.google.com/spreadsheets/d/10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q/edit?gid=1800640563#gid=1800640563" target="_blank" rel="noopener" class="report-source-badge" style="text-decoration:none;color:var(--accent-primary);">
+                                ชีตเป้าหมาย: User_Report (gid=1800640563) ↗
+                            </a>
+                            <button type="button" class="report-mini-btn" onclick="window.toggleUrWebhookConfig()" style="margin-left:auto;font-size:10.5px;">
+                                ⚙️ ตั้งค่า Webhook URL
+                            </button>
+                        </div>
+                        <h3 id="userReportModalTitle">แจ้งข้อมูลอุปกรณ์ไม่ถูกต้อง (ระบบ SCADA NE2)</h3>
+                        <p class="report-subtitle">เลือกอุปกรณ์ที่ต้องการแจ้งปัญหา ติ๊กเลือกฟิลด์ที่ไม่ถูกต้อง และระบุข้อมูลที่ถูกต้องเพื่อส่งเข้าชีต <code>User_Report</code></p>
+                    </div>
+                </div>
+
+                <!-- กล่องตั้งค่า Google Apps Script Web App URL (พับเก็บได้) -->
+                <div id="urWebhookConfigBox" class="report-section" style="display:none;border-color:var(--accent-primary);">
+                    <div class="report-section-heading" style="margin-bottom:6px;">
+                        <div class="report-section-title-wrap">
+                            <span class="report-section-title" style="color:var(--accent-primary);">ตั้งค่า URL ของ Google Apps Script Web App (Webhook)</span>
+                            <span class="report-section-help">นำ URL ที่ได้จากการ Deploy สคริปต์ Code.gs (ลงท้ายด้วย /exec) มาวางที่นี่</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="url" id="urWebhookUrlInput" class="ur-text-input" placeholder="https://script.google.com/macros/s/AKfycb.../exec" oninput="window.saveUrWebhookUrl(this.value)">
+                        <button type="button" class="report-mini-btn" style="white-space:nowrap;padding:8px 12px;" onclick="window.toggleUrWebhookConfig(false)">บันทึก & ปิด</button>
+                    </div>
+                </div>
+
+                <!-- ขั้นตอนที่ 1: เลือกชื่ออุปกรณ์/ข้อมูล -->
+                <section class="report-section">
+                    <div class="report-section-heading">
+                        <div class="report-section-title-wrap">
+                            <span class="report-section-title"><span class="ur-step-badge">1</span>เลือก "ชื่ออุปกรณ์/ข้อมูล" ที่ต้องการแจ้งปัญหา</span>
+                            <span class="report-section-help">พิมพ์ค้นหาหรือเลือกจากรายการ อุปกรณ์ทั้งหมดจะถูกดึงมาแสดงด้านล่าง</span>
+                        </div>
+                        <span class="report-worker-count" id="urMatchedDeviceCount">1,571 อุปกรณ์</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <input type="search" id="urDeviceSearchInput" class="ur-text-input" placeholder="พิมพ์ค้นหา Site ID, รหัสสั่งการ, สถานที่, การไฟฟ้า, IP, DNP..." oninput="window.filterUserReportDeviceOptions()">
+                        <select id="urDeviceSelect" class="ur-text-input" style="font-weight:600;cursor:pointer;" onchange="window.onUserReportDeviceSelected(this.value)">
+                            <option value="">-- กรุณาเลือกอุปกรณ์ที่ต้องการแจ้งข้อมูลไม่ถูกต้อง --</option>
+                        </select>
+                    </div>
+                    <div id="urDeviceFullDataBox" style="display:none;margin-top:10px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                            <span style="font-size:11.5px;font-weight:600;color:var(--accent-primary);" id="urSelectedDeviceHeader">ข้อมูลปัจจุบันของอุปกรณ์ในระบบทั้งหมด:</span>
+                            <span style="font-size:11px;color:var(--text-secondary);">ตรวจสอบค่าปัจจุบันก่อนติ๊กเลือกฟิลด์ด้านล่าง</span>
+                        </div>
+                        <div id="urDeviceInfoGrid" class="ur-device-info-grid"></div>
+                    </div>
+                </section>
+
+                <!-- ขั้นตอนที่ 2: Checkbox เลือกเฉพาะฟิลด์หรือค่าที่ไม่ถูกต้อง -->
+                <section class="report-section">
+                    <div class="report-section-heading">
+                        <div class="report-section-title-wrap">
+                            <span class="report-section-title"><span class="ur-step-badge">2</span>ติ๊กเลือกเฉพาะ "ฟิลด์หรือค่าที่ไม่ถูกต้อง"</span>
+                            <span class="report-section-help">เลือกได้มากกว่า 1 ฟิลด์ (สามารถพิมพ์ค่าที่ถูกต้องแยกตามฟิลด์หรือพิมพ์รวมในข้อ 3 ได้)</span>
+                        </div>
+                        <span class="report-worker-count" id="urCheckedFieldsBadge">เลือกแล้ว 0 ฟิลด์</span>
+                    </div>
+                    <div id="urFieldsChecklist" class="ur-fields-checklist">
+                        <div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-secondary);font-size:12px;">
+                            กรุณาเลือกอุปกรณ์ในขั้นตอนที่ 1 ก่อน เพื่อแสดงรายการฟิลด์และค่าปัจจุบันทั้งหมด
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ขั้นตอนที่ 3: ช่อง Text Input พิมพ์ข้อมูลที่ถูกต้อง (แก้ไขเป็น) -->
+                <section class="report-section">
+                    <div class="report-section-heading">
+                        <div class="report-section-title-wrap">
+                            <span class="report-section-title"><span class="ur-step-badge">3</span>ข้อมูลที่ถูกต้อง (แก้ไขเป็น)</span>
+                            <span class="report-section-help">ระบุค่าหรือรายละเอียดที่ถูกต้องสำหรับฟิลด์ที่ติ๊กเลือกข้างต้น</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <input type="text" id="urCorrectedValueInput" class="ur-text-input" placeholder="พิมพ์ข้อมูลที่ถูกต้อง (แก้ไขเป็น)... เช่น เปลี่ยนรหัสสั่งการเป็น UBB05R-01, เปลี่ยน IP เป็น 10.120.xx.xx">
+                        <input type="text" id="urReporterNoteInput" class="ur-text-input" style="font-size:12px;padding:7px 12px;" placeholder="ผู้แจ้ง / สังกัด / หมายเหตุเพิ่มเติม (ถ้ามี)">
+                    </div>
+                    <div id="urStatusBanner" class="ur-status-banner"></div>
+                </section>
+
+                <!-- ขั้นตอนที่ 4: ปุ่มส่งข้อมูล (Submit) -->
+                <div class="report-btn-group">
+                    <div class="report-btn-secondary-row">
+                        <button class="report-btn report-btn-cancel" type="button" onclick="window.resetUserReportForm()">ล้างฟอร์ม</button>
+                        <button class="report-btn report-btn-cancel" type="button" onclick="window.closeUserReportModal()">ปิดหน้าต่าง</button>
+                    </div>
+                    <button id="urSubmitBtn" class="report-btn report-btn-dl" type="button" onclick="window.submitUserReportToGoogleSheet()" style="background:#ea580c;">
+                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                        4. ส่งข้อมูล (Submit) เข้า Google Sheets (ชีต User_Report)
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Modal แจ้งเตือน -->
         <div id="customAlertOverlay" class="custom-alert-overlay">
             <div class="custom-alert-box">
@@ -6017,6 +6554,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             if (fw) fw.classList.remove('show');
             if (typeof closeReportModal === 'function') closeReportModal();
             if (typeof window.closeDashExportModal === 'function') window.closeDashExportModal();
+            if (typeof window.closeUserReportModal === 'function') window.closeUserReportModal();
+            if (typeof window.closeAllCascFilterMenus === 'function') window.closeAllCascFilterMenus();
             var alertOverlay = document.getElementById('customAlertOverlay');
             if (alertOverlay) alertOverlay.classList.remove('show');
             var results = document.getElementById('searchResults');
@@ -8909,6 +9448,14 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             resp: ''
         }};
 
+        // ตั้งค่า Google Sheets เป้าหมายสำหรับระบบ "Report ข้อมูลไม่ถูกต้อง"
+        var USER_REPORT_TARGET_SPREADSHEET_ID = '10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q';
+        var USER_REPORT_TARGET_GID = '1800640563';
+        var USER_REPORT_TARGET_SHEET_NAME = 'User_Report';
+        var USER_REPORT_TARGET_SHEET_URL = 'https://docs.google.com/spreadsheets/d/10QuVWnj2BCPpNqrXpBM8sbARmKGTksQ1fxUYx2Xaa8Q/edit?gid=1800640563#gid=1800640563';
+        // สามารถนำ Web App URL ที่ได้จากการ Deploy Google Apps Script (Code.gs) มาใส่ในตัวแปรด้านล่างนี้ หรือตั้งค่าผ่านปุ่ม "ตั้งค่า Webhook URL" บนหน้าเว็บได้ทันที
+        var USER_REPORT_GAS_WEBHOOK_URL = '{USER_REPORT_GAS_WEBHOOK_URL}';
+
         function classifyRawParentState(stText) {{
             var u = String(stText || '').trim().toUpperCase();
             if (u.startsWith('ONLINE')) return 'Online';
@@ -8943,9 +9490,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             ].indexOf(normEq) >= 0;
         }}
 
-        // กฎการจัดกลุ่มยี่ห้อหลักอัตโนมัติ (Hierarchical Brand Filter & Auto-grouping)
-        // เรียงลำดับความสำคัญให้ยี่ห้อเฉพาะเจาะจงตรวจจับก่อน (เช่น REC Form Shinsung -> Shinsung, RCS Timpano FDCU-F80 -> Timpano)
-        // และ LRR ทั่วไป จะถูกจัดเข้ากลุ่มเฉพาะกรณีที่ไม่มีชื่อยี่ห้อหลักอื่นผสมอยู่
         var MAIN_BRAND_DEFINITIONS = [
             {{ group: 'FXD', keywords: ['FXD'] }},
             {{ group: 'Shinsung', keywords: ['SHINSUNG', 'SHINSING'] }},
@@ -8966,24 +9510,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         ];
 
         var BRAND_DISPLAY_ORDER = [
-            'FXD',
-            'Shinsung',
-            'CYG',
-            'Precise',
-            'Timpano',
-            'Form / Cooper',
-            'Nulec',
-            'G&W',
-            'FDCU',
-            'ENTEC',
-            'ENOVA',
-            'Jin Kwang',
-            'Robin',
-            'CCS',
-            'LBS115',
-            'LRR ทั่วไป',
-            'ยี่ห้ออื่นๆ',
-            'ไม่ระบุ'
+            'FXD', 'Shinsung', 'CYG', 'Precise', 'Timpano', 'Form / Cooper',
+            'Nulec', 'G&W', 'FDCU', 'ENTEC', 'ENOVA', 'Jin Kwang',
+            'Robin', 'CCS', 'LBS115', 'LRR ทั่วไป', 'ยี่ห้ออื่นๆ', 'ไม่ระบุ'
         ];
 
         function classifyMainBrandGroup(subBrandStr) {{
@@ -9003,7 +9532,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             return 'ยี่ห้ออื่นๆ';
         }}
 
-        // โครงสร้าง Dictionary สำหรับจัดกลุ่มอุปกรณ์สื่อสารหลัก (ซิงค์จาก Python COMM_DEVICE_GROUPS รองรับการขยายในอนาคต)
         var COMM_DEVICE_GROUPS_CONFIG = {comm_device_groups_json};
         var expandedCommGroupsInTable = Object.create(null);
 
@@ -9019,24 +9547,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             var upperAll = combined.toUpperCase();
             var groupNames = Object.keys(COMM_DEVICE_GROUPS_CONFIG);
 
-            // 1. ตรวจสอบจาก Commu. ก่อน
             for (var i = 0; i < groupNames.length; i++) {{
                 var gName = groupNames[i];
                 var kws = COMM_DEVICE_GROUPS_CONFIG[gName] || [];
                 for (var j = 0; j < kws.length; j++) {{
-                    if (upperC.indexOf(String(kws[j]).toUpperCase()) !== -1) {{
-                        return gName;
-                    }}
+                    if (upperC.indexOf(String(kws[j]).toUpperCase()) !== -1) return gName;
                 }}
             }}
-            // 2. ตรวจสอบจากข้อความรวม (Commu. + Item)
             for (var k = 0; k < groupNames.length; k++) {{
                 var gName2 = groupNames[k];
                 var kws2 = COMM_DEVICE_GROUPS_CONFIG[gName2] || [];
                 for (var m = 0; m < kws2.length; m++) {{
-                    if (upperAll.indexOf(String(kws2[m]).toUpperCase()) !== -1) {{
-                        return gName2;
-                    }}
+                    if (upperAll.indexOf(String(kws2[m]).toUpperCase()) !== -1) return gName2;
                 }}
             }}
             return 'อุปกรณ์สื่อสารอื่นๆ';
@@ -9059,6 +9581,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         var expandedBrandGroupsInMenu = Object.create(null);
         var expandedBrandGroupsInTable = Object.create(null);
         var brandSearchQueryByMode = {{ top: '', exp: '' }};
+        var cascFilterSearchQuery = {{ pea: '', status: '', eq: '', comm: '', wrl: '' }};
 
         function matchesBrandSelection(row, selectedFilterVal) {{
             if (!selectedFilterVal || selectedFilterVal === 'all') return true;
@@ -9160,30 +9683,77 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             return keys.slice().sort(function(a, b) {{
                 var da = dataMap[a], db = dataMap[b];
                 var totA = da.total || 0, totB = db.total || 0;
+                // ให้รายการที่มีข้อมูล (> 0) แสดงขึ้นก่อนรายการที่ไม่มีข้อมูลตรงเงื่อนไข (0 ชุด) เสมอ
+                var hasA = totA > 0 ? 1 : 0;
+                var hasB = totB > 0 ? 1 : 0;
+                if (hasA !== hasB) return hasB - hasA;
+
                 var onA = da.Online || 0, onB = db.Online || 0;
                 var offA = (da.OfflineSum !== undefined) ? da.OfflineSum : (totA - onA);
                 var offB = (db.OfflineSum !== undefined) ? db.OfflineSum : (totB - onB);
                 var avaA = totA > 0 ? (onA / totA) * 100 : 0;
                 var avaB = totB > 0 ? (onB / totB) * 100 : 0;
 
-                if (mode === 'ava_desc') return (avaB - avaA) || (totB - totA);
-                if (mode === 'ava_asc') return (avaA - avaB) || (offB - offA);
-                if (mode === 'total_desc') return (totB - totA) || (avaB - avaA);
-                if (mode === 'total_asc') return (totA - totB) || (avaB - avaA);
-                if (mode === 'online_desc') return (onB - onA) || (totB - totA);
-                if (mode === 'online_asc') return (onA - onB) || (totA - totB);
-                if (mode === 'offline_desc') return (offB - offA) || (totB - totA);
-                if (mode === 'offline_asc') return (offA - offB) || (totA - totB);
+                if (mode === 'ava_desc') return (avaB - avaA) || (totB - totA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'ava_asc') return (avaA - avaB) || (offB - offA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'total_desc') return (totB - totA) || (avaB - avaA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'total_asc') return (totA - totB) || (avaB - avaA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'online_desc') return (onB - onA) || (totB - totA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'online_asc') return (onA - onB) || (totA - totB) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'offline_desc') return (offB - offA) || (totB - totA) || String(a).localeCompare(String(b), 'th');
+                if (mode === 'offline_asc') return (offA - offB) || (totA - totB) || String(a).localeCompare(String(b), 'th');
                 if (mode === 'name_asc') return String(a).localeCompare(String(b), 'th');
                 if (mode === 'name_desc') return String(b).localeCompare(String(a), 'th');
                 return (avaB - avaA) || (totB - totA);
             }});
         }}
 
+        // ฟังก์ชันตรวจสอบเงื่อนไข Real-time Cascading Cross-Filter (สามารถระบุ ignoreDim เพื่อคำนวณตัวเลือกในมิติตัวเองได้)
+        function classifyRowRespBucketKey(r) {{
+            if (r.parent_state === 'Online') return '';
+            var af = r.after_full || '';
+            if (af.includes('รอ ผบอ. และ ผอส.')) return 'รอ ผบอ. และ ผอส. เข้าแก้ไข';
+            if (af.includes('รอ ผบอ.')) return 'รอ ผบอ. เข้าแก้ไข';
+            if (af.includes('รอ ผอส.')) return 'รอ ผอส. เข้าแก้ไข';
+            if (af.includes('ผบอ. เคยแก้ไข')) return 'ผบอ. เคยแก้ไขแล้วกลับมา Offline';
+            if (af.includes('ระบบสื่อสารเคยแก้ไข')) return 'ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline';
+            return 'รอตรวจสอบสาเหตุ';
+        }}
+
+        function rowMatchesActiveFilters(r, ignoreDim) {{
+            var ig = ignoreDim || '';
+            var peaFilter = explorerFilterState.pea || 'all';
+            var stFilter = explorerFilterState.status || 'all';
+            var eqFilter = explorerFilterState.eq || 'all';
+            var prodFilter = explorerFilterState.prod || 'all';
+            var commFilter = explorerFilterState.comm || 'all';
+            var wrlFilter = explorerFilterState.wrl || 'all';
+            var respFilter = explorerFilterState.resp || '';
+            var q = String((document.getElementById('dashExplorerSearch') || {{}}).value || '').trim().toLowerCase();
+
+            if (ig !== 'pea' && peaFilter !== 'all' && r.pea !== peaFilter) return false;
+            if (ig !== 'status') {{
+                if (stFilter === 'ALL_OFFLINE' && r.parent_state === 'Online') return false;
+                else if (stFilter !== 'all' && stFilter !== 'ALL_OFFLINE' && r.parent_state !== stFilter) return false;
+            }}
+            if (ig !== 'eq' && eqFilter !== 'all' && r.norm_eq !== eqFilter) return false;
+            if (ig !== 'prod' && prodFilter !== 'all' && !matchesBrandSelection(r, prodFilter)) return false;
+            if (ig !== 'comm' && commFilter !== 'all' && !matchesCommSelection(r, commFilter)) return false;
+            if (ig !== 'wrl' && wrlFilter !== 'all' && r.comm_ref !== wrlFilter) return false;
+            if (ig !== 'resp' && respFilter) {{
+                var rowRespKey = classifyRowRespBucketKey(r);
+                if (rowRespKey !== respFilter) return false;
+            }}
+            if (ig !== 'search' && q) {{
+                var hay = (r.site_id + ' ' + r.cmd + ' ' + r.loc + ' ' + r.pea + ' ' + r.norm_eq + ' ' + r.prod + ' ' + r.ip + ' ' + r.dnp + ' ' + r.comm_type + ' ' + r.comm_item + ' ' + r.comm_ref + ' ' + r.state_full).toLowerCase();
+                if (hay.indexOf(q) === -1) return false;
+            }}
+            return true;
+        }}
+
         function populateDashboardDropdownsOnce() {{
-            var peaSelect = document.getElementById('dashPeaFilter');
             var expPeaSelect = document.getElementById('dashExplorerPea');
-            if (!peaSelect || peaSelect.dataset.initialized === '1') return;
+            if (!expPeaSelect || expPeaSelect.dataset.initialized === '1') return;
 
             var peaSet = new Set();
             for (var i = 0; i < dashAllRecords.length; i++) {{
@@ -9192,27 +9762,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }}
             var sortedPeas = Array.from(peaSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }});
             sortedPeas.forEach(function(p) {{
-                var opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                peaSelect.appendChild(opt);
-                if (expPeaSelect) {{
-                    var opt2 = document.createElement('option');
-                    opt2.value = p;
-                    opt2.textContent = p;
-                    expPeaSelect.appendChild(opt2);
-                }}
+                var opt2 = document.createElement('option');
+                opt2.value = p;
+                opt2.textContent = p;
+                expPeaSelect.appendChild(opt2);
             }});
-            peaSelect.dataset.initialized = '1';
-            if (expPeaSelect) expPeaSelect.dataset.initialized = '1';
+            expPeaSelect.dataset.initialized = '1';
         }}
 
         window.onTopPeaFilterChange = function(val) {{
             var v = val || 'all';
             explorerFilterState.pea = v;
-            var topSel = document.getElementById('dashPeaFilter');
             var expSel = document.getElementById('dashExplorerPea');
-            if (topSel && topSel.value !== v) topSel.value = v;
             if (expSel && expSel.value !== v) expSel.value = v;
             dashExplorerLimit = 250;
             window.renderScadaDashboard();
@@ -9221,90 +9782,298 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         window.onExplorerPeaDropdownChange = function(val) {{
             var v = val || 'all';
             explorerFilterState.pea = v;
-            var topSel = document.getElementById('dashPeaFilter');
             var expSel = document.getElementById('dashExplorerPea');
-            if (topSel && topSel.value !== v) topSel.value = v;
             if (expSel && expSel.value !== v) expSel.value = v;
             dashExplorerLimit = 250;
             window.renderScadaDashboard();
         }};
 
-        function syncExplorerFilterDropdowns(rows) {{
-            var eqSel = document.getElementById('dashExplorerEq');
-            var prodSel = document.getElementById('dashExplorerProd');
-            var commSel = document.getElementById('dashExplorerComm');
-            var wrlSel = document.getElementById('dashExplorerWrl');
-            var stSel = document.getElementById('dashExplorerStatus');
+        window.onExplorerSearchInput = function() {{
+            dashExplorerLimit = 250;
+            window.renderScadaDashboard();
+        }};
 
-            var eqSet = new Set();
-            var prodSet = new Set();
-            var commSet = new Set();
-            var wrlSet = new Set();
-
-            rows.forEach(function(r) {{
-                if (r.norm_eq) eqSet.add(r.norm_eq);
-                if (r.prod) prodSet.add(r.prod);
-                if (r.comm_group) commSet.add('COMM_GROUP:' + r.comm_group);
-                if (r.comm_combo) commSet.add(r.comm_combo);
-                if (r.comm_type) commSet.add(r.comm_type);
-                if (r.comm_item) commSet.add(r.comm_item);
-                if (r.comm_ref) wrlSet.add(r.comm_ref);
+        // === ระบบ Cascading Popover Menus สำหรับตัวกรองในหัวข้อที่ 6 (แสดง Opacity 0.4 และห้ามคลิกเมื่อไม่มีข้อมูลตรงเงื่อนไข) ===
+        window.closeAllCascFilterMenus = function() {{
+            ['expPeaCascMenu', 'expStatusCascMenu', 'expEqCascMenu', 'expCommCascMenu', 'expWrlCascMenu', 'expHierBrandMenu'].forEach(function(id) {{
+                var el = document.getElementById(id);
+                if (el) el.classList.remove('show');
             }});
+        }};
 
-            function rebuildSelect(sel, allLabel, itemsSet, currentVal) {{
-                if (!sel) return;
-                sel.innerHTML = '';
-                var optAll = document.createElement('option');
-                optAll.value = 'all';
-                optAll.textContent = allLabel;
-                sel.appendChild(optAll);
-                Array.from(itemsSet).sort(function(a, b) {{
-                    var isGrpA = String(a).indexOf('COMM_GROUP:') === 0 ? 0 : 1;
-                    var isGrpB = String(b).indexOf('COMM_GROUP:') === 0 ? 0 : 1;
-                    if (isGrpA !== isGrpB) return isGrpA - isGrpB;
-                    return String(a).localeCompare(String(b), 'th');
-                }}).forEach(function(val) {{
-                    var opt = document.createElement('option');
-                    opt.value = val;
-                    opt.textContent = String(val).indexOf('COMM_GROUP:') === 0
-                        ? ('[กลุ่มหลัก] ' + String(val).substring(11) + ' (ทั้งหมด)')
-                        : val;
-                    sel.appendChild(opt);
-                }});
-                if (currentVal && currentVal !== 'all' && !itemsSet.has(currentVal)) {{
-                    var extraOpt = document.createElement('option');
-                    extraOpt.value = currentVal;
-                    extraOpt.textContent = currentVal;
-                    sel.appendChild(extraOpt);
+        window.toggleCascFilterMenu = function(dimKey, ev) {{
+            if (ev) {{
+                ev.preventDefault();
+                ev.stopPropagation();
+            }}
+            var menuIdMap = {{
+                pea: 'expPeaCascMenu',
+                status: 'expStatusCascMenu',
+                eq: 'expEqCascMenu',
+                comm: 'expCommCascMenu',
+                wrl: 'expWrlCascMenu'
+            }};
+            var targetId = menuIdMap[dimKey];
+            var targetEl = document.getElementById(targetId);
+            if (!targetEl) return;
+            var willShow = !targetEl.classList.contains('show');
+            window.closeAllCascFilterMenus();
+            if (willShow) {{
+                targetEl.classList.add('show');
+                renderCascadingFilterMenus(cachedDashboardRows);
+                var sInp = targetEl.querySelector('.hier-brand-search');
+                if (sInp) setTimeout(function() {{ sInp.focus(); }}, 30);
+            }}
+        }};
+
+        window.selectCascFilterOption = function(dimKey, val, ev) {{
+            if (ev) {{
+                ev.preventDefault();
+                ev.stopPropagation();
+            }}
+            explorerFilterState[dimKey] = val || 'all';
+            var selectIdMap = {{
+                pea: 'dashExplorerPea',
+                status: 'dashExplorerStatus',
+                eq: 'dashExplorerEq',
+                comm: 'dashExplorerComm',
+                wrl: 'dashExplorerWrl'
+            }};
+            var selEl = document.getElementById(selectIdMap[dimKey]);
+            if (selEl) {{
+                var hasOpt = Array.from(selEl.options).some(function(o) {{ return o.value === explorerFilterState[dimKey]; }});
+                if (!hasOpt && explorerFilterState[dimKey] !== 'all') {{
+                    var nOpt = document.createElement('option');
+                    nOpt.value = explorerFilterState[dimKey];
+                    nOpt.textContent = explorerFilterState[dimKey];
+                    selEl.appendChild(nOpt);
                 }}
-                sel.value = currentVal || 'all';
+                selEl.value = explorerFilterState[dimKey];
+            }}
+            window.closeAllCascFilterMenus();
+            dashExplorerLimit = 250;
+            window.renderScadaDashboard();
+        }};
+
+        function renderSingleCascMenu(dimKey, menuId, labelId, selectId, defaultLabel, allOptionsList, countByValMap, totalAvailCount) {{
+            var menuEl = document.getElementById(menuId);
+            var labelEl = document.getElementById(labelId);
+            var selEl = document.getElementById(selectId);
+            var currentVal = explorerFilterState[dimKey] || 'all';
+
+            var currentOptionObj = allOptionsList.find(function(o) {{ return o.value === currentVal; }});
+            if (labelEl) {{
+                labelEl.textContent = (currentVal === 'all' || !currentOptionObj) ? defaultLabel : currentOptionObj.label;
             }}
 
-            rebuildSelect(eqSel, 'ทุกชนิดอุปกรณ์', eqSet, explorerFilterState.eq);
-            rebuildSelect(prodSel, 'ทุกผลิตภัณฑ์', prodSet, explorerFilterState.prod);
-            rebuildSelect(commSel, 'ทุกประเภทสื่อสาร', commSet, explorerFilterState.comm);
-            rebuildSelect(wrlSel, 'ทุกแม่ข่าย', wrlSet, explorerFilterState.wrl);
-            if (stSel) stSel.value = explorerFilterState.status || 'all';
-            var topPeaSel = document.getElementById('dashPeaFilter');
-            var expPeaSel = document.getElementById('dashExplorerPea');
-            var currentPeaVal = explorerFilterState.pea || (topPeaSel ? topPeaSel.value : 'all') || 'all';
-            if (topPeaSel && topPeaSel.value !== currentPeaVal) topPeaSel.value = currentPeaVal;
-            if (expPeaSel && expPeaSel.value !== currentPeaVal) expPeaSel.value = currentPeaVal;
+            // ซิงค์กับ <select> เดิมพร้อมตั้งค่า disabled และ opacity 0.4 สำหรับตัวเลือกที่มี 0 ชุด
+            if (selEl) {{
+                selEl.innerHTML = '';
+                var optAll = document.createElement('option');
+                optAll.value = 'all';
+                optAll.textContent = defaultLabel + ' (' + totalAvailCount.toLocaleString() + ')';
+                selEl.appendChild(optAll);
+                allOptionsList.forEach(function(o) {{
+                    var c = countByValMap[o.value] || 0;
+                    var opt = document.createElement('option');
+                    opt.value = o.value;
+                    opt.textContent = o.label + ' (' + c.toLocaleString() + ')';
+                    if (c === 0 && currentVal !== o.value) {{
+                        opt.disabled = true;
+                        opt.style.opacity = '0.4';
+                    }}
+                    selEl.appendChild(opt);
+                }});
+                selEl.value = currentVal;
+            }}
+
+            if (!menuEl) return;
+            var q = String(cascFilterSearchQuery[dimKey] || '').trim().toLowerCase();
+            menuEl.innerHTML = '';
+
+            if (allOptionsList.length > 6) {{
+                var searchInp = document.createElement('input');
+                searchInp.type = 'search';
+                searchInp.className = 'hier-brand-search';
+                searchInp.placeholder = 'ค้นหาตัวเลือก...';
+                searchInp.value = cascFilterSearchQuery[dimKey] || '';
+                searchInp.onclick = function(e) {{ e.stopPropagation(); }};
+                searchInp.oninput = function(e) {{
+                    cascFilterSearchQuery[dimKey] = e.target.value;
+                    renderSingleCascMenu(dimKey, menuId, labelId, selectId, defaultLabel, allOptionsList, countByValMap, totalAvailCount);
+                    var nextInp = menuEl.querySelector('.hier-brand-search');
+                    if (nextInp) {{
+                        nextInp.focus();
+                        var ln = nextInp.value.length;
+                        nextInp.setSelectionRange(ln, ln);
+                    }}
+                }};
+                menuEl.appendChild(searchInp);
+            }}
+
+            var allBtn = document.createElement('button');
+            allBtn.type = 'button';
+            allBtn.className = 'casc-menu-item' + (currentVal === 'all' ? ' is-active' : '');
+            allBtn.innerHTML = '<span>' + defaultLabel + ' (ทั้งหมด)</span><span class="hier-brand-count">' + totalAvailCount.toLocaleString() + ' ชุด</span>';
+            allBtn.onclick = function(e) {{ window.selectCascFilterOption(dimKey, 'all', e); }};
+            menuEl.appendChild(allBtn);
+
+            // เรียงลำดับให้ตัวเลือกที่มีข้อมูล (> 0) แสดงผลด้านบนอย่างโดดเด่น ส่วนตัวที่ไม่มีข้อมูล (0 ชุด) แสดงสีจาง (Opacity 0.4) และคลิกไม่ได้
+            var sortedOpts = allOptionsList.slice().sort(function(a, b) {{
+                var cA = countByValMap[a.value] || 0;
+                var cB = countByValMap[b.value] || 0;
+                var hasA = cA > 0 ? 1 : 0;
+                var hasB = cB > 0 ? 1 : 0;
+                if (hasA !== hasB) return hasB - hasA;
+                if (a.preserveOrder && b.preserveOrder) return a.orderIdx - b.orderIdx;
+                return (cB - cA) || String(a.label).localeCompare(String(b.label), 'th');
+            }});
+
+            sortedOpts.forEach(function(o) {{
+                if (q && o.label.toLowerCase().indexOf(q) === -1 && o.value.toLowerCase().indexOf(q) === -1) return;
+                var cnt = countByValMap[o.value] || 0;
+                var isZero = (cnt === 0);
+                var isSelected = (currentVal === o.value);
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'casc-menu-item' + (isSelected ? ' is-active' : '') + (isZero ? ' is-zero-match' : '');
+                if (isZero) {{
+                    btn.disabled = true;
+                    btn.setAttribute('aria-disabled', 'true');
+                }}
+                btn.innerHTML =
+                    '<span style="word-break:break-word;">' + o.label + '</span>' +
+                    '<span class="hier-brand-count">' + cnt.toLocaleString() + ' ชุด</span>';
+                if (!isZero) {{
+                    btn.onclick = function(e) {{ window.selectCascFilterOption(dimKey, o.value, e); }};
+                }}
+                menuEl.appendChild(btn);
+            }});
+        }}
+
+        function renderCascadingFilterMenus(allRows) {{
+            var rows = allRows || [];
+            var peaAllSet = new Set();
+            var eqAllSet = new Set();
+            var commGroupSet = new Set();
+            var commComboSet = new Set();
+            var wrlAllSet = new Set();
+
+            rows.forEach(function(r) {{
+                if (r.pea) peaAllSet.add(r.pea);
+                if (r.norm_eq) eqAllSet.add(r.norm_eq);
+                if (r.comm_group) commGroupSet.add(r.comm_group);
+                if (r.comm_combo) commComboSet.add(r.comm_combo);
+                if (r.comm_ref) wrlAllSet.add(r.comm_ref);
+            }});
+
+            // 1. การไฟฟ้า (pea)
+            var peaMatchedRows = rows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'pea'); }});
+            var peaCounts = Object.create(null);
+            peaMatchedRows.forEach(function(r) {{ peaCounts[r.pea] = (peaCounts[r.pea] || 0) + 1; }});
+            var peaOpts = Array.from(peaAllSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).map(function(v) {{
+                return {{ value: v, label: v }};
+            }});
+            renderSingleCascMenu('pea', 'expPeaCascMenu', 'expPeaTriggerLabel', 'dashExplorerPea', 'ทุกการไฟฟ้า', peaOpts, peaCounts, peaMatchedRows.length);
+
+            // 2. State SCADA (status)
+            var statusMatchedRows = rows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'status'); }});
+            var statusCounts = {{
+                'ALL_OFFLINE': 0,
+                'Online': 0,
+                'Connecting': 0,
+                'Offline': 0,
+                'Initializing': 0,
+                'Telemetry Failure': 0
+            }};
+            statusMatchedRows.forEach(function(r) {{
+                if (statusCounts[r.parent_state] !== undefined) statusCounts[r.parent_state]++;
+                if (r.parent_state !== 'Online') statusCounts['ALL_OFFLINE']++;
+            }});
+            var statusOpts = [
+                {{ value: 'ALL_OFFLINE', label: 'ไม่ออนไลน์ทั้งหมด', preserveOrder: true, orderIdx: 1 }},
+                {{ value: 'Online', label: 'Online', preserveOrder: true, orderIdx: 2 }},
+                {{ value: 'Connecting', label: 'Connecting', preserveOrder: true, orderIdx: 3 }},
+                {{ value: 'Offline', label: 'Offline', preserveOrder: true, orderIdx: 4 }},
+                {{ value: 'Initializing', label: 'Initializing', preserveOrder: true, orderIdx: 5 }},
+                {{ value: 'Telemetry Failure', label: 'Telemetry Failure', preserveOrder: true, orderIdx: 6 }}
+            ];
+            renderSingleCascMenu('status', 'expStatusCascMenu', 'expStatusTriggerLabel', 'dashExplorerStatus', 'ทุกสถานะ', statusOpts, statusCounts, statusMatchedRows.length);
+
+            // 3. ชนิดอุปกรณ์ (eq)
+            var eqMatchedRows = rows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'eq'); }});
+            var eqCounts = Object.create(null);
+            eqMatchedRows.forEach(function(r) {{ eqCounts[r.norm_eq] = (eqCounts[r.norm_eq] || 0) + 1; }});
+            var eqOpts = Array.from(eqAllSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).map(function(v) {{
+                return {{ value: v, label: v }};
+            }});
+            renderSingleCascMenu('eq', 'expEqCascMenu', 'expEqTriggerLabel', 'dashExplorerEq', 'ทุกชนิดอุปกรณ์', eqOpts, eqCounts, eqMatchedRows.length);
+
+            // 4. อุปกรณ์สื่อสาร (comm)
+            var commMatchedRows = rows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'comm'); }});
+            var commCounts = Object.create(null);
+            commMatchedRows.forEach(function(r) {{
+                var gVal = 'COMM_GROUP:' + r.comm_group;
+                commCounts[gVal] = (commCounts[gVal] || 0) + 1;
+                commCounts[r.comm_combo] = (commCounts[r.comm_combo] || 0) + 1;
+                commCounts[r.comm_type] = (commCounts[r.comm_type] || 0) + 1;
+                commCounts[r.comm_item] = (commCounts[r.comm_item] || 0) + 1;
+            }});
+            var commOpts = [];
+            Array.from(commGroupSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).forEach(function(g, idx) {{
+                commOpts.push({{ value: 'COMM_GROUP:' + g, label: '[กลุ่มหลัก] ' + g + ' (ทั้งหมด)', preserveOrder: true, orderIdx: idx }});
+            }});
+            Array.from(commComboSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).forEach(function(c, idx) {{
+                commOpts.push({{ value: c, label: c, preserveOrder: false, orderIdx: 100 + idx }});
+            }});
+            renderSingleCascMenu('comm', 'expCommCascMenu', 'expCommTriggerLabel', 'dashExplorerComm', 'ทุกประเภทสื่อสาร', commOpts, commCounts, commMatchedRows.length);
+
+            // 5. แม่ข่ายสื่อสาร (wrl)
+            var wrlMatchedRows = rows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'wrl'); }});
+            var wrlCounts = Object.create(null);
+            wrlMatchedRows.forEach(function(r) {{ wrlCounts[r.comm_ref] = (wrlCounts[r.comm_ref] || 0) + 1; }});
+            var wrlOpts = Array.from(wrlAllSet).sort(function(a, b) {{ return a.localeCompare(b, 'th'); }}).map(function(v) {{
+                return {{ value: v, label: v }};
+            }});
+            renderSingleCascMenu('wrl', 'expWrlCascMenu', 'expWrlTriggerLabel', 'dashExplorerWrl', 'ทุกแม่ข่าย', wrlOpts, wrlCounts, wrlMatchedRows.length);
+
+            // 6. ผลิตภัณฑ์ / ยี่ห้อ (prod)
             renderHierBrandFilterMenus(rows);
         }}
 
-        function buildBrandHierarchyMap(rowsSource) {{
+        function syncExplorerFilterDropdowns(rows) {{
+            renderCascadingFilterMenus(rows);
+        }}
+
+        function buildBrandHierarchyMap(allRowsSource) {{
             var hierarchy = Object.create(null);
-            (rowsSource || []).forEach(function(r) {{
+            var prodMatchedRows = (allRowsSource || []).filter(function(r) {{
+                return rowMatchesActiveFilters(r, 'prod');
+            }});
+            var matchedGroupCounts = Object.create(null);
+            var matchedSubCounts = Object.create(null);
+            prodMatchedRows.forEach(function(r) {{
+                var grp = r.prod_group || classifyMainBrandGroup(r.prod);
+                var sub = r.prod || 'ไม่ระบุประเภทผลิตภัณฑ์';
+                matchedGroupCounts[grp] = (matchedGroupCounts[grp] || 0) + 1;
+                matchedSubCounts[sub] = (matchedSubCounts[sub] || 0) + 1;
+            }});
+
+            (allRowsSource || []).forEach(function(r) {{
                 var grp = r.prod_group || classifyMainBrandGroup(r.prod);
                 var sub = r.prod || 'ไม่ระบุประเภทผลิตภัณฑ์';
                 if (!hierarchy[grp]) {{
-                    hierarchy[grp] = {{ total: 0, subs: Object.create(null) }};
+                    hierarchy[grp] = {{ total: matchedGroupCounts[grp] || 0, subs: Object.create(null) }};
                 }}
-                hierarchy[grp].total++;
-                hierarchy[grp].subs[sub] = (hierarchy[grp].subs[sub] || 0) + 1;
+                if (hierarchy[grp].subs[sub] === undefined) {{
+                    hierarchy[grp].subs[sub] = matchedSubCounts[sub] || 0;
+                }}
             }});
+
             var orderedGroups = Object.keys(hierarchy).sort(function(a, b) {{
+                var totA = hierarchy[a].total > 0 ? 1 : 0;
+                var totB = hierarchy[b].total > 0 ? 1 : 0;
+                if (totA !== totB) return totB - totA;
                 var idxA = BRAND_DISPLAY_ORDER.indexOf(a);
                 var idxB = BRAND_DISPLAY_ORDER.indexOf(b);
                 if (idxA === -1) idxA = 999;
@@ -9312,7 +10081,11 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 if (idxA !== idxB) return idxA - idxB;
                 return String(a).localeCompare(String(b), 'th');
             }});
-            return {{ hierarchy: hierarchy, orderedGroups: orderedGroups }};
+            return {{
+                hierarchy: hierarchy,
+                orderedGroups: orderedGroups,
+                totalAvailable: prodMatchedRows.length
+            }};
         }}
 
         window.toggleHierBrandMenu = function(mode, ev) {{
@@ -9320,15 +10093,12 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 ev.preventDefault();
                 ev.stopPropagation();
             }}
-            var topMenu = document.getElementById('topHierBrandMenu');
             var expMenu = document.getElementById('expHierBrandMenu');
-            var targetMenu = (mode === 'top') ? topMenu : expMenu;
-            var otherMenu = (mode === 'top') ? expMenu : topMenu;
-            if (otherMenu) otherMenu.classList.remove('show');
-            if (!targetMenu) return;
-            var willShow = !targetMenu.classList.contains('show');
-            targetMenu.classList.toggle('show', willShow);
+            if (!expMenu) return;
+            var willShow = !expMenu.classList.contains('show');
+            window.closeAllCascFilterMenus();
             if (willShow) {{
+                expMenu.classList.add('show');
                 renderHierBrandFilterMenus(cachedDashboardRows);
             }}
         }};
@@ -9339,7 +10109,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 ev.stopPropagation();
             }}
             var key = mode + ':' + grpName;
-            // [BUG FIX 1.2] สลับสถานะเปิด/ปิด (Toggle Collapse/Expand) ของกลุ่มยี่ห้อในเมนูตัวกรอง
             expandedBrandGroupsInMenu[key] = !Boolean(expandedBrandGroupsInMenu[key]);
             renderHierBrandFilterMenus(cachedDashboardRows);
         }};
@@ -9361,10 +10130,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }}
                 prodSel.value = explorerFilterState.prod;
             }}
-            var topMenu = document.getElementById('topHierBrandMenu');
-            var expMenu = document.getElementById('expHierBrandMenu');
-            if (topMenu) topMenu.classList.remove('show');
-            if (expMenu) expMenu.classList.remove('show');
+            window.closeAllCascFilterMenus();
             dashExplorerLimit = 250;
             window.renderScadaDashboard();
         }};
@@ -9403,18 +10169,24 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }};
             menuEl.appendChild(searchInp);
 
-            var totalAll = (rowsSource || []).length;
+            var totalAll = info.totalAvailable || 0;
             var allBtn = document.createElement('button');
             allBtn.type = 'button';
             allBtn.className = 'hier-brand-all-btn' + (currentVal === 'all' ? ' is-active' : '');
-            allBtn.innerHTML = '<span>แสดงทุกยี่ห้อ (ทั้งหมด)</span><span class="hier-brand-count">' + totalAll.toLocaleString() + ' ชุด</span>';
+            allBtn.innerHTML = '<span>แสดงทุกยี่ห้อ (ที่ตรงเงื่อนไข)</span><span class="hier-brand-count">' + totalAll.toLocaleString() + ' ชุด</span>';
             allBtn.onclick = function(e) {{ window.selectHierBrandOption('all', e); }};
             menuEl.appendChild(allBtn);
 
             orderedGroups.forEach(function(grp) {{
                 var gData = hierarchy[grp];
+                var isZeroGroup = (gData.total === 0);
                 var subNames = Object.keys(gData.subs).sort(function(a, b) {{
-                    return (gData.subs[b] - gData.subs[a]) || String(a).localeCompare(String(b), 'th');
+                    var cA = gData.subs[a] || 0;
+                    var cB = gData.subs[b] || 0;
+                    var hasA = cA > 0 ? 1 : 0;
+                    var hasB = cB > 0 ? 1 : 0;
+                    if (hasA !== hasB) return hasB - hasA;
+                    return (cB - cA) || String(a).localeCompare(String(b), 'th');
                 }});
 
                 var filteredSubs = subNames.filter(function(sName) {{
@@ -9428,16 +10200,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 var groupValKey = 'GROUP:' + grp;
                 var isGroupSelected = (currentVal === groupValKey) || (subNames.indexOf(currentVal) !== -1);
                 var expKey = mode + ':' + grp;
-                // [BUG FIX 1.2] แก้ไขบั๊กการพับเก็บหัวข้อย่อยในเมนูเลือกยี่ห้อ (UI Toggle):
-                // เดิมใช้ `|| isGroupSelected` ต่อท้าย ทำให้เมื่อเลือกยี่ห้อในกลุ่มนั้นแล้ว จะถูกบังคับเปิดค้างและกดพับเก็บ (Collapse) ไม่ได้
-                // แก้ไขโดยกำหนดค่าเริ่มต้นเฉพาะตอนที่ยังไม่เคยคลิก (undefined) ส่วนเมื่อผู้ใช้คลิกหัวข้อจะสลับค่า true/false ใน expandedBrandGroupsInMenu ได้อย่างอิสระ
-                if (expandedBrandGroupsInMenu[expKey] === undefined && isGroupSelected) {{
+                if (expandedBrandGroupsInMenu[expKey] === undefined && isGroupSelected && !isZeroGroup) {{
                     expandedBrandGroupsInMenu[expKey] = true;
                 }}
-                var isExpanded = Boolean(searchVal) || Boolean(expandedBrandGroupsInMenu[expKey]);
+                var isExpanded = !isZeroGroup && (Boolean(searchVal) || Boolean(expandedBrandGroupsInMenu[expKey]));
 
                 var grpWrap = document.createElement('div');
-                grpWrap.className = 'hier-brand-group' + (isExpanded ? ' is-expanded' : '');
+                grpWrap.className = 'hier-brand-group' + (isExpanded ? ' is-expanded' : '') + (isZeroGroup ? ' is-zero-match' : '');
 
                 var headerDiv = document.createElement('div');
                 headerDiv.className = 'hier-brand-header' + (isGroupSelected ? ' is-active' : '');
@@ -9447,39 +10216,46 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         '<span class="hier-brand-title">' + grp + '</span>' +
                         '<span style="font-size:10.5px;color:var(--text-secondary);">(' + subNames.length + ' รุ่นย่อย)</span>' +
                     '</div>' +
-                    '<span class="hier-brand-count">' + gData.total.toLocaleString() + '</span>';
-                headerDiv.onclick = function(e) {{
-                    window.toggleBrandGroupInMenu(mode, grp, e);
-                }};
+                    '<span class="hier-brand-count">' + gData.total.toLocaleString() + ' ชุด</span>';
+                if (!isZeroGroup) {{
+                    headerDiv.onclick = function(e) {{
+                        window.toggleBrandGroupInMenu(mode, grp, e);
+                    }};
+                }}
                 grpWrap.appendChild(headerDiv);
 
                 var subListDiv = document.createElement('div');
                 subListDiv.className = 'hier-brand-sublist';
 
-                // ปุ่มเลือกทั้งกลุ่มยี่ห้อหลัก
                 var selectAllGrpBtn = document.createElement('button');
                 selectAllGrpBtn.type = 'button';
-                selectAllGrpBtn.className = 'hier-brand-subitem hier-brand-subitem-SelectGroup' + (currentVal === groupValKey ? ' is-active' : '');
+                selectAllGrpBtn.className = 'hier-brand-subitem hier-brand-subitem-SelectGroup' + (currentVal === groupValKey ? ' is-active' : '') + (isZeroGroup ? ' is-zero-match' : '');
+                if (isZeroGroup) selectAllGrpBtn.disabled = true;
                 selectAllGrpBtn.innerHTML =
                     '<span>เลือกทั้งหมดในกลุ่ม ' + grp + '</span>' +
                     '<span class="hier-brand-count">' + gData.total.toLocaleString() + '</span>';
-                selectAllGrpBtn.onclick = function(e) {{
-                    window.selectHierBrandOption(groupValKey, e);
-                }};
+                if (!isZeroGroup) {{
+                    selectAllGrpBtn.onclick = function(e) {{
+                        window.selectHierBrandOption(groupValKey, e);
+                    }};
+                }}
                 subListDiv.appendChild(selectAllGrpBtn);
 
-                // รายการยี่ห้อย่อยแต่ละตัวในกลุ่ม
                 filteredSubs.forEach(function(subName) {{
                     var subCnt = gData.subs[subName] || 0;
+                    var isZeroSub = (subCnt === 0);
                     var subBtn = document.createElement('button');
                     subBtn.type = 'button';
-                    subBtn.className = 'hier-brand-subitem' + (currentVal === subName ? ' is-active' : '');
+                    subBtn.className = 'hier-brand-subitem' + (currentVal === subName ? ' is-active' : '') + (isZeroSub ? ' is-zero-match' : '');
+                    if (isZeroSub) subBtn.disabled = true;
                     subBtn.innerHTML =
                         '<span style="word-break:break-word;">• ' + subName + '</span>' +
                         '<span class="hier-brand-count">' + subCnt.toLocaleString() + '</span>';
-                    subBtn.onclick = function(e) {{
-                        window.selectHierBrandOption(subName, e);
-                    }};
+                    if (!isZeroSub) {{
+                        subBtn.onclick = function(e) {{
+                            window.selectHierBrandOption(subName, e);
+                        }};
+                    }}
                     subListDiv.appendChild(subBtn);
                 }});
 
@@ -9490,27 +10266,34 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
         function renderHierBrandFilterMenus(rowsSource) {{
             var allScopeRows = cachedDashboardRows && cachedDashboardRows.length ? cachedDashboardRows : rowsSource;
-            renderSingleHierBrandMenu('top', 'topHierBrandMenu', 'topHierBrandLabel', 'ทุกยี่ห้อ (ทั้งหมด)', allScopeRows);
             renderSingleHierBrandMenu('exp', 'expHierBrandMenu', 'expHierBrandLabel', 'ทุกผลิตภัณฑ์', allScopeRows);
         }}
 
         document.addEventListener('click', function(e) {{
-            var topWrap = document.getElementById('topHierBrandFilterWrap');
             var expWrap = document.getElementById('expHierBrandFilterWrap');
-            var topMenu = document.getElementById('topHierBrandMenu');
             var expMenu = document.getElementById('expHierBrandMenu');
-            if (topMenu && topMenu.classList.contains('show') && topWrap && !topWrap.contains(e.target)) {{
-                topMenu.classList.remove('show');
-            }}
             if (expMenu && expMenu.classList.contains('show') && expWrap && !expWrap.contains(e.target)) {{
                 expMenu.classList.remove('show');
             }}
+            var cascWraps = [
+                ['expPeaFilterGroup', 'expPeaCascMenu'],
+                ['expStatusFilterGroup', 'expStatusCascMenu'],
+                ['expEqFilterGroup', 'expEqCascMenu'],
+                ['expCommFilterGroup', 'expCommCascMenu'],
+                ['expWrlFilterGroup', 'expWrlCascMenu']
+            ];
+            cascWraps.forEach(function(pair) {{
+                var wEl = document.getElementById(pair[0]);
+                var mEl = document.getElementById(pair[1]);
+                if (mEl && mEl.classList.contains('show') && wEl && !wEl.contains(e.target)) {{
+                    mEl.classList.remove('show');
+                }}
+            }});
         }});
 
         var cachedDashboardRows = [];
         var cachedSummaryExports = {{ eq: [], resp: [], prod: [], comm: [], pea: [] }};
 
-        // [BUG FIX 1.1] ฟังก์ชันคำนวณค่าสรุปแยกส่วน เพื่อแยก overall_summary (ยอดรวมทั้งระบบ) ออกจาก filtered_data อย่างชัดเจน
         function computeSummaryMetricsFromRows(targetRows) {{
             var c = {{
                 total: targetRows.length,
@@ -9537,57 +10320,83 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }};
         }}
 
-        window.renderScadaDashboard = function() {{
-            populateDashboardDropdownsOnce();
-            var eqScopeEl = document.getElementById('dashEqScope');
-            var peaFilterEl = document.getElementById('dashPeaFilter');
-            var expPeaFilterEl = document.getElementById('dashExplorerPea');
-            var eqScope = (eqScopeEl && eqScopeEl.value) ? eqScopeEl.value : 'all';
-            var peaFilter = (peaFilterEl && peaFilterEl.value) ? peaFilterEl.value : (explorerFilterState.pea || 'all');
-            explorerFilterState.pea = peaFilter;
-            if (peaFilterEl && peaFilterEl.value !== peaFilter) peaFilterEl.value = peaFilter;
-            if (expPeaFilterEl && expPeaFilterEl.value !== peaFilter) expPeaFilterEl.value = peaFilter;
+        // อัปเดตแถบสรุปผลตามเงื่อนไขการกรอง (Filtered Summary) ตรงหัวข้อที่ 6
+        function renderFilteredSummaryInSection6(matchedRows, allRowsCount) {{
+            var stripEl = document.getElementById('dashFilteredSummaryBar');
+            var tagEl = document.getElementById('filteredSummaryModeTag');
+            var avaEl = document.getElementById('filteredSummaryAvaBadge');
+            var badgesWrap = document.getElementById('filteredSummaryBadgesWrap');
+            if (!stripEl || !badgesWrap) return;
 
-            // [BUG FIX 1.1] แยกข้อมูลเป็น 2 ชุดอย่างชัดเจน:
-            // 1) allSystemRows: ข้อมูลรวมของทั้งระบบ (ใช้คำนวณ overall_summary สำหรับแสดงบน Summary Cards ด้านบนสุดเสมอ ไม่ถูกกรองตามยี่ห้อ/รุ่น FRTU)
-            // 2) filtered_data (rows): ข้อมูลที่ผ่านตัวกรองยี่ห้อ/รุ่น FRTU สำหรับใช้แสดงผลในตารางย่อยและตาราง Explorer ด้านล่าง
-            var allSystemRows = [];
-            var preBrandRows = [];
-            var activeBrandFilter = explorerFilterState.prod || 'all';
-            for (var i = 0; i < dashAllRecords.length; i++) {{
-                var r = getEffectiveRowData(i);
-                allSystemRows.push(r);
-                if (eqScope === 'core4' && !isCore4Equipment(r.norm_eq)) continue;
-                if (eqScope === 'mapped' && !r.safe_id) continue;
-                if (peaFilter !== 'all' && r.pea !== peaFilter) continue;
-                preBrandRows.push(r);
+            var fm = computeSummaryMetricsFromRows(matchedRows || []);
+            var c = fm.counts;
+            var offTot = fm.offlineTotal;
+            var dn = fm.denom;
+            var ava = fm.avaPct;
+            var tier = fm.tier;
+
+            var isFiltered = (matchedRows.length !== allRowsCount) ||
+                explorerFilterState.pea !== 'all' ||
+                explorerFilterState.status !== 'all' ||
+                explorerFilterState.eq !== 'all' ||
+                explorerFilterState.prod !== 'all' ||
+                explorerFilterState.comm !== 'all' ||
+                explorerFilterState.wrl !== 'all' ||
+                Boolean(explorerFilterState.resp) ||
+                Boolean(String((document.getElementById('dashExplorerSearch') || {{}}).value || '').trim());
+
+            stripEl.classList.toggle('is-filtered-mode', isFiltered);
+            if (tagEl) {{
+                tagEl.textContent = isFiltered ? 'ค่าตามเงื่อนไข Filter (กำลังกรองข้อมูล)' : 'ค่าตามเงื่อนไข Filter (แสดงทั้งหมด)';
             }}
-            var filtered_data = preBrandRows.filter(function(r) {{
-                return matchesBrandSelection(r, activeBrandFilter);
-            }});
-            var rows = filtered_data;
-            cachedDashboardRows = preBrandRows;
-            syncExplorerFilterDropdowns(preBrandRows);
+            if (avaEl) {{
+                avaEl.innerHTML = '<span class="ava-badge ' + tier.cls + '" style="font-size:12px;padding:3px 10px;">%AVA: ' + ava.toFixed(2) + '% (' + tier.gradeText + ')</span>';
+            }}
 
-            // [BUG FIX 1.1] คำนวณ overall_summary จากข้อมูลทั้งระบบ (ไม่นำตัวกรองยี่ห้อ/รุ่น FRTU มาคิดรวมในการ์ดด้านบนสุดเด็ดขาด)
-            var overall_summary = computeSummaryMetricsFromRows(
-                (eqScope === 'all' && peaFilter === 'all') ? allSystemRows : preBrandRows
-            );
-            // คำนวณ filteredSummary แยกต่างหากสำหรับแถวสรุปท้ายตารางที่ถูกกรองตามยี่ห้อ/รุ่น FRTU
-            var filteredSummary = computeSummaryMetricsFromRows(filtered_data);
+            var onPct = dn > 0 ? ((c.Online / dn) * 100).toFixed(1) : '0.0';
+            var offPct = dn > 0 ? ((offTot / dn) * 100).toFixed(1) : '0.0';
 
+            badgesWrap.innerHTML =
+                '<span class="fs-badge fs-total">ทั้งหมด: <strong>' + c.total.toLocaleString() + '</strong> ชุด</span>' +
+                '<span class="fs-badge fs-online"><span class="fs-badge-dot" style="background:#16a34a;"></span>Online: <strong>' + c.Online.toLocaleString() + '</strong> (' + onPct + '%)</span>' +
+                '<span class="fs-badge fs-offline-all"><span class="fs-badge-dot" style="background:#dc2626;"></span>ไม่ออนไลน์รวม: <strong>' + offTot.toLocaleString() + '</strong> (' + offPct + '%)</span>' +
+                '<span class="fs-badge fs-connecting"><span class="fs-badge-dot" style="background:#ea580c;"></span>Connecting: <strong>' + c.Connecting.toLocaleString() + '</strong></span>' +
+                '<span class="fs-badge fs-offline"><span class="fs-badge-dot" style="background:#dc2626;"></span>Offline: <strong>' + c.Offline.toLocaleString() + '</strong></span>' +
+                '<span class="fs-badge fs-init"><span class="fs-badge-dot" style="background:#65a30d;"></span>Init: <strong>' + c.Initializing.toLocaleString() + '</strong></span>' +
+                '<span class="fs-badge fs-tele"><span class="fs-badge-dot" style="background:#d97706;"></span>Telemetry: <strong>' + c['Telemetry Failure'].toLocaleString() + '</strong></span>';
+        }}
+
+        window.renderScadaDashboard = function() {{
+            // รักษาตำแหน่ง Scroll ปัจจุบันเสมอ (No Auto-scroll)
+            var dashScrollEl = document.getElementById('scadaDashboardView');
+            var savedScrollTop = dashScrollEl ? dashScrollEl.scrollTop : 0;
+
+            populateDashboardDropdownsOnce();
+
+            var allSystemRows = [];
+            for (var i = 0; i < dashAllRecords.length; i++) {{
+                allSystemRows.push(getEffectiveRowData(i));
+            }}
+            cachedDashboardRows = allSystemRows;
+
+            // [REQUIREMENT 4] การ์ดสรุปผลด้านบนสุด (Top Summary Cards) แสดงค่าภาพรวมทั้งหมดของระบบเสมอ (Overall Total) และไม่อัปเดตลดลงตามการเลือก Filter
+            var overall_summary = computeSummaryMetricsFromRows(allSystemRows);
             var overallCounts = overall_summary.counts;
             var overallOfflineTotal = overall_summary.offlineTotal;
             var overallDenom = overall_summary.denom;
             var overallAvaPct = overall_summary.avaPct;
             var overallTier = overall_summary.tier;
 
-            // สำหรับใช้ในแถวรวมท้ายตารางที่ 1 (tfoot) ให้สะท้อนข้อมูลตาม filtered_data
+            // ข้อมูลที่ผ่านตัวกรองทุกเงื่อนไข (Real-time Cascading Cross-Filtered Rows)
+            var fullyFilteredRows = allSystemRows.filter(function(r) {{
+                return rowMatchesActiveFilters(r, '');
+            }});
+            var filteredSummary = computeSummaryMetricsFromRows(fullyFilteredRows);
             var counts = filteredSummary.counts;
             var offlineTotal = filteredSummary.offlineTotal;
-            var denom = filteredSummary.denom;
             var avaPct = filteredSummary.avaPct;
-            var tier = filteredSummary.tier;
+
+            syncExplorerFilterDropdowns(allSystemRows);
 
             var navBadge = document.getElementById('navAvaBadge');
             if (navBadge) {{
@@ -9595,7 +10404,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 navBadge.className = 'nav-ava-pill ' + overallTier.cls;
             }}
 
-            // [BUG FIX 1.1] อัปเดต Summary Cards ด้านบนสุดทั้ง 6 ใบ ด้วยค่าจาก overall_summary เท่านั้น (แสดงยอดรวมทั้งระบบเสมอ)
             var kpiAvaValEl = document.getElementById('kpiAvaVal');
             var kpiAvaStatusPillEl = document.getElementById('kpiAvaStatusPill');
             if (kpiAvaValEl) {{
@@ -9612,7 +10420,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             document.getElementById('dashFormulaRatioText').innerHTML =
                 'Online <strong>' + overallCounts.Online.toLocaleString() + '</strong> | ' +
                 'ไม่ออนไลน์ <strong>' + overallOfflineTotal.toLocaleString() + '</strong> ' +
-                '(&bull; <strong>' + overallTier.gradeText + '</strong>)';
+                '(&bull; <strong>' + overallTier.gradeText + '</strong> &bull; ค่าภาพรวมทั้งระบบ)';
 
             var stackedBar = document.getElementById('kpiStackedBar');
             if (stackedBar && overallDenom > 0) {{
@@ -9638,11 +10446,15 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             setKpiBox('kpiInitCount', 'kpiInitPct', 'kpiInitShareOffline', 'kpiInitBar', overallCounts.Initializing);
             setKpiBox('kpiTeleCount', 'kpiTelePct', 'kpiTeleShareOffline', 'kpiTeleBar', overallCounts['Telemetry Failure']);
 
-            // 1. ตารางแยกตามชนิดอุปกรณ์ (Sort by %AVA เป็นค่าเริ่มต้น)
+            // 1. ตารางแยกตามชนิดอุปกรณ์ (Cascading Cross-Filter: แสดงทุกชนิดอุปกรณ์ และทำให้ตัวเลือกที่มี 0 ชุด จางลง opacity 0.4 + คลิกไม่ได้)
             var eqMap = {{}};
-            rows.forEach(function(r) {{
+            allSystemRows.forEach(function(r) {{
                 var k = r.norm_eq;
                 if (!eqMap[k]) eqMap[k] = {{ total: 0, Online: 0, 'Telemetry Failure': 0, Offline: 0, Initializing: 0, Connecting: 0 }};
+            }});
+            var rowsForEqTable = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'eq'); }});
+            rowsForEqTable.forEach(function(r) {{
+                var k = r.norm_eq;
                 eqMap[k].total++;
                 if (eqMap[k][r.parent_state] !== undefined) eqMap[k][r.parent_state]++;
             }});
@@ -9655,14 +10467,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
             sortedEqKeys.forEach(function(k) {{
                 var d = eqMap[k];
-                if (d.total === 0) return;
+                var isZero = (d.total === 0);
                 var offSum = d['Telemetry Failure'] + d.Offline + d.Initializing + d.Connecting;
                 var eqAva = d.total > 0 ? (d.Online / d.total) * 100 : 0;
-                cachedSummaryExports.eq.push([k, d.total, d.Online, offSum, d['Telemetry Failure'], d.Offline, d.Initializing, d.Connecting, eqAva.toFixed(2) + '%']);
+                if (!isZero) {{
+                    cachedSummaryExports.eq.push([k, d.total, d.Online, offSum, d['Telemetry Failure'], d.Offline, d.Initializing, d.Connecting, eqAva.toFixed(2) + '%']);
+                }}
                 var isSelected = (explorerFilterState.eq === k);
                 var tr = document.createElement('tr');
-                tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '');
-                tr.onclick = function() {{ window.selectSummaryItem('eq', k); }};
+                tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '') + (isZero ? ' is-zero-match' : '');
+                if (!isZero) {{
+                    tr.onclick = function() {{ window.selectSummaryItem('eq', k); }};
+                }}
                 tr.innerHTML =
                     '<td><strong>' + k + '</strong>' +
                         '<div class="mobile-sub-breakdown">Conn ' + d.Connecting + ' · Off ' + d.Offline + ' · Init ' + d.Initializing + ' · Tele ' + d['Telemetry Failure'] + '</div>' +
@@ -9681,7 +10497,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             var eqTfoot = document.getElementById('dashEqTypeTfoot');
             eqTfoot.innerHTML =
                 '<tr>' +
-                    '<td>รวมทั้งหมด</td>' +
+                    '<td>รวมตามตัวกรอง</td>' +
                     '<td class="num">' + counts.total.toLocaleString() + '</td>' +
                     '<td class="num" style="color:#16a34a;">' + counts.Online.toLocaleString() + '</td>' +
                     '<td class="num" style="color:#dc2626;">' + offlineTotal.toLocaleString() + '</td>' +
@@ -9692,7 +10508,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                     '<td class="num">' + formatAvaBadge(avaPct) + '</td>' +
                 '</tr>';
 
-            // 2. ตารางสถานะการติดตามหน้างาน
+            // 2. ตารางสถานะการติดตามหน้างานของอุปกรณ์ที่ไม่ออนไลน์ (Cascading Cross-Filter)
             var respBuckets = [
                 {{ key: 'รอ ผบอ. เข้าแก้ไข', label: 'รอ ผบอ.กบษ.ฉ.2 เข้าแก้ไข (FRTU/อุปกรณ์หลัก)', count: 0, color: '#ea580c' }},
                 {{ key: 'รอ ผอส. เข้าแก้ไข', label: 'รอ ผอส.กสฟ.ฉ.2 เข้าแก้ไข (ระบบสื่อสาร)', count: 0, color: '#7c3aed' }},
@@ -9701,18 +10517,24 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 {{ key: 'ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline', label: 'ระบบสื่อสารเคยแก้ไขแล้ว กลับมาไม่ออนไลน์', count: 0, color: '#9333ea' }},
                 {{ key: 'รอตรวจสอบสาเหตุ', label: 'ไม่ออนไลน์ (อยู่ระหว่างรอเข้าตรวจสอบสาเหตุ)', count: 0, color: '#64748b' }}
             ];
-            rows.forEach(function(r) {{
+            var rowsForRespTable = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'resp'); }});
+            var respOfflineDenom = 0;
+            rowsForRespTable.forEach(function(r) {{
                 if (r.parent_state === 'Online') return;
-                var af = r.after_full;
-                if (af.includes('รอ ผบอ. และ ผอส.')) respBuckets[2].count++;
-                else if (af.includes('รอ ผบอ.')) respBuckets[0].count++;
-                else if (af.includes('รอ ผอส.')) respBuckets[1].count++;
-                else if (af.includes('ผบอ. เคยแก้ไข')) respBuckets[3].count++;
-                else if (af.includes('ระบบสื่อสารเคยแก้ไข')) respBuckets[4].count++;
-                else respBuckets[5].count++;
+                respOfflineDenom++;
+                var bKey = classifyRowRespBucketKey(r);
+                for (var bIdx = 0; bIdx < respBuckets.length; bIdx++) {{
+                    if (respBuckets[bIdx].key === bKey) {{
+                        respBuckets[bIdx].count++;
+                        break;
+                    }}
+                }}
             }});
             var respSortMode = (document.getElementById('dashRespSort') || {{}}).value || 'count_desc';
             respBuckets.sort(function(a, b) {{
+                var hasA = a.count > 0 ? 1 : 0;
+                var hasB = b.count > 0 ? 1 : 0;
+                if (hasA !== hasB) return hasB - hasA;
                 return respSortMode === 'count_asc' ? (a.count - b.count) : (b.count - a.count);
             }});
 
@@ -9720,23 +10542,26 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             respTbody.innerHTML = '';
             cachedSummaryExports.resp = [];
             respBuckets.forEach(function(b) {{
-                var share = offlineTotal > 0 ? (b.count / offlineTotal) * 100 : 0;
+                var isZero = (b.count === 0);
+                var share = respOfflineDenom > 0 ? (b.count / respOfflineDenom) * 100 : 0;
                 cachedSummaryExports.resp.push([b.label, b.count, share.toFixed(1) + '%']);
                 var isSelected = (explorerFilterState.resp === b.key);
                 var tr = document.createElement('tr');
-                tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '');
-                tr.onclick = function() {{ window.selectSummaryItem('resp', b.key); }};
+                tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '') + (isZero ? ' is-zero-match' : '');
+                if (!isZero) {{
+                    tr.onclick = function() {{ window.selectSummaryItem('resp', b.key); }};
+                }}
                 tr.innerHTML =
                     '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + b.color + ';margin-right:7px;"></span>' + b.label + '</td>' +
                     '<td class="num"><strong>' + b.count.toLocaleString() + '</strong></td>' +
                     '<td class="num">' + share.toFixed(1) + '%</td>' +
-                    '<td class="num"><span class="btn-jump-map">ดูรายการ</span></td>';
+                    '<td class="num"><span class="btn-jump-map">' + (isSelected ? 'กำลังกรอง' : 'กรองข้อมูล') + '</span></td>';
                 respTbody.appendChild(tr);
             }});
 
-            // 3. ตารางแยกตามประเภทผลิตภัณฑ์ FRTU แบบจัดกลุ่มยี่ห้อหลัก -> ยี่ห้อย่อย (Hierarchical Brand Grouping)
+            // 3. ตารางแยกตามประเภทผลิตภัณฑ์ FRTU (Cascading Cross-Filter)
             var prodGroupMap = {{}};
-            preBrandRows.forEach(function(r) {{
+            allSystemRows.forEach(function(r) {{
                 var gKey = r.prod_group || classifyMainBrandGroup(r.prod);
                 var sKey = r.prod;
                 if (!prodGroupMap[gKey]) {{
@@ -9745,14 +10570,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         subs: {{}}
                     }};
                 }}
-                var gObj = prodGroupMap[gKey];
-                gObj.total++;
-                if (!gObj.subs[sKey]) {{
-                    gObj.subs[sKey] = {{ total: 0, Online: 0, OfflineSum: 0, Connecting: 0, Offline: 0, Init: 0, Tele: 0 }};
+                if (!prodGroupMap[gKey].subs[sKey]) {{
+                    prodGroupMap[gKey].subs[sKey] = {{ total: 0, Online: 0, OfflineSum: 0, Connecting: 0, Offline: 0, Init: 0, Tele: 0 }};
                 }}
+            }});
+            var rowsForProdTable = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'prod'); }});
+            rowsForProdTable.forEach(function(r) {{
+                var gKey = r.prod_group || classifyMainBrandGroup(r.prod);
+                var sKey = r.prod;
+                var gObj = prodGroupMap[gKey];
                 var sObj = gObj.subs[sKey];
+                gObj.total++;
                 sObj.total++;
-
                 if (r.parent_state === 'Online') {{
                     gObj.Online++;
                     sObj.Online++;
@@ -9765,13 +10594,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                     else if (r.parent_state === 'Telemetry Failure') {{ gObj.Tele++; sObj.Tele++; }}
                 }}
             }});
+
             var prodSortMode = (document.getElementById('dashProdSort') || {{}}).value || 'ava_desc';
             var sortedProdGroupKeys = sortSummaryKeys(Object.keys(prodGroupMap), prodGroupMap, prodSortMode);
             var prodTbody = document.getElementById('dashProductTbody');
             prodTbody.innerHTML = '';
             cachedSummaryExports.prod = [];
 
-            // [BUG FIX 1.2] แก้ไขฟังก์ชัน Toggle เปิด-ปิด (Collapse/Expand) หัวข้อย่อยในตารางที่ 3 (ประเภทผลิตภัณฑ์ FRTU)
             window.toggleProdTableGroupExpand = function(gKey, ev) {{
                 if (ev) {{
                     ev.preventDefault();
@@ -9783,34 +10612,37 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
             sortedProdGroupKeys.forEach(function(gKey) {{
                 var gData = prodGroupMap[gKey];
+                var isZeroGroup = (gData.total === 0);
                 var gAva = gData.total > 0 ? (gData.Online / gData.total) * 100 : 0;
                 var gSubBreak = 'Conn ' + gData.Connecting + ' · Off ' + gData.Offline + ' · Init ' + gData.Init + ' · Tele ' + gData.Tele;
                 var subKeys = sortSummaryKeys(Object.keys(gData.subs), gData.subs, prodSortMode);
                 var groupFilterVal = 'GROUP:' + gKey;
                 var isGroupSelected = (explorerFilterState.prod === groupFilterVal);
                 var hasSubSelected = subKeys.indexOf(explorerFilterState.prod) !== -1;
-                // [BUG FIX 1.2] นำ `|| isGroupSelected || hasSubSelected` ออก เพื่อไม่ให้บังคับกางค้างจนกดพับเก็บ (Collapse) ไม่ได้
-                var isExpanded = Boolean(expandedBrandGroupsInTable[gKey]);
+                var isExpanded = !isZeroGroup && Boolean(expandedBrandGroupsInTable[gKey]);
 
-                cachedSummaryExports.prod.push(['[ยี่ห้อหลัก] ' + gKey + ' (' + subKeys.length + ' รุ่นย่อย)', gData.total, gData.Online, gData.OfflineSum, gSubBreak, gAva.toFixed(2) + '%']);
+                if (!isZeroGroup) {{
+                    cachedSummaryExports.prod.push(['[ยี่ห้อหลัก] ' + gKey + ' (' + subKeys.length + ' รุ่นย่อย)', gData.total, gData.Online, gData.OfflineSum, gSubBreak, gAva.toFixed(2) + '%']);
+                }}
 
                 var trGroup = document.createElement('tr');
-                trGroup.className = 'clickable-row prod-group-row' + ((isGroupSelected || hasSubSelected) ? ' is-active-filter' : '');
-                trGroup.onclick = function(ev) {{
-                    // [BUG FIX 1.2] คลิกที่แถวยี่ห้อหลักเพื่อสลับเปิด/พับเก็บ (Toggle Collapse/Expand) ได้อย่างสมบูรณ์
-                    var willExpand = !Boolean(expandedBrandGroupsInTable[gKey]);
-                    expandedBrandGroupsInTable[gKey] = willExpand;
-                    if (willExpand) {{
-                        explorerFilterState.prod = groupFilterVal;
-                    }} else if (explorerFilterState.prod === groupFilterVal) {{
-                        explorerFilterState.prod = 'all';
-                    }}
-                    dashExplorerLimit = 250;
-                    window.renderScadaDashboard();
-                }};
+                trGroup.className = 'clickable-row prod-group-row' + ((isGroupSelected || hasSubSelected) ? ' is-active-filter' : '') + (isZeroGroup ? ' is-zero-match' : '');
+                if (!isZeroGroup) {{
+                    trGroup.onclick = function() {{
+                        var willExpand = !Boolean(expandedBrandGroupsInTable[gKey]);
+                        expandedBrandGroupsInTable[gKey] = willExpand;
+                        if (willExpand) {{
+                            explorerFilterState.prod = groupFilterVal;
+                        }} else if (explorerFilterState.prod === groupFilterVal) {{
+                            explorerFilterState.prod = 'all';
+                        }}
+                        dashExplorerLimit = 250;
+                        window.renderScadaDashboard();
+                    }};
+                }}
                 trGroup.innerHTML =
                     '<td>' +
-                        '<button type="button" class="prod-expand-btn' + (isExpanded ? ' is-open' : '') + '" title="คลิกเพื่อขยาย/ซ่อนยี่ห้อย่อย" onclick="window.toggleProdTableGroupExpand(&quot;' + gKey.replace(/"/g, '&quot;') + '&quot;, event)">&#9654;</button>' +
+                        '<button type="button" class="prod-expand-btn' + (isExpanded ? ' is-open' : '') + '" title="คลิกเพื่อขยาย/ซ่อนยี่ห้อย่อย" ' + (isZeroGroup ? 'disabled' : 'onclick="window.toggleProdTableGroupExpand(&quot;' + gKey.replace(/"/g, '&quot;') + '&quot;, event)"') + '>&#9654;</button>' +
                         '<strong>' + gKey + '</strong> <span style="font-size:11px;color:var(--text-secondary);">(' + subKeys.length + ' ยี่ห้อย่อย)</span>' +
                         '<div class="mobile-sub-breakdown">' + gSubBreak + '</div>' +
                     '</td>' +
@@ -9823,18 +10655,22 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
                 subKeys.forEach(function(sKey) {{
                     var sd = gData.subs[sKey];
+                    var isZeroSub = (sd.total === 0);
                     var sAva = sd.total > 0 ? (sd.Online / sd.total) * 100 : 0;
                     var sSubBreak = 'Conn ' + sd.Connecting + ' · Off ' + sd.Offline + ' · Init ' + sd.Init + ' · Tele ' + sd.Tele;
-                    cachedSummaryExports.prod.push(['   ↳ ' + sKey, sd.total, sd.Online, sd.OfflineSum, sSubBreak, sAva.toFixed(2) + '%']);
-
+                    if (!isZeroSub) {{
+                        cachedSummaryExports.prod.push(['   ↳ ' + sKey, sd.total, sd.Online, sd.OfflineSum, sSubBreak, sAva.toFixed(2) + '%']);
+                    }}
                     if (!isExpanded) return;
                     var isSubSelected = (explorerFilterState.prod === sKey);
                     var trSub = document.createElement('tr');
-                    trSub.className = 'clickable-row prod-sub-row' + (isSubSelected ? ' is-active-filter' : '');
-                    trSub.onclick = function(ev) {{
-                        ev.stopPropagation();
-                        window.selectSummaryItem('prod', sKey);
-                    }};
+                    trSub.className = 'clickable-row prod-sub-row' + (isSubSelected ? ' is-active-filter' : '') + (isZeroSub ? ' is-zero-match' : '');
+                    if (!isZeroSub) {{
+                        trSub.onclick = function(ev) {{
+                            ev.stopPropagation();
+                            window.selectSummaryItem('prod', sKey);
+                        }};
+                    }}
                     trSub.innerHTML =
                         '<td><span style="color:var(--text-secondary);margin-right:4px;">↳</span>' + sKey + '<div class="mobile-sub-breakdown">' + sSubBreak + '</div></td>' +
                         '<td class="num">' + sd.total.toLocaleString() + '</td>' +
@@ -9846,14 +10682,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }});
             }});
 
-            // 4. ตารางแยกตามอุปกรณ์สื่อสารและแม่ข่าย (รองรับการจัดกลุ่มหลัก Cellular Router / DAU แบบขยายดูรุ่นย่อยได้)
+            // 4. ตารางแยกตามอุปกรณ์สื่อสารและแม่ข่าย (Cascading Cross-Filter)
             var commMode = (document.getElementById('dashCommGroupMode') || {{}}).value || 'comm_group';
             var commSortMode = (document.getElementById('dashCommSort') || {{}}).value || 'ava_desc';
             var commTbody = document.getElementById('dashCommTbody');
             commTbody.innerHTML = '';
             cachedSummaryExports.comm = [];
 
-            // [BUG FIX 1.2] แก้ไขฟังก์ชัน Toggle เปิด-ปิด (Collapse/Expand) หัวข้อย่อยในตารางที่ 4 (อุปกรณ์สื่อสาร)
             window.toggleCommTableGroupExpand = function(gKey, ev) {{
                 if (ev) {{
                     ev.preventDefault();
@@ -9865,18 +10700,23 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
             if (commMode === 'comm_group') {{
                 var commGroupMap = {{}};
-                rows.forEach(function(r) {{
+                allSystemRows.forEach(function(r) {{
                     var gKey = r.comm_group || classifyMainCommGroup(r.comm_type, r.comm_item);
                     var sKey = r.comm_combo;
                     if (!commGroupMap[gKey]) {{
                         commGroupMap[gKey] = {{ total: 0, Online: 0, OfflineSum: 0, subs: {{}} }};
                     }}
-                    var gObj = commGroupMap[gKey];
-                    gObj.total++;
-                    if (!gObj.subs[sKey]) {{
-                        gObj.subs[sKey] = {{ label: sKey, comm_type: r.comm_type, comm_item: r.comm_item, total: 0, Online: 0, OfflineSum: 0 }};
+                    if (!commGroupMap[gKey].subs[sKey]) {{
+                        commGroupMap[gKey].subs[sKey] = {{ label: sKey, comm_type: r.comm_type, comm_item: r.comm_item, total: 0, Online: 0, OfflineSum: 0 }};
                     }}
+                }});
+                var rowsForCommTable = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'comm'); }});
+                rowsForCommTable.forEach(function(r) {{
+                    var gKey = r.comm_group || classifyMainCommGroup(r.comm_type, r.comm_item);
+                    var sKey = r.comm_combo;
+                    var gObj = commGroupMap[gKey];
                     var sObj = gObj.subs[sKey];
+                    gObj.total++;
                     sObj.total++;
                     if (r.parent_state === 'Online') {{
                         gObj.Online++;
@@ -9890,33 +10730,36 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 var sortedCommGroupKeys = sortSummaryKeys(Object.keys(commGroupMap), commGroupMap, commSortMode);
                 sortedCommGroupKeys.forEach(function(gKey) {{
                     var gData = commGroupMap[gKey];
+                    var isZeroGroup = (gData.total === 0);
                     var gAva = gData.total > 0 ? (gData.Online / gData.total) * 100 : 0;
                     var subKeys = sortSummaryKeys(Object.keys(gData.subs), gData.subs, commSortMode);
                     var groupFilterVal = 'COMM_GROUP:' + gKey;
                     var isGroupSelected = (explorerFilterState.comm === groupFilterVal);
                     var hasSubSelected = subKeys.indexOf(explorerFilterState.comm) !== -1;
-                    // [BUG FIX 1.2] นำ `|| isGroupSelected || hasSubSelected` ออก เพื่อให้สามารถกดพับเก็บ (Collapse) แถวย่อยกลับได้ทุกเมื่อ
-                    var isExpanded = Boolean(expandedCommGroupsInTable[gKey]);
+                    var isExpanded = !isZeroGroup && Boolean(expandedCommGroupsInTable[gKey]);
 
-                    cachedSummaryExports.comm.push(['[กลุ่มหลัก] ' + gKey + ' (' + subKeys.length + ' รูปแบบย่อย)', gData.total, gData.Online, gData.OfflineSum, gAva.toFixed(2) + '%']);
+                    if (!isZeroGroup) {{
+                        cachedSummaryExports.comm.push(['[กลุ่มหลัก] ' + gKey + ' (' + subKeys.length + ' รูปแบบย่อย)', gData.total, gData.Online, gData.OfflineSum, gAva.toFixed(2) + '%']);
+                    }}
 
                     var trGroup = document.createElement('tr');
-                    trGroup.className = 'clickable-row prod-group-row' + ((isGroupSelected || hasSubSelected) ? ' is-active-filter' : '');
-                    trGroup.onclick = function() {{
-                        // [BUG FIX 1.2] คลิกที่แถวกลุ่มอุปกรณ์สื่อสารหลักเพื่อสลับเปิด/พับเก็บ (Toggle Collapse/Expand) ได้ทันที
-                        var willExpand = !Boolean(expandedCommGroupsInTable[gKey]);
-                        expandedCommGroupsInTable[gKey] = willExpand;
-                        if (willExpand) {{
-                            explorerFilterState.comm = groupFilterVal;
-                        }} else if (explorerFilterState.comm === groupFilterVal) {{
-                            explorerFilterState.comm = 'all';
-                        }}
-                        dashExplorerLimit = 250;
-                        window.renderScadaDashboard();
-                    }};
+                    trGroup.className = 'clickable-row prod-group-row' + ((isGroupSelected || hasSubSelected) ? ' is-active-filter' : '') + (isZeroGroup ? ' is-zero-match' : '');
+                    if (!isZeroGroup) {{
+                        trGroup.onclick = function() {{
+                            var willExpand = !Boolean(expandedCommGroupsInTable[gKey]);
+                            expandedCommGroupsInTable[gKey] = willExpand;
+                            if (willExpand) {{
+                                explorerFilterState.comm = groupFilterVal;
+                            }} else if (explorerFilterState.comm === groupFilterVal) {{
+                                explorerFilterState.comm = 'all';
+                            }}
+                            dashExplorerLimit = 250;
+                            window.renderScadaDashboard();
+                        }};
+                    }}
                     trGroup.innerHTML =
                         '<td>' +
-                            '<button type="button" class="prod-expand-btn' + (isExpanded ? ' is-open' : '') + '" title="คลิกเพื่อขยาย/ซ่อนรูปแบบย่อย" onclick="window.toggleCommTableGroupExpand(&quot;' + gKey.replace(/"/g, '&quot;') + '&quot;, event)">&#9654;</button>' +
+                            '<button type="button" class="prod-expand-btn' + (isExpanded ? ' is-open' : '') + '" title="คลิกเพื่อขยาย/ซ่อนรูปแบบย่อย" ' + (isZeroGroup ? 'disabled' : 'onclick="window.toggleCommTableGroupExpand(&quot;' + gKey.replace(/"/g, '&quot;') + '&quot;, event)"') + '>&#9654;</button>' +
                             '<strong>' + gKey + '</strong> <span style="font-size:11px;color:var(--text-secondary);">(' + subKeys.length + ' รูปแบบย่อย)</span>' +
                         '</td>' +
                         '<td class="num"><strong>' + gData.total.toLocaleString() + '</strong></td>' +
@@ -9927,16 +10770,21 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
                     subKeys.forEach(function(sKey) {{
                         var sd = gData.subs[sKey];
+                        var isZeroSub = (sd.total === 0);
                         var sAva = sd.total > 0 ? (sd.Online / sd.total) * 100 : 0;
-                        cachedSummaryExports.comm.push(['   ↳ ' + sKey, sd.total, sd.Online, sd.OfflineSum, sAva.toFixed(2) + '%']);
+                        if (!isZeroSub) {{
+                            cachedSummaryExports.comm.push(['   ↳ ' + sKey, sd.total, sd.Online, sd.OfflineSum, sAva.toFixed(2) + '%']);
+                        }}
                         if (!isExpanded) return;
                         var isSubSelected = (explorerFilterState.comm === sKey);
                         var trSub = document.createElement('tr');
-                        trSub.className = 'clickable-row prod-sub-row' + (isSubSelected ? ' is-active-filter' : '');
-                        trSub.onclick = function(ev) {{
-                            ev.stopPropagation();
-                            window.selectSummaryItem('comm', sKey);
-                        }};
+                        trSub.className = 'clickable-row prod-sub-row' + (isSubSelected ? ' is-active-filter' : '') + (isZeroSub ? ' is-zero-match' : '');
+                        if (!isZeroSub) {{
+                            trSub.onclick = function(ev) {{
+                                ev.stopPropagation();
+                                window.selectSummaryItem('comm', sKey);
+                            }};
+                        }}
                         trSub.innerHTML =
                             '<td><span style="color:var(--text-secondary);margin-right:4px;">↳</span>' + sKey +
                                 '<div style="font-size:10.5px;color:var(--text-secondary);padding-left:14px;">Commu.: ' + sd.comm_type + ' | Item: ' + sd.comm_item + '</div>' +
@@ -9950,7 +10798,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }});
             }} else {{
                 var commMap = {{}};
-                rows.forEach(function(r) {{
+                var targetIgnoreDim = (commMode === 'master') ? 'wrl' : 'comm';
+                allSystemRows.forEach(function(r) {{
                     var k = '';
                     var subText = '';
                     var filterTargetType = 'comm';
@@ -9969,6 +10818,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                         filterTargetType = 'wrl';
                     }}
                     if (!commMap[k]) commMap[k] = {{ label: k, sub: subText, fType: filterTargetType, total: 0, Online: 0, OfflineSum: 0 }};
+                }});
+                var rowsForCommFlat = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, targetIgnoreDim); }});
+                rowsForCommFlat.forEach(function(r) {{
+                    var k = commMode === 'commu_item' ? r.comm_combo : (commMode === 'type' ? r.comm_type : (commMode === 'item' ? r.comm_item : r.comm_ref));
                     commMap[k].total++;
                     if (r.parent_state === 'Online') commMap[k].Online++;
                     else commMap[k].OfflineSum++;
@@ -9976,12 +10829,17 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 var sortedCommKeys = sortSummaryKeys(Object.keys(commMap), commMap, commSortMode);
                 sortedCommKeys.forEach(function(k) {{
                     var d = commMap[k];
+                    var isZero = (d.total === 0);
                     var cAva = d.total > 0 ? (d.Online / d.total) * 100 : 0;
-                    cachedSummaryExports.comm.push([d.label, d.total, d.Online, d.OfflineSum, cAva.toFixed(2) + '%']);
+                    if (!isZero) {{
+                        cachedSummaryExports.comm.push([d.label, d.total, d.Online, d.OfflineSum, cAva.toFixed(2) + '%']);
+                    }}
                     var isSelected = (d.fType === 'wrl' ? explorerFilterState.wrl === k : explorerFilterState.comm === k);
                     var tr = document.createElement('tr');
-                    tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '');
-                    tr.onclick = function() {{ window.selectSummaryItem(d.fType, k); }};
+                    tr.className = 'clickable-row' + (isSelected ? ' is-active-filter' : '') + (isZero ? ' is-zero-match' : '');
+                    if (!isZero) {{
+                        tr.onclick = function() {{ window.selectSummaryItem(d.fType, k); }};
+                    }}
                     tr.innerHTML =
                         '<td><strong>' + d.label + '</strong><div style="font-size:10.5px;color:var(--text-secondary);">' + d.sub + '</div></td>' +
                         '<td class="num">' + d.total.toLocaleString() + '</td>' +
@@ -9992,11 +10850,15 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }});
             }}
 
-            // 5. ตารางแยกตามการไฟฟ้า (กฟจ. / กฟส.) (Sort by ทั้งหมด และ %AVA ได้ครบถ้วน)
+            // 5. ตารางแยกตามการไฟฟ้า (กฟจ. / กฟส.) (Cascading Cross-Filter)
             var peaMap = {{}};
-            rows.forEach(function(r) {{
+            allSystemRows.forEach(function(r) {{
                 var k = r.pea;
                 if (!peaMap[k]) peaMap[k] = {{ total: 0, Online: 0, 'Telemetry Failure': 0, Offline: 0, Initializing: 0, Connecting: 0 }};
+            }});
+            var rowsForPeaTable = allSystemRows.filter(function(r) {{ return rowMatchesActiveFilters(r, 'pea'); }});
+            rowsForPeaTable.forEach(function(r) {{
+                var k = r.pea;
                 peaMap[k].total++;
                 if (peaMap[k][r.parent_state] !== undefined) peaMap[k][r.parent_state]++;
             }});
@@ -10007,16 +10869,21 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             cachedSummaryExports.pea = [];
             peaKeys.forEach(function(k) {{
                 var d = peaMap[k];
+                var isZero = (d.total === 0);
                 var offSum = d['Telemetry Failure'] + d.Offline + d.Initializing + d.Connecting;
                 var pAva = d.total > 0 ? (d.Online / d.total) * 100 : 0;
-                cachedSummaryExports.pea.push([k, d.total, d.Online, offSum, d['Telemetry Failure'], d.Offline, d.Initializing, d.Connecting, pAva.toFixed(2) + '%']);
-                var isPeaSelected = (peaFilter === k);
+                if (!isZero) {{
+                    cachedSummaryExports.pea.push([k, d.total, d.Online, offSum, d['Telemetry Failure'], d.Offline, d.Initializing, d.Connecting, pAva.toFixed(2) + '%']);
+                }}
+                var isPeaSelected = (explorerFilterState.pea === k);
                 var tr = document.createElement('tr');
-                tr.className = 'clickable-row' + (isPeaSelected ? ' is-active-filter' : '');
-                tr.onclick = function() {{
-                    var nextPea = (explorerFilterState.pea === k) ? 'all' : k;
-                    window.onTopPeaFilterChange(nextPea);
-                }};
+                tr.className = 'clickable-row' + (isPeaSelected ? ' is-active-filter' : '') + (isZero ? ' is-zero-match' : '');
+                if (!isZero) {{
+                    tr.onclick = function() {{
+                        var nextPea = (explorerFilterState.pea === k) ? 'all' : k;
+                        window.onTopPeaFilterChange(nextPea);
+                    }};
+                }}
                 tr.innerHTML =
                     '<td><strong>' + k + '</strong>' +
                         '<div class="mobile-sub-breakdown">Conn ' + d.Connecting + ' · Off ' + d.Offline + ' · Init ' + d.Initializing + ' · Tele ' + d['Telemetry Failure'] + '</div>' +
@@ -10033,58 +10900,47 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }});
 
             window.renderDashExplorerTable();
+
+            // คืนค่าตำแหน่ง Scroll เดิมเสมอ (ห้าม Auto-scroll ลงมาเองโดยเด็ดขาด)
+            if (dashScrollEl) {{
+                dashScrollEl.scrollTop = savedScrollTop;
+            }}
         }};
 
+        // [REQUIREMENT 3 & 5] คลิกเลือกเงื่อนไขแบบ Real-time Cross-Filtering โดยไม่ล้างตัวกรองมิติอื่น และไม่เลื่อนหน้าเว็บลงมาอัตโนมัติ (No Auto-scroll)
         window.selectSummaryItem = function(filterType, value) {{
             dashExplorerLimit = 250;
-            var isSame = false;
-            if (filterType === 'eq') isSame = (explorerFilterState.eq === value);
-            else if (filterType === 'prod') isSame = (explorerFilterState.prod === value);
-            else if (filterType === 'comm') isSame = (explorerFilterState.comm === value);
-            else if (filterType === 'wrl') isSame = (explorerFilterState.wrl === value);
-            else if (filterType === 'resp') isSame = (explorerFilterState.resp === value);
-            else if (filterType === 'status') isSame = (explorerFilterState.status === value && value !== 'all');
-
-            explorerFilterState.status = 'all';
-            explorerFilterState.eq = 'all';
-            explorerFilterState.prod = 'all';
-            explorerFilterState.comm = 'all';
-            explorerFilterState.wrl = 'all';
-            explorerFilterState.resp = '';
-
-            if (!isSame) {{
-                if (filterType === 'eq') explorerFilterState.eq = value;
-                else if (filterType === 'prod') explorerFilterState.prod = value;
-                else if (filterType === 'comm') explorerFilterState.comm = value;
-                else if (filterType === 'wrl') explorerFilterState.wrl = value;
-                else if (filterType === 'resp') {{
-                    explorerFilterState.resp = value;
-                    explorerFilterState.status = 'ALL_OFFLINE';
-                }} else if (filterType === 'status') {{
-                    explorerFilterState.status = value;
+            if (filterType === 'eq') {{
+                explorerFilterState.eq = (explorerFilterState.eq === value) ? 'all' : value;
+            }} else if (filterType === 'prod') {{
+                explorerFilterState.prod = (explorerFilterState.prod === value) ? 'all' : value;
+            }} else if (filterType === 'comm') {{
+                explorerFilterState.comm = (explorerFilterState.comm === value) ? 'all' : value;
+            }} else if (filterType === 'wrl') {{
+                explorerFilterState.wrl = (explorerFilterState.wrl === value) ? 'all' : value;
+            }} else if (filterType === 'resp') {{
+                explorerFilterState.resp = (explorerFilterState.resp === value) ? '' : value;
+            }} else if (filterType === 'status') {{
+                if (value === 'all') {{
+                    explorerFilterState.status = 'all';
+                }} else {{
+                    explorerFilterState.status = (explorerFilterState.status === value) ? 'all' : value;
                 }}
+            }} else if (filterType === 'pea') {{
+                explorerFilterState.pea = (explorerFilterState.pea === value) ? 'all' : value;
             }}
-
             window.renderScadaDashboard();
-            var card = document.getElementById('dashExplorerCard');
-            if (card) card.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
         }};
 
         window.onExplorerDropdownChange = function() {{
             var peaSel = document.getElementById('dashExplorerPea');
-            var topPeaSel = document.getElementById('dashPeaFilter');
             var stSel = document.getElementById('dashExplorerStatus');
             var eqSel = document.getElementById('dashExplorerEq');
             var prodSel = document.getElementById('dashExplorerProd');
             var commSel = document.getElementById('dashExplorerComm');
             var wrlSel = document.getElementById('dashExplorerWrl');
 
-            if (peaSel) {{
-                explorerFilterState.pea = peaSel.value || 'all';
-                if (topPeaSel && topPeaSel.value !== explorerFilterState.pea) {{
-                    topPeaSel.value = explorerFilterState.pea;
-                }}
-            }}
+            if (peaSel) explorerFilterState.pea = peaSel.value || 'all';
             explorerFilterState.status = stSel ? stSel.value : 'all';
             explorerFilterState.eq = eqSel ? eqSel.value : 'all';
             explorerFilterState.prod = prodSel ? prodSel.value : 'all';
@@ -10097,13 +10953,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         window.clearSingleExplorerFilter = function(filterKey) {{
             if (filterKey === 'pea') {{
                 explorerFilterState.pea = 'all';
-                var topPea = document.getElementById('dashPeaFilter');
                 var expPea = document.getElementById('dashExplorerPea');
-                if (topPea) topPea.value = 'all';
                 if (expPea) expPea.value = 'all';
-            }} else if (filterKey === 'scope') {{
-                var scopeSel = document.getElementById('dashEqScope');
-                if (scopeSel) scopeSel.value = 'all';
             }} else if (filterKey === 'resp') {{
                 explorerFilterState.resp = '';
             }} else if (filterKey === 'search') {{
@@ -10126,7 +10977,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             window.renderScadaDashboard();
         }};
 
-        // [BUG FIX] ฟังก์ชันปุ่มล้างตัวกรอง (Clear Filter): รีเซ็ตค่า Dropdown "การไฟฟ้า" และตัวกรองทุกตัวในหน้าเว็บกลับเป็นค่า Default อย่างสมบูรณ์
         window.resetDashExplorerFilters = function() {{
             explorerFilterState.pea = 'all';
             explorerFilterState.status = 'all';
@@ -10137,11 +10987,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             explorerFilterState.resp = '';
             dashExplorerLimit = 250;
 
-            // รีเซ็ตค่า Dropdown ทุกตัวในหน้า Dashboard และตาราง Explorer
             var selectDefaults = {{
-                'dashPeaFilter': 'all',
                 'dashExplorerPea': 'all',
-                'dashEqScope': 'all',
                 'dashExplorerStatus': 'all',
                 'dashExplorerEq': 'all',
                 'dashExplorerProd': 'all',
@@ -10153,22 +11000,15 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 if (el) el.value = selectDefaults[id];
             }});
 
-            // ล้างช่องค้นหาหลักและช่องค้นหาในเมนูยี่ห้อผลิตภัณฑ์
             var s = document.getElementById('dashExplorerSearch');
             if (s) s.value = '';
             brandSearchQueryByMode = {{ top: '', exp: '' }};
+            cascFilterSearchQuery = {{ pea: '', status: '', eq: '', comm: '', wrl: '' }};
 
-            // ปิดเมนู Popover ยี่ห้อผลิตภัณฑ์และรีเซ็ตข้อความปุ่มกลับเป็นค่าเริ่มต้น
-            var topMenu = document.getElementById('topHierBrandMenu');
-            var expMenu = document.getElementById('expHierBrandMenu');
-            if (topMenu) topMenu.classList.remove('show');
-            if (expMenu) expMenu.classList.remove('show');
-            var topLbl = document.getElementById('topHierBrandLabel');
+            window.closeAllCascFilterMenus();
             var expLbl = document.getElementById('expHierBrandLabel');
-            if (topLbl) topLbl.textContent = 'ทุกยี่ห้อ (ทั้งหมด)';
             if (expLbl) expLbl.textContent = 'ทุกผลิตภัณฑ์';
 
-            // รีเซ็ตสถานะการกางตารางย่อย (Collapse/Expand)
             expandedBrandGroupsInMenu = Object.create(null);
             expandedBrandGroupsInTable = Object.create(null);
             expandedCommGroupsInTable = Object.create(null);
@@ -10189,25 +11029,19 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 if (grp) grp.classList.toggle('is-filter-active', Boolean(isActive));
             }}
 
-            var eqScopeVal = (document.getElementById('dashEqScope') || {{}}).value || 'all';
-            var peaVal = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
-
-            toggleCtrlGroupActive('dashEqScope', eqScopeVal !== 'all');
-            toggleCtrlGroupActive('dashPeaFilter', peaVal !== 'all');
-            toggleCtrlGroupActive('dashExplorerPea', peaVal !== 'all');
-            toggleCtrlGroupActive('topHierBrandFilterWrap', explorerFilterState.prod && explorerFilterState.prod !== 'all');
+            var peaVal = explorerFilterState.pea || 'all';
+            toggleCtrlGroupActive('expPeaFilterGroup', peaVal !== 'all');
             toggleCtrlGroupActive('expHierBrandFilterWrap', explorerFilterState.prod && explorerFilterState.prod !== 'all');
-            toggleCtrlGroupActive('dashExplorerStatus', explorerFilterState.status && explorerFilterState.status !== 'all');
-            toggleCtrlGroupActive('dashExplorerEq', explorerFilterState.eq && explorerFilterState.eq !== 'all');
-            toggleCtrlGroupActive('dashExplorerComm', explorerFilterState.comm && explorerFilterState.comm !== 'all');
-            toggleCtrlGroupActive('dashExplorerWrl', explorerFilterState.wrl && explorerFilterState.wrl !== 'all');
+            toggleCtrlGroupActive('expStatusFilterGroup', explorerFilterState.status && explorerFilterState.status !== 'all');
+            toggleCtrlGroupActive('expEqFilterGroup', explorerFilterState.eq && explorerFilterState.eq !== 'all');
+            toggleCtrlGroupActive('expCommFilterGroup', explorerFilterState.comm && explorerFilterState.comm !== 'all');
+            toggleCtrlGroupActive('expWrlFilterGroup', explorerFilterState.wrl && explorerFilterState.wrl !== 'all');
 
             var searchInp = document.getElementById('dashExplorerSearch');
             if (searchInp) {{
                 searchInp.classList.toggle('is-filter-active', Boolean(q));
             }}
 
-            // ไฮไลท์การ์ด KPI ด้านบนเมื่อคลิกกรองตามสถานะ
             var kpiMap = {{
                 'Online': 'kpiCardOnline',
                 'Connecting': 'kpiCardConnecting',
@@ -10222,19 +11056,16 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }}
             }});
 
-            // อัปเดตสถานะปุ่ม "ล้างตัวกรอง" ทั้งด้านบนและในหัวข้อที่ 6 ให้เด่นชัดเมื่อมีตัวกรองทำงานอยู่
             var hasActive = activeChipCount > 0;
-            ['topResetFilterBtn', 'expResetFilterBtn'].forEach(function(btnId) {{
-                var btn = document.getElementById(btnId);
-                if (!btn) return;
-                btn.classList.toggle('has-active-filters', hasActive);
-                var txtSpan = btn.querySelector('.btn-clear-filter-text');
+            var expResetBtn = document.getElementById('expResetFilterBtn');
+            if (expResetBtn) {{
+                expResetBtn.classList.toggle('has-active-filters', hasActive);
+                var txtSpan = expResetBtn.querySelector('.btn-clear-filter-text');
                 if (txtSpan) {{
                     txtSpan.textContent = hasActive ? ('ล้างตัวกรอง (' + activeChipCount + ')') : 'ล้างตัวกรอง';
                 }}
-            }});
+            }}
 
-            // อัปเดตสถานะปุ่ม "แสดงครบทุกแถว"
             var showAllBtn = document.getElementById('showAllExplorerRowsBtn');
             if (showAllBtn) {{
                 var isShowingAll = dashExplorerLimit > 250;
@@ -10247,18 +11078,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             var bar = document.getElementById('dashActiveFilterBar');
             var chips = [];
 
-            var eqScopeEl = document.getElementById('dashEqScope');
-            var eqScopeVal = (eqScopeEl && eqScopeEl.value) ? eqScopeEl.value : 'all';
-            if (eqScopeVal !== 'all') {{
-                var scopeText = eqScopeEl.options[eqScopeEl.selectedIndex] ? eqScopeEl.options[eqScopeEl.selectedIndex].text : eqScopeVal;
-                chips.push({{ key: 'scope', label: 'กลุ่มอุปกรณ์: ' + scopeText }});
-            }}
-
-            var peaVal = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
+            var peaVal = explorerFilterState.pea || 'all';
             if (peaVal && peaVal !== 'all') {{
                 chips.push({{ key: 'pea', label: 'การไฟฟ้า: ' + peaVal }});
             }}
-
             if (explorerFilterState.eq && explorerFilterState.eq !== 'all') {{
                 chips.push({{ key: 'eq', label: 'ชนิดอุปกรณ์: ' + explorerFilterState.eq }});
             }}
@@ -10303,48 +11126,21 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 html += '<span class="filter-chip-badge">' + c.label +
                         '<button type="button" data-k="' + c.key + '" onclick="window.clearSingleExplorerFilter(this.getAttribute(&quot;data-k&quot;))" title="ลบตัวกรองนี้">×</button></span>';
             }});
-            html += '<button type="button" class="filter-chip-clear-all" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมด">ล้างทั้งหมด ×</button>';
+            html += '<button type="button" class="filter-chip-clear-all" onclick="window.resetDashExplorerFilters()" title="ล้างตัวกรองทั้งหมด">ล้างตัวกรองทั้งหมด ×</button>';
             bar.innerHTML = html;
         }}
 
         window.renderDashExplorerTable = function() {{
             var q = String((document.getElementById('dashExplorerSearch') || {{}}).value || '').trim().toLowerCase();
-            var stFilter = explorerFilterState.status || 'all';
-            var eqFilter = explorerFilterState.eq || 'all';
-            var prodFilter = explorerFilterState.prod || 'all';
-            var commFilter = explorerFilterState.comm || 'all';
-            var wrlFilter = explorerFilterState.wrl || 'all';
-            var respFilter = explorerFilterState.resp || '';
-
             renderActiveFilterChips(q);
 
-            var peaFilter = explorerFilterState.pea || (document.getElementById('dashPeaFilter') || {{}}).value || 'all';
             var matched = cachedDashboardRows.filter(function(r) {{
-                if (peaFilter !== 'all' && r.pea !== peaFilter) return false;
-                if (stFilter === 'ALL_OFFLINE' && r.parent_state === 'Online') return false;
-                else if (stFilter !== 'all' && stFilter !== 'ALL_OFFLINE' && r.parent_state !== stFilter) return false;
-
-                if (eqFilter !== 'all' && r.norm_eq !== eqFilter) return false;
-                if (prodFilter !== 'all' && !matchesBrandSelection(r, prodFilter)) return false;
-                if (commFilter !== 'all' && !matchesCommSelection(r, commFilter)) return false;
-                if (wrlFilter !== 'all' && r.comm_ref !== wrlFilter) return false;
-
-                if (respFilter) {{
-                    if (respFilter === 'รอตรวจสอบสาเหตุ') {{
-                        if (r.after_full.includes('ผบอ.') || r.after_full.includes('ผอส.') || r.after_full.includes('ระบบสื่อสารเคยแก้ไข')) return false;
-                    }} else if (!r.after_full.includes(respFilter)) {{
-                        return false;
-                    }}
-                }}
-
-                if (q) {{
-                    var hay = (r.site_id + ' ' + r.cmd + ' ' + r.loc + ' ' + r.pea + ' ' + r.norm_eq + ' ' + r.prod + ' ' + r.ip + ' ' + r.dnp + ' ' + r.comm_type + ' ' + r.comm_item + ' ' + r.comm_ref + ' ' + r.state_full).toLowerCase();
-                    if (hay.indexOf(q) === -1) return false;
-                }}
-                return true;
+                return rowMatchesActiveFilters(r, '');
             }});
 
             window.cachedExplorerMatchedRows = matched;
+            renderFilteredSummaryInSection6(matched, cachedDashboardRows.length);
+
             var shownCount = Math.min(matched.length, dashExplorerLimit);
             var subEl = document.getElementById('dashExplorerSubtitle');
             if (subEl) {{
@@ -10374,9 +11170,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             matched.slice(0, dashExplorerLimit).forEach(function(r, idx) {{
                 var tr = document.createElement('tr');
                 var badgeColor = colorByParent[r.parent_state] || '#64748b';
-                var actionHtml = r.safe_id
+                var mapBtnHtml = r.safe_id
                     ? '<button type="button" class="btn-jump-map" data-safe-id="' + r.safe_id + '" onclick="window.jumpFromDashToMapPin(this.getAttribute(&quot;data-safe-id&quot;))">ดูพิกัด</button>'
                     : '<span style="font-size:11px;opacity:0.65;">ไม่มีพิกัด</span>';
+                var reportIssueBtnHtml = '<button type="button" class="btn-jump-map" style="margin-left:4px;color:#c2410c;border-color:#fdba74;" data-row-idx="' + r.idx + '" onclick="window.openUserReportModal(Number(this.getAttribute(&quot;data-row-idx&quot;)))" title="แจ้งข้อมูลไม่ถูกต้องของอุปกรณ์นี้">แจ้งแก้ไข</button>';
                 tr.innerHTML =
                     '<td class="num" style="opacity:0.7;">' + (idx + 1) + '</td>' +
                     '<td><strong>' + r.site_id + '</strong>' +
@@ -10393,7 +11190,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                     '<td class="hide-on-mobile" style="font-family:monospace;">' + r.ip + '</td>' +
                     '<td class="hide-on-mobile" style="font-family:monospace;">' + r.dnp + '</td>' +
                     '<td><span class="status-pill-sm" style="background:' + badgeColor + ';">' + r.state_full + '</span></td>' +
-                    '<td>' + actionHtml + '</td>';
+                    '<td style="white-space:nowrap;">' + mapBtnHtml + reportIssueBtnHtml + '</td>';
                 tbody.appendChild(tr);
             }});
         }};
@@ -10454,6 +11251,417 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                     window.location.href = 'scada_detailed_map.html?site=' + encodeURIComponent(m.id);
                 }}
             }}, 180);
+        }};
+
+        // ============================================================================
+        // === [REQUIREMENT 2] ระบบแจ้งข้อมูลไม่ถูกต้อง (Report Incorrect Data) ส่งเข้า Google Sheets (User_Report) ===
+        // ============================================================================
+        var USER_REPORT_FIELD_LIST = [
+            "Site ID",
+            "รหัสสั่งการ",
+            "สถานที่",
+            "การไฟฟ้า",
+            "ชนิดอุปกรณ์",
+            "ประเภทผลิตภัณฑ์",
+            "อุปกรณ์สื่อสาร (Commu.)",
+            "ประเภทย่อยสื่อสาร (Item)",
+            "เชื่อมกับ WRL Master",
+            "IP",
+            "DNP",
+            "LAT/LONG",
+            "State SCADA",
+            "State SCADA (หลังตรวจสอบ)",
+            "รายละเอียดการแก้ไขข้อขัดข้อง",
+            "รายละเอียดการเข้าแก้ไข",
+            "รอ ผอส. เข้าแก้ไข",
+            "รอ ผบอ. เข้าแก้ไข",
+            "วันที่เข้าตรวจสอบ"
+        ];
+
+        var urCurrentSelectedIdx = -1;
+        var urPerFieldCorrections = Object.create(null);
+
+        function getActiveUrWebhookUrl() {{
+            var saved = '';
+            try {{
+                saved = localStorage.getItem('scada_user_report_webhook_url') || '';
+            }} catch (e) {{}}
+            return String(saved || USER_REPORT_GAS_WEBHOOK_URL || '').trim();
+        }}
+
+        window.saveUrWebhookUrl = function(val) {{
+            var clean = String(val || '').trim();
+            try {{
+                if (clean) localStorage.setItem('scada_user_report_webhook_url', clean);
+                else localStorage.removeItem('scada_user_report_webhook_url');
+            }} catch (e) {{}}
+        }};
+
+        window.toggleUrWebhookConfig = function(forceState) {{
+            var box = document.getElementById('urWebhookConfigBox');
+            var inp = document.getElementById('urWebhookUrlInput');
+            if (!box) return;
+            var willShow = typeof forceState === 'boolean' ? forceState : (box.style.display === 'none');
+            box.style.display = willShow ? 'block' : 'none';
+            if (willShow && inp) {{
+                inp.value = getActiveUrWebhookUrl();
+                setTimeout(function() {{ inp.focus(); }}, 40);
+            }}
+        }};
+
+        window.openUserReportModal = function(preselectRowIdx) {{
+            var modal = document.getElementById('userReportModalOverlay');
+            if (!modal) return;
+            var webhookInp = document.getElementById('urWebhookUrlInput');
+            if (webhookInp) webhookInp.value = getActiveUrWebhookUrl();
+
+            var searchInp = document.getElementById('urDeviceSearchInput');
+            if (searchInp) searchInp.value = '';
+            window.filterUserReportDeviceOptions();
+
+            if (typeof preselectRowIdx === 'number' && !isNaN(preselectRowIdx) && preselectRowIdx >= 0) {{
+                var sel = document.getElementById('urDeviceSelect');
+                if (sel) sel.value = String(preselectRowIdx);
+                window.onUserReportDeviceSelected(String(preselectRowIdx));
+            }} else if (urCurrentSelectedIdx < 0) {{
+                window.resetUserReportForm();
+            }}
+            modal.classList.add('show');
+        }};
+
+        window.closeUserReportModal = function() {{
+            var modal = document.getElementById('userReportModalOverlay');
+            if (modal) modal.classList.remove('show');
+        }};
+
+        window.filterUserReportDeviceOptions = function() {{
+            var searchInp = document.getElementById('urDeviceSearchInput');
+            var sel = document.getElementById('urDeviceSelect');
+            var cntBadge = document.getElementById('urMatchedDeviceCount');
+            if (!sel) return;
+
+            var q = String((searchInp && searchInp.value) || '').trim().toLowerCase();
+            var prevVal = sel.value;
+            sel.innerHTML = '';
+
+            var placeholderOpt = document.createElement('option');
+            placeholderOpt.value = '';
+            placeholderOpt.textContent = '-- กรุณาเลือกอุปกรณ์ที่ต้องการแจ้งข้อมูลไม่ถูกต้อง --';
+            sel.appendChild(placeholderOpt);
+
+            var matchedIndices = [];
+            for (var i = 0; i < dashAllRecords.length; i++) {{
+                var rec = dashAllRecords[i];
+                var sid = rec["Site ID"] || '-';
+                var cmd = (rec["รหัสสั่งการ"] && rec["รหัสสั่งการ"] !== 'ไม่มีค่า') ? rec["รหัสสั่งการ"] : '-';
+                var loc = (rec["สถานที่"] && rec["สถานที่"] !== 'ไม่มีค่า') ? rec["สถานที่"] : '-';
+                var pea = (rec["การไฟฟ้า"] && rec["การไฟฟ้า"] !== 'ไม่มีค่า') ? rec["การไฟฟ้า"] : '-';
+                var eq = (rec["ชนิดอุปกรณ์"] && rec["ชนิดอุปกรณ์"] !== 'ไม่มีค่า') ? rec["ชนิดอุปกรณ์"] : '-';
+                var ip = (rec["IP"] && rec["IP"] !== 'ไม่มีค่า') ? rec["IP"] : '';
+                var dnp = (rec["DNP"] && rec["DNP"] !== 'ไม่มีค่า') ? rec["DNP"] : '';
+                if (q) {{
+                    var hay = (sid + ' ' + cmd + ' ' + loc + ' ' + pea + ' ' + eq + ' ' + ip + ' ' + dnp).toLowerCase();
+                    if (hay.indexOf(q) === -1) continue;
+                }}
+                matchedIndices.push(i);
+            }}
+
+            if (cntBadge) {{
+                cntBadge.textContent = matchedIndices.length.toLocaleString() + ' อุปกรณ์';
+            }}
+
+            matchedIndices.forEach(function(idx) {{
+                var rec = dashAllRecords[idx];
+                var sid = rec["Site ID"] || '-';
+                var cmd = (rec["รหัสสั่งการ"] && rec["รหัสสั่งการ"] !== 'ไม่มีค่า') ? rec["รหัสสั่งการ"] : '-';
+                var loc = (rec["สถานที่"] && rec["สถานที่"] !== 'ไม่มีค่า') ? rec["สถานที่"] : '-';
+                var pea = (rec["การไฟฟ้า"] && rec["การไฟฟ้า"] !== 'ไม่มีค่า') ? rec["การไฟฟ้า"] : '-';
+                var opt = document.createElement('option');
+                opt.value = String(idx);
+                opt.textContent = sid + ' | ' + cmd + ' | ' + loc + ' (' + pea + ')';
+                sel.appendChild(opt);
+            }});
+
+            if (prevVal && matchedIndices.indexOf(Number(prevVal)) >= 0) {{
+                sel.value = prevVal;
+            }} else if (q && matchedIndices.length === 1) {{
+                sel.value = String(matchedIndices[0]);
+                window.onUserReportDeviceSelected(String(matchedIndices[0]));
+            }}
+        }};
+
+        function syncUrCombinedCorrectedInput() {{
+            var checkedCbs = Array.from(document.querySelectorAll('.ur-field-cb:checked'));
+            var badge = document.getElementById('urCheckedFieldsBadge');
+            if (badge) {{
+                badge.textContent = 'เลือกแล้ว ' + checkedCbs.length + ' ฟิลด์';
+            }}
+            var parts = [];
+            checkedCbs.forEach(function(cb) {{
+                var fName = cb.value;
+                var inlineVal = String(urPerFieldCorrections[fName] || '').trim();
+                if (inlineVal) {{
+                    parts.push(fName + ' แก้ไขเป็น: ' + inlineVal);
+                }}
+            }});
+            var mainInput = document.getElementById('urCorrectedValueInput');
+            if (mainInput && parts.length > 0) {{
+                mainInput.value = parts.join(' | ');
+            }}
+        }}
+
+        window.onUserReportDeviceSelected = function(idxStr) {{
+            var infoBox = document.getElementById('urDeviceFullDataBox');
+            var infoGrid = document.getElementById('urDeviceInfoGrid');
+            var checklistEl = document.getElementById('urFieldsChecklist');
+            var headerEl = document.getElementById('urSelectedDeviceHeader');
+            var bannerEl = document.getElementById('urStatusBanner');
+            if (bannerEl) bannerEl.className = 'ur-status-banner';
+
+            urPerFieldCorrections = Object.create(null);
+
+            if (idxStr === '' || idxStr === null || idxStr === undefined) {{
+                urCurrentSelectedIdx = -1;
+                if (infoBox) infoBox.style.display = 'none';
+                if (checklistEl) {{
+                    checklistEl.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-secondary);font-size:12px;">กรุณาเลือกอุปกรณ์ในขั้นตอนที่ 1 ก่อน เพื่อแสดงรายการฟิลด์และค่าปัจจุบันทั้งหมด</div>';
+                }}
+                var badge = document.getElementById('urCheckedFieldsBadge');
+                if (badge) badge.textContent = 'เลือกแล้ว 0 ฟิลด์';
+                return;
+            }}
+
+            var idx = Number(idxStr);
+            urCurrentSelectedIdx = idx;
+            var rec = dashAllRecords[idx] || {{}};
+
+            if (infoBox) infoBox.style.display = 'block';
+            if (headerEl) {{
+                headerEl.textContent = 'ข้อมูลปัจจุบันของอุปกรณ์: ' + (rec["Site ID"] || '-') + ' (' + ((rec["รหัสสั่งการ"] && rec["รหัสสั่งการ"] !== 'ไม่มีค่า') ? rec["รหัสสั่งการ"] : '-') + ')';
+            }}
+
+            if (infoGrid) {{
+                infoGrid.innerHTML = '';
+                USER_REPORT_FIELD_LIST.forEach(function(fName) {{
+                    var curVal = (rec[fName] && rec[fName] !== 'ไม่มีค่า') ? rec[fName] : '-';
+                    var cell = document.createElement('div');
+                    cell.className = 'ur-info-cell';
+                    cell.innerHTML = '<span>' + fName + '</span><strong>' + curVal + '</strong>';
+                    infoGrid.appendChild(cell);
+                }});
+            }}
+
+            if (checklistEl) {{
+                checklistEl.innerHTML = '';
+                USER_REPORT_FIELD_LIST.forEach(function(fName) {{
+                    var curVal = (rec[fName] && rec[fName] !== 'ไม่มีค่า') ? rec[fName] : '-';
+                    var card = document.createElement('div');
+                    card.className = 'ur-field-check-card';
+
+                    var topLabel = document.createElement('label');
+                    topLabel.className = 'ur-field-check-top';
+
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'ur-field-cb';
+                    cb.value = fName;
+
+                    var txtWrap = document.createElement('div');
+                    txtWrap.style.flex = '1';
+                    txtWrap.style.minWidth = '0';
+                    txtWrap.innerHTML = '<div class="ur-field-name">' + fName + '</div><div class="ur-field-curval">ค่าปัจจุบัน: ' + curVal + '</div>';
+
+                    var inlineInp = document.createElement('input');
+                    inlineInp.type = 'text';
+                    inlineInp.className = 'ur-field-inline-input';
+                    inlineInp.placeholder = 'ระบุค่าที่ถูกต้องของ "' + fName + '" (หรือพิมพ์รวมในข้อ 3)...';
+
+                    cb.addEventListener('change', function() {{
+                        card.classList.toggle('is-checked', cb.checked);
+                        syncUrCombinedCorrectedInput();
+                        if (cb.checked) {{
+                            setTimeout(function() {{ inlineInp.focus(); }}, 30);
+                        }}
+                    }});
+
+                    inlineInp.addEventListener('input', function() {{
+                        urPerFieldCorrections[fName] = inlineInp.value;
+                        syncUrCombinedCorrectedInput();
+                    }});
+
+                    topLabel.appendChild(cb);
+                    topLabel.appendChild(txtWrap);
+                    card.appendChild(topLabel);
+                    card.appendChild(inlineInp);
+                    checklistEl.appendChild(card);
+                }});
+            }}
+            syncUrCombinedCorrectedInput();
+        }};
+
+        window.resetUserReportForm = function() {{
+            urCurrentSelectedIdx = -1;
+            urPerFieldCorrections = Object.create(null);
+            var sInp = document.getElementById('urDeviceSearchInput');
+            if (sInp) sInp.value = '';
+            var sel = document.getElementById('urDeviceSelect');
+            if (sel) sel.value = '';
+            var corrInp = document.getElementById('urCorrectedValueInput');
+            if (corrInp) corrInp.value = '';
+            var noteInp = document.getElementById('urReporterNoteInput');
+            if (noteInp) noteInp.value = '';
+            var bannerEl = document.getElementById('urStatusBanner');
+            if (bannerEl) bannerEl.className = 'ur-status-banner';
+            window.filterUserReportDeviceOptions();
+            window.onUserReportDeviceSelected('');
+        }};
+
+        function setUrBanner(type, htmlMsg) {{
+            var bannerEl = document.getElementById('urStatusBanner');
+            if (!bannerEl) return;
+            bannerEl.className = 'ur-status-banner show is-' + type;
+            bannerEl.innerHTML = htmlMsg;
+        }}
+
+        window.submitUserReportToGoogleSheet = async function() {{
+            if (urCurrentSelectedIdx < 0 || !dashAllRecords[urCurrentSelectedIdx]) {{
+                setUrBanner('error', '⚠️ กรุณาเลือกอุปกรณ์ที่ต้องการแจ้งข้อมูลไม่ถูกต้องในขั้นตอนที่ 1 ก่อนครับ');
+                return;
+            }}
+            var checkedCbs = Array.from(document.querySelectorAll('.ur-field-cb:checked'));
+            if (checkedCbs.length === 0) {{
+                setUrBanner('error', '⚠️ กรุณาติ๊กเลือกฟิลด์หรือค่าที่ไม่ถูกต้องอย่างน้อย 1 ฟิลด์ในขั้นตอนที่ 2 ครับ');
+                return;
+            }}
+            var corrInp = document.getElementById('urCorrectedValueInput');
+            var correctedValueText = String((corrInp && corrInp.value) || '').trim();
+            if (!correctedValueText) {{
+                setUrBanner('error', '⚠️ กรุณาระบุ "ข้อมูลที่ถูกต้อง (แก้ไขเป็น)" ในขั้นตอนที่ 3 ก่อนกดส่งข้อมูลครับ');
+                if (corrInp) corrInp.focus();
+                return;
+            }}
+
+            var rec = dashAllRecords[urCurrentSelectedIdx];
+            var incorrectFields = checkedCbs.map(function(cb) {{ return cb.value; }});
+            var currentValuesObj = {{}};
+            var perFieldDetailParts = [];
+            incorrectFields.forEach(function(fName) {{
+                var cVal = (rec[fName] && rec[fName] !== 'ไม่มีค่า') ? rec[fName] : '-';
+                currentValuesObj[fName] = cVal;
+                var newVal = String(urPerFieldCorrections[fName] || '').trim();
+                if (newVal) {{
+                    perFieldDetailParts.push(fName + ': [' + cVal + '] -> [' + newVal + ']');
+                }} else {{
+                    perFieldDetailParts.push(fName + ': [' + cVal + ']');
+                }}
+            }});
+
+            var snapshotObj = {{}};
+            USER_REPORT_FIELD_LIST.forEach(function(fName) {{
+                snapshotObj[fName] = (rec[fName] && rec[fName] !== 'ไม่มีค่า') ? rec[fName] : '-';
+            }});
+
+            var noteInp = document.getElementById('urReporterNoteInput');
+            var reporterNote = String((noteInp && noteInp.value) || '').trim();
+
+            var payload = {{
+                timestamp: new Date().toISOString(),
+                spreadsheet_id: USER_REPORT_TARGET_SPREADSHEET_ID,
+                target_gid: USER_REPORT_TARGET_GID,
+                target_sheet: USER_REPORT_TARGET_SHEET_NAME,
+                target_url: USER_REPORT_TARGET_SHEET_URL,
+                site_id: rec["Site ID"] || '-',
+                cmd: (rec["รหัสสั่งการ"] && rec["รหัสสั่งการ"] !== 'ไม่มีค่า') ? rec["รหัสสั่งการ"] : '-',
+                location: (rec["สถานที่"] && rec["สถานที่"] !== 'ไม่มีค่า') ? rec["สถานที่"] : '-',
+                pea: (rec["การไฟฟ้า"] && rec["การไฟฟ้า"] !== 'ไม่มีค่า') ? rec["การไฟฟ้า"] : '-',
+                device_type: (rec["ชนิดอุปกรณ์"] && rec["ชนิดอุปกรณ์"] !== 'ไม่มีค่า') ? rec["ชนิดอุปกรณ์"] : '-',
+                incorrect_fields: incorrectFields,
+                current_values: currentValuesObj,
+                corrected_value: correctedValueText,
+                per_field_detail: perFieldDetailParts.join(' ; '),
+                reporter_note: reporterNote,
+                device_snapshot: snapshotObj
+            }};
+
+            // บันทึกสำรองไว้ใน localStorage เสมอเพื่อความปลอดภัยของข้อมูล
+            try {{
+                var localQueue = JSON.parse(localStorage.getItem('scada_user_reports_history') || '[]');
+                localQueue.unshift(payload);
+                localStorage.setItem('scada_user_reports_history', JSON.stringify(localQueue.slice(0, 100)));
+            }} catch (e) {{}}
+
+            var submitBtn = document.getElementById('urSubmitBtn');
+            if (submitBtn) {{
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '⏳ กำลังส่งข้อมูลเข้าสู่ชีต User_Report...';
+            }}
+
+            var webhookUrl = getActiveUrWebhookUrl();
+            var sentOk = false;
+            var errDetail = '';
+
+            // 1. ส่งผ่าน Fetch API ไปยัง Google Apps Script Web App URL (ใช้ Content-Type: text/plain;charset=utf-8 เพื่อรองรับ CORS ของ Google Apps Script)
+            if (webhookUrl) {{
+                try {{
+                    var resp = await fetch(webhookUrl, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'text/plain;charset=utf-8' }},
+                        body: JSON.stringify(payload)
+                    }});
+                    if (resp.ok || resp.type === 'opaque') {{
+                        sentOk = true;
+                    }} else {{
+                        errDetail = 'HTTP ' + resp.status;
+                    }}
+                }} catch (fetchErr) {{
+                    try {{
+                        await fetch(webhookUrl, {{
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: {{ 'Content-Type': 'text/plain;charset=utf-8' }},
+                            body: JSON.stringify(payload)
+                        }});
+                        sentOk = true;
+                    }} catch (noCorsErr) {{
+                        errDetail = String(noCorsErr.message || noCorsErr);
+                    }}
+                }}
+            }}
+
+            // 2. กรณีรันผ่านเซิร์ฟเวอร์ Python หลังบ้าน (/api/user_report)
+            if (!sentOk && window.location.protocol !== 'file:') {{
+                try {{
+                    var bkResp = await fetch('/api/user_report', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(payload)
+                    }});
+                    if (bkResp.ok) sentOk = true;
+                }} catch (bkErr) {{}}
+            }}
+
+            if (submitBtn) {{
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg> 4. ส่งข้อมูล (Submit) เข้า Google Sheets (ชีต User_Report)';
+            }}
+
+            if (sentOk) {{
+                setUrBanner(
+                    'success',
+                    '✅ ส่งข้อมูลแจ้งแก้ไขของอุปกรณ์ <strong>' + payload.site_id + '</strong> (ฟิลด์: ' + incorrectFields.join(', ') + ') เข้าสู่ Google Sheets ชีต <code>User_Report</code> เรียบร้อยแล้ว!'
+                );
+            }} else if (!webhookUrl) {{
+                window.toggleUrWebhookConfig(true);
+                setUrBanner(
+                    'warn',
+                    '⚠️ บันทึกข้อมูลของ <strong>' + payload.site_id + '</strong> ไว้ในระบบเรียบร้อยแล้ว — กรุณานำ <strong>Web App URL</strong> ที่ได้จากการ Deploy ไฟล์ <code>Code.gs</code> มาวางในช่อง <strong>"ตั้งค่า Webhook URL"</strong> ด้านบน แล้วกดส่งข้อมูลอีกครั้งเพื่อยิงตรงเข้าชีต <a href="' + USER_REPORT_TARGET_SHEET_URL + '" target="_blank" rel="noopener">User_Report</a> ครับ'
+                );
+            }} else {{
+                setUrBanner(
+                    'error',
+                    '❌ ไม่สามารถเชื่อมต่อ Webhook URL ได้ (' + (errDetail || 'Network Error') + ') กรุณาตรวจสอบสิทธิ์การ Deploy ของ Google Apps Script (Who has access: Anyone)'
+                );
+            }}
         }};
 
         // ระบบเปิดหน้าต่างตั้งค่า Export ข้อมูลของหน้า Dashboard (เลือกตารางและคอลัมน์ได้ตามต้องการ)
