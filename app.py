@@ -11,6 +11,11 @@ import io
 import sqlite3
 import ssl
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import glob
 import shutil
 import time
@@ -438,11 +443,10 @@ except ImportError:
     genai_types = None
     HAS_GOOGLE_GENAI_SDK = False
 
-# CHANGED: ตั้งค่า Default/Hardcode API Key (Free Tier) ในโค้ดเป็นค่าเริ่มต้น พร้อมรองรับ Environment Variable
+# อ่านค่า API Key จาก Environment Variables เท่านั้น (ป้องกัน Google ระงับ Key เมื่ออัปโหลดขึ้น GitHub สาธารณะ)
 DEFAULT_GEMINI_API_KEY = (
     os.environ.get("GEMINI_API_KEY")
     or os.environ.get("GOOGLE_API_KEY")
-    or "AQ.Ab8RN6Ls9WgRvWqiqgxB8ICLyIVlvzA8eG1j8CxQ_WZDuNmQqQ"
 )
 
 # System Instruction มาตรฐานวิศวกรรม (Engineering Narrative Report Style: สาเหตุ -> การดำเนินการ -> ผลลัพธ์)
@@ -4640,13 +4644,9 @@ def generate_map():
                     </div>
                 </div>
                 <div class="dash-controls-bar">
-                    <button type="button" class="dash-action-btn" onclick="window.openReportModal(true)" style="border-color:var(--accent-primary);color:var(--accent-primary);font-weight:600;">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
-                        สรุปรายงานตรวจสอบด้วย AI
-                    </button>
-                    <button type="button" class="dash-action-btn btn-primary" onclick="window.exportDashboardExcel()">
+                    <button type="button" class="dash-action-btn btn-primary" onclick="window.openDashExportModal()">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg>
-                        ส่งออก Excel ขนาด A4 (.xlsx)
+                        Export ข้อมูล (.xlsx)
                     </button>
                 </div>
             </div>
@@ -5325,6 +5325,157 @@ def generate_map():
         <div id="reportWorkerDropdown" class="report-worker-dropdown" role="listbox" aria-label="ผลการค้นหาผู้ปฏิบัติงาน"></div>
     </div>
 
+    <!-- หน้าต่าง Export ข้อมูลของหน้า Dashboard (เลือกเนื้อหาและรายละเอียดที่ต้องการส่งออก) -->
+    <div id="dashExportModalOverlay" class="report-modal-overlay">
+        <div class="report-modal" role="dialog" aria-modal="true" aria-labelledby="dashExportModalTitle">
+            <button class="report-close-btn" type="button" onclick="window.closeDashExportModal()" aria-label="ปิดหน้าต่าง">×</button>
+            <div class="report-modal-top">
+                <div class="report-modal-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg></div>
+                <div>
+                    <div class="report-eyebrow-row">
+                        <p class="report-eyebrow">CUSTOM DATA EXPORT (.XLSX)</p>
+                        <span class="report-source-badge" id="dashExportScopeBadge">Dashboard Data</span>
+                    </div>
+                    <h3 id="dashExportModalTitle">Export ข้อมูลความพร้อมใช้งานระบบ SCADA</h3>
+                    <p class="report-subtitle">เลือกหัวข้อตารางสรุป ขอบเขตข้อมูล และคอลัมน์รายละเอียดที่ต้องการส่งออกเป็นไฟล์ Excel (.xlsx)</p>
+                </div>
+            </div>
+
+            <section class="report-section">
+                <div class="report-section-heading">
+                    <div class="report-section-title-wrap">
+                        <span class="report-section-title">1. เลือกตารางข้อมูลที่ต้องการส่งออก (Sheets)</span>
+                        <span class="report-section-help">เลือกได้หลายตารางในไฟล์เดียวกัน</span>
+                    </div>
+                    <div class="report-footer-btns">
+                        <button type="button" class="report-mini-btn" onclick="window.setAllDashExportSheets(true)">เลือกทั้งหมด</button>
+                        <button type="button" class="report-mini-btn" onclick="window.setAllDashExportSheets(false)">ล้างที่เลือก</button>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" value="eq" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>1. %AVA แยกตามชนิดอุปกรณ์</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" value="resp" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>2. สถานะการติดตามหน้างาน (ไม่ออนไลน์)</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" value="prod" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>3. แยกตามประเภทผลิตภัณฑ์ FRTU</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" value="comm" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>4. แยกตามอุปกรณ์สื่อสารและแม่ข่าย</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" value="pea" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>5. %AVA แยกตามสังกัดการไฟฟ้า</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border-hairline);border-radius:8px;">
+                        <input type="checkbox" class="dash-exp-sheet-cb" id="dashExpDevicesSheetCb" value="devices" checked onchange="window.updateDashExportPreview()" style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                        <span>6. ตารางรายการอุปกรณ์และการสื่อสาร</span>
+                    </label>
+                </div>
+            </section>
+
+            <section class="report-section" id="dashExportDeviceOptionsSection">
+                <div class="report-section-heading">
+                    <div class="report-section-title-wrap">
+                        <span class="report-section-title">2. เลือกรายละเอียดตารางรายการอุปกรณ์ (หัวข้อที่ 6)</span>
+                        <span class="report-section-help">ปรับเลือกขอบเขตและคอลัมน์ได้ตามต้องการ</span>
+                    </div>
+                    <div class="report-footer-btns">
+                        <button type="button" class="report-mini-btn" onclick="window.setAllDashExportCols(true)">เลือกทุกคอลัมน์</button>
+                        <button type="button" class="report-mini-btn" onclick="window.setDefaultDashExportCols()">คอลัมน์หลัก</button>
+                    </div>
+                </div>
+                <div class="adv-grid-row" style="margin-bottom:10px;">
+                    <div class="adv-field">
+                        <label for="dashExportRowScope">ขอบเขตรายการอุปกรณ์ที่จะส่งออก</label>
+                        <select id="dashExportRowScope" class="adv-select" onchange="window.updateDashExportPreview()">
+                            <option value="filtered" selected>ตามตัวกรองที่เลือกในตารางข้อ 6 ปัจจุบัน</option>
+                            <option value="all_dashboard">อุปกรณ์ทั้งหมดตามขอบเขต Dashboard ด้านบน</option>
+                        </select>
+                    </div>
+                    <div class="adv-field">
+                        <label for="dashExportPageFormat">รูปแบบการจัดหน้ากระดาษ Excel</label>
+                        <select id="dashExportPageFormat" class="adv-select" onchange="window.updateDashExportPreview()">
+                            <option value="a4_landscape" selected>จัดหน้ามาตรฐาน A4 แนวนอน (Fit to 1 Page Wide)</option>
+                            <option value="standard">ตารางข้อมูลมาตรฐาน (ไม่จำกัดความกว้างหน้า)</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:6px;">
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="seq" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> ลำดับ
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="site_id" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> Site ID
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="cmd" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> รหัสสั่งการ
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="loc" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> สถานที่
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="pea" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> การไฟฟ้า
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="norm_eq" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> ชนิดอุปกรณ์
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="prod" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> ประเภทผลิตภัณฑ์
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="comm_type" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> Commu.
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="comm_item" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> Item
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="comm_ref" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> WRL Master
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="ip" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> IP Address
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="dnp" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> DNP Address
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="state_full" checked onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> State SCADA
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-primary);cursor:pointer;">
+                        <input type="checkbox" class="dash-exp-col-cb" value="after_full" onchange="window.updateDashExportPreview()" style="accent-color:var(--accent-primary);"> สถานะหลังตรวจสอบ
+                    </label>
+                </div>
+            </section>
+
+            <div class="report-export-summary">
+                <div class="report-export-summary-left">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="var(--accent-primary)" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <div>
+                        <div class="report-export-summary-text" id="dashExportSummaryTitle">สรุปรายละเอียดข้อมูลที่จะ Export</div>
+                        <div class="report-export-subtext" id="dashExportSummarySub">เลือก 6 ตาราง · 13 คอลัมน์อุปกรณ์</div>
+                    </div>
+                </div>
+                <div class="report-preview-count" id="dashExportPreviewBadge">6 Sheets</div>
+            </div>
+
+            <div class="report-btn-group">
+                <div class="report-btn-secondary-row">
+                    <button class="report-btn report-btn-cancel" type="button" onclick="window.setAllDashExportSheets(true); window.setAllDashExportCols(true);">เลือกครบทั้งหมด</button>
+                    <button class="report-btn report-btn-cancel" type="button" onclick="window.closeDashExportModal()">ยกเลิก</button>
+                </div>
+                <button id="execDashExportBtn" class="report-btn report-btn-dl" type="button" onclick="window.exportDashboardExcel()">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="white" stroke-width="2"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg> Export ข้อมูล (.xlsx)
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal แจ้งเตือน -->
     <div id="customAlertOverlay" class="custom-alert-overlay">
         <div class="custom-alert-box">
@@ -5482,6 +5633,7 @@ def generate_map():
         var fw = document.getElementById('customFilterWrapper');
         if (fw) fw.classList.remove('show');
         if (typeof closeReportModal === 'function') closeReportModal();
+        if (typeof window.closeDashExportModal === 'function') window.closeDashExportModal();
         var alertOverlay = document.getElementById('customAlertOverlay');
         if (alertOverlay) alertOverlay.classList.remove('show');
         var results = document.getElementById('searchResults');
@@ -6207,12 +6359,8 @@ def generate_map():
         "2. แก้คำผิด คำซ้ำซ้อน และใช้ศัพท์เทคนิคทางวิศวกรรมให้ถูกต้องตามมาตรฐานวิชาชีพ โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •)\\n" +
         "3. กรณีข้อมูลต้นฉบับไม่ครบทั้ง 3 ส่วน ให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุดโดยห้ามแต่งเติมข้อมูลเท็จ";
 
-    // คีย์สำรองภายในโค้ดสำหรับเรียกใช้งานหลังบ้านเมื่อผู้ใช้ไม่ได้ระบุคีย์ของตนเอง (ห้ามนำไปแสดงในหน้า UI เด็ดขาด)
-    var INTERNAL_FALLBACK_GEMINI_KEY = [
-        "AQ.Ab8RN6Ls9WgRvWqi",
-        "qgxB8ICLyIVlvzA8eG1j",
-        "8CxQ_WZDuNmQqQ"
-    ].join("");
+    // ไม่เก็บ API Key แบบ Hardcode ในฝั่ง Frontend เพื่อความปลอดภัยเมื่ออัปโหลดขึ้น GitHub สาธารณะ
+    var INTERNAL_FALLBACK_GEMINI_KEY = "";
 
     var MODEL_MONO_ICONS = {{
         sparkle: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>',
@@ -7903,7 +8051,7 @@ function hideCustomPanel() {{
 
             if(!document.getElementById('exportCsvBtn')) {{
                 var exportDiv = document.createElement('div'); exportDiv.className = 'g-export-container';
-                exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>ส่งออก Excel ขนาด A4 (.xlsx)</button>';
+                exportDiv.innerHTML = '<button id="exportCsvBtn" class="g-export-btn" type="button"><svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>Export ข้อมูลตามตัวกรอง (.xlsx)</button>';
                 targetForm.appendChild(exportDiv);
 
                 document.getElementById('exportCsvBtn').onclick = async function(e) {{
@@ -8284,6 +8432,8 @@ function hideCustomPanel() {{
         if (fw && fw.classList.contains('show') && !fw.contains(target) && !filterBtn.contains(target)) fw.classList.remove('show');
 
         if (reportModal && reportModal.classList.contains('show') && target === reportModal) closeReportModal();
+        var dashExpModal = document.getElementById('dashExportModalOverlay');
+        if (dashExpModal && dashExpModal.classList.contains('show') && target === dashExpModal) window.closeDashExportModal();
         var alertOverlay = document.getElementById('customAlertOverlay');
         if (alertOverlay && alertOverlay.classList.contains('show') && target === alertOverlay) alertOverlay.classList.remove('show');
 
@@ -9046,6 +9196,7 @@ function hideCustomPanel() {{
             return true;
         }});
 
+        window.cachedExplorerMatchedRows = matched;
         var shownCount = Math.min(matched.length, dashExplorerLimit);
         var subEl = document.getElementById('dashExplorerSubtitle');
         if (subEl) {{
@@ -9157,10 +9308,112 @@ function hideCustomPanel() {{
         }}, 180);
     }};
 
-    // ส่งออกไฟล์ Excel ของหน้า Dashboard ทุกตารางขนาดมาตรฐาน A4
+    // ระบบเปิดหน้าต่างตั้งค่า Export ข้อมูลของหน้า Dashboard (เลือกตารางและคอลัมน์ได้ตามต้องการ)
+    var DASH_EXPORT_COL_DEFS = [
+        {{ key: 'seq', label: 'ลำดับ', width: 8 }},
+        {{ key: 'site_id', label: 'Site ID', width: 16 }},
+        {{ key: 'cmd', label: 'รหัสสั่งการ', width: 16 }},
+        {{ key: 'loc', label: 'สถานที่', width: 24 }},
+        {{ key: 'pea', label: 'การไฟฟ้า', width: 20 }},
+        {{ key: 'norm_eq', label: 'ชนิดอุปกรณ์', width: 22 }},
+        {{ key: 'prod', label: 'ประเภทผลิตภัณฑ์', width: 18 }},
+        {{ key: 'comm_type', label: 'Commu.', width: 14 }},
+        {{ key: 'comm_item', label: 'Item', width: 14 }},
+        {{ key: 'comm_ref', label: 'WRL Master', width: 16 }},
+        {{ key: 'ip', label: 'IP', width: 16 }},
+        {{ key: 'dnp', label: 'DNP', width: 10 }},
+        {{ key: 'state_full', label: 'State SCADA', width: 16 }},
+        {{ key: 'after_full', label: 'สถานะหลังตรวจสอบ', width: 26 }}
+    ];
+
+    window.openDashExportModal = function() {{
+        var modal = document.getElementById('dashExportModalOverlay');
+        if (!modal) return;
+        window.updateDashExportPreview();
+        modal.classList.add('show');
+    }};
+
+    window.closeDashExportModal = function() {{
+        var modal = document.getElementById('dashExportModalOverlay');
+        if (modal) modal.classList.remove('show');
+    }};
+
+    window.setAllDashExportSheets = function(checked) {{
+        document.querySelectorAll('.dash-exp-sheet-cb').forEach(function(cb) {{
+            cb.checked = Boolean(checked);
+        }});
+        window.updateDashExportPreview();
+    }};
+
+    window.setAllDashExportCols = function(checked) {{
+        document.querySelectorAll('.dash-exp-col-cb').forEach(function(cb) {{
+            cb.checked = Boolean(checked);
+        }});
+        window.updateDashExportPreview();
+    }};
+
+    window.setDefaultDashExportCols = function() {{
+        var mainKeys = ['seq', 'site_id', 'cmd', 'loc', 'pea', 'norm_eq', 'state_full'];
+        document.querySelectorAll('.dash-exp-col-cb').forEach(function(cb) {{
+            cb.checked = mainKeys.indexOf(cb.value) >= 0;
+        }});
+        window.updateDashExportPreview();
+    }};
+
+    window.updateDashExportPreview = function() {{
+        var selectedSheets = Array.from(document.querySelectorAll('.dash-exp-sheet-cb:checked')).map(function(cb) {{ return cb.value; }});
+        var selectedCols = Array.from(document.querySelectorAll('.dash-exp-col-cb:checked')).map(function(cb) {{ return cb.value; }});
+        var devSection = document.getElementById('dashExportDeviceOptionsSection');
+        var hasDevices = selectedSheets.indexOf('devices') >= 0;
+        if (devSection) {{
+            devSection.style.opacity = hasDevices ? '1' : '0.5';
+        }}
+
+        var scopeSel = document.getElementById('dashExportRowScope');
+        var scopeMode = scopeSel ? scopeSel.value : 'filtered';
+        var targetDeviceRows = (scopeMode === 'filtered' && window.cachedExplorerMatchedRows) ? window.cachedExplorerMatchedRows : cachedDashboardRows;
+        var rowCount = targetDeviceRows ? targetDeviceRows.length : 0;
+
+        var subEl = document.getElementById('dashExportSummarySub');
+        var badgeEl = document.getElementById('dashExportPreviewBadge');
+        var scopeBadge = document.getElementById('dashExportScopeBadge');
+        if (scopeBadge) {{
+            scopeBadge.textContent = 'อุปกรณ์ ' + rowCount.toLocaleString() + ' ชุด';
+        }}
+        if (subEl) {{
+            subEl.textContent = 'เลือก ' + selectedSheets.length + ' ตาราง' + (hasDevices ? (' · ตารางอุปกรณ์ ' + rowCount.toLocaleString() + ' ชุด (' + selectedCols.length + ' คอลัมน์)') : '');
+        }}
+        if (badgeEl) {{
+            badgeEl.textContent = selectedSheets.length + ' Sheets';
+            badgeEl.classList.toggle('is-invalid', selectedSheets.length === 0 || (hasDevices && selectedCols.length === 0));
+        }}
+    }};
+
+    // ส่งออกไฟล์ Excel ของหน้า Dashboard ตามเนื้อหาและรายละเอียดที่ผู้ใช้เลือก
     window.exportDashboardExcel = async function() {{
+        var selectedSheets = Array.from(document.querySelectorAll('.dash-exp-sheet-cb:checked')).map(function(cb) {{ return cb.value; }});
+        var selectedColKeys = Array.from(document.querySelectorAll('.dash-exp-col-cb:checked')).map(function(cb) {{ return cb.value; }});
+
+        // กรณีเรียกใช้งานโดยตรงโดยยังไม่ได้เปิด Modal ให้ส่งออกครบทุกตารางเป็นค่าเริ่มต้น
+        if (selectedSheets.length === 0 && !document.getElementById('dashExportModalOverlay').classList.contains('show')) {{
+            selectedSheets = ['eq', 'resp', 'prod', 'comm', 'pea', 'devices'];
+        }}
+        if (selectedSheets.length === 0) {{
+            showCustomAlert('กรุณาเลือกตารางข้อมูลที่ต้องการส่งออกอย่างน้อย 1 ตาราง');
+            return;
+        }}
+        if (selectedSheets.indexOf('devices') >= 0 && selectedColKeys.length === 0) {{
+            showCustomAlert('กรุณาเลือกคอลัมน์ในตารางรายการอุปกรณ์อย่างน้อย 1 คอลัมน์');
+            return;
+        }}
+
+        var pageFmtEl = document.getElementById('dashExportPageFormat');
+        var isA4Format = !pageFmtEl || pageFmtEl.value === 'a4_landscape';
+        var scopeSel = document.getElementById('dashExportRowScope');
+        var scopeMode = scopeSel ? scopeSel.value : 'filtered';
+
         var workbook = new ExcelJS.Workbook();
-        var a4Setup = {{
+        var sheetPageSetup = isA4Format ? {{
             paperSize: 9, // A4 Standard
             orientation: 'landscape',
             fitToPage: true,
@@ -9169,11 +9422,14 @@ function hideCustomPanel() {{
             horizontalCentered: true,
             printTitlesRow: '1:2',
             margins: {{ left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }}
+        }} : {{
+            orientation: 'landscape',
+            printTitlesRow: '1:2'
         }};
 
-        function addFormattedA4Sheet(sheetName, titleText, headers, dataRows, colWidths) {{
-            var ws = workbook.addWorksheet(sheetName, {{ pageSetup: a4Setup }});
-            ws.mergeCells(1, 1, 1, headers.length);
+        function addFormattedSheet(sheetName, titleText, headers, dataRows, colWidths) {{
+            var ws = workbook.addWorksheet(sheetName, {{ pageSetup: sheetPageSetup }});
+            ws.mergeCells(1, 1, 1, Math.max(1, headers.length));
             var tCell = ws.getCell(1, 1);
             tCell.value = titleText;
             tCell.font = {{ name: 'TH SarabunPSK', size: 18, bold: true }};
@@ -9204,55 +9460,85 @@ function hideCustomPanel() {{
             return ws;
         }}
 
-        addFormattedA4Sheet(
-            '1.แยกตามชนิดอุปกรณ์',
-            'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามชนิดอุปกรณ์',
-            ['ชนิดอุปกรณ์', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'Telemetry Failure', 'Offline', 'Initializing', 'Connecting', '%AVA'],
-            cachedSummaryExports.eq,
-            [30, 14, 14, 16, 16, 14, 14, 14, 16]
-        );
+        if (selectedSheets.indexOf('eq') >= 0) {{
+            addFormattedSheet(
+                '1.แยกตามชนิดอุปกรณ์',
+                'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามชนิดอุปกรณ์',
+                ['ชนิดอุปกรณ์', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'Telemetry Failure', 'Offline', 'Initializing', 'Connecting', '%AVA'],
+                cachedSummaryExports.eq,
+                [30, 14, 14, 16, 16, 14, 14, 14, 16]
+            );
+        }}
 
-        addFormattedA4Sheet(
-            '3.แยกตามผลิตภัณฑ์ FRTU',
-            'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามประเภทผลิตภัณฑ์ของ FRTU',
-            ['ประเภทผลิตภัณฑ์ (FRTU Model)', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'สถานะย่อย', '%AVA'],
-            cachedSummaryExports.prod,
-            [28, 14, 14, 16, 38, 16]
-        );
+        if (selectedSheets.indexOf('resp') >= 0) {{
+            addFormattedSheet(
+                '2.สถานะติดตามหน้างาน',
+                'สถานะการติดตามหน้างานของอุปกรณ์ที่ไม่ออนไลน์',
+                ['สถานะการติดตาม / ผู้รับผิดชอบ', 'จำนวน (ชุด)', 'สัดส่วนของที่ไม่ออนไลน์'],
+                cachedSummaryExports.resp,
+                [46, 18, 22]
+            );
+        }}
 
-        addFormattedA4Sheet(
-            '4.แยกตามสื่อสาร-แม่ข่าย',
-            'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามอุปกรณ์สื่อสารและ WRL Master',
-            ['อุปกรณ์สื่อสาร / WRL Master', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', '%AVA'],
-            cachedSummaryExports.comm,
-            [38, 16, 16, 18, 18]
-        );
+        if (selectedSheets.indexOf('prod') >= 0) {{
+            addFormattedSheet(
+                '3.แยกตามผลิตภัณฑ์ FRTU',
+                'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามประเภทผลิตภัณฑ์ของ FRTU',
+                ['ประเภทผลิตภัณฑ์ (FRTU Model)', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'สถานะย่อย', '%AVA'],
+                cachedSummaryExports.prod,
+                [28, 14, 14, 16, 38, 16]
+            );
+        }}
 
-        addFormattedA4Sheet(
-            '5.แยกตามการไฟฟ้า',
-            'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามสังกัดการไฟฟ้า (กฟจ. / กฟส.)',
-            ['การไฟฟ้า', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'Telemetry Failure', 'Offline', 'Initializing', 'Connecting', '%AVA'],
-            cachedSummaryExports.pea,
-            [30, 14, 14, 16, 16, 14, 14, 14, 16]
-        );
+        if (selectedSheets.indexOf('comm') >= 0) {{
+            addFormattedSheet(
+                '4.แยกตามสื่อสาร-แม่ข่าย',
+                'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามอุปกรณ์สื่อสารและ WRL Master',
+                ['อุปกรณ์สื่อสาร / WRL Master', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', '%AVA'],
+                cachedSummaryExports.comm,
+                [38, 16, 16, 18, 18]
+            );
+        }}
 
-        var deviceRows = cachedDashboardRows.map(function(r, i) {{
-            return [i + 1, r.site_id, r.cmd, r.loc, r.pea, r.norm_eq, r.prod, r.comm_type, r.comm_item, r.comm_ref, r.ip, r.dnp, r.state_full];
-        }});
-        addFormattedA4Sheet(
-            '6.รายการอุปกรณ์ทั้งหมด',
-            'ตารางข้อมูลอุปกรณ์และการสื่อสารในระบบ SCADA',
-            ['ลำดับ', 'Site ID', 'รหัสสั่งการ', 'สถานที่', 'การไฟฟ้า', 'ชนิดอุปกรณ์', 'ประเภทผลิตภัณฑ์', 'Commu.', 'Item', 'WRL Master', 'IP', 'DNP', 'State SCADA'],
-            deviceRows,
-            [8, 16, 16, 22, 20, 22, 16, 14, 14, 16, 16, 10, 14]
-        );
+        if (selectedSheets.indexOf('pea') >= 0) {{
+            addFormattedSheet(
+                '5.แยกตามการไฟฟ้า',
+                'รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA (%AVA) - แยกตามสังกัดการไฟฟ้า (กฟจ. / กฟส.)',
+                ['การไฟฟ้า', 'ทั้งหมด', 'Online', 'ไม่ออนไลน์รวม', 'Telemetry Failure', 'Offline', 'Initializing', 'Connecting', '%AVA'],
+                cachedSummaryExports.pea,
+                [30, 14, 14, 16, 16, 14, 14, 14, 16]
+            );
+        }}
+
+        if (selectedSheets.indexOf('devices') >= 0) {{
+            var activeColDefs = DASH_EXPORT_COL_DEFS.filter(function(def) {{
+                return selectedColKeys.indexOf(def.key) >= 0;
+            }});
+            var sourceRows = (scopeMode === 'filtered' && window.cachedExplorerMatchedRows) ? window.cachedExplorerMatchedRows : cachedDashboardRows;
+            var deviceHeaders = activeColDefs.map(function(def) {{ return def.label; }});
+            var deviceWidths = activeColDefs.map(function(def) {{ return def.width; }});
+            var deviceRows = (sourceRows || []).map(function(r, i) {{
+                return activeColDefs.map(function(def) {{
+                    if (def.key === 'seq') return i + 1;
+                    return r[def.key] || '-';
+                }});
+            }});
+            addFormattedSheet(
+                '6.รายการอุปกรณ์',
+                'ตารางข้อมูลอุปกรณ์และการสื่อสารในระบบ SCADA (' + deviceRows.length.toLocaleString() + ' ชุด)',
+                deviceHeaders,
+                deviceRows,
+                deviceWidths
+            );
+        }}
 
         var buffer = await workbook.xlsx.writeBuffer();
         var blob = new Blob([buffer], {{ type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }});
         var link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'SCADA_Dashboard_AVA_Summary_A4.xlsx';
+        link.download = 'SCADA_Dashboard_Export.xlsx';
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        window.closeDashExportModal();
     }};
 
     (function initDashboardBindings() {{
