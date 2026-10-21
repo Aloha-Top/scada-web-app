@@ -356,7 +356,10 @@ class _FallbackFlask:
                 except Exception:
                     payload = {}
 
-                if parsed.path == "/api/gemini/summarize":
+                if parsed.path in ("/api/user_report", "/api/user-report"):
+                    res_ur = save_and_forward_user_report(payload)
+                    self_req._send_json(res_ur, 200)
+                elif parsed.path == "/api/gemini/summarize":
                     try:
                         res = cdm.summarize_inspection_report_with_gemini(
                             rows=payload.get("rows") or [],
@@ -475,6 +478,140 @@ def healthz():
         "last_updated": snap["last_updated"],
         "time": time.time(),
     })
+
+
+def save_and_forward_user_report(payload):
+    """บันทึกข้อมูลแจ้งแก้ไขอุปกรณ์ (User_Report) ลง SQLite และส่งต่อไปยัง Google Apps Script Webhook (หากตั้งค่าไว้)"""
+    import sqlite3
+    import urllib.request
+
+    site_id = str(payload.get("site_id") or "-").strip()
+    cmd = str(payload.get("cmd") or "-").strip()
+    location = str(payload.get("location") or "-").strip()
+    pea = str(payload.get("pea") or "-").strip()
+    device_type = str(payload.get("device_type") or "-").strip()
+    incorrect_fields = payload.get("incorrect_fields") or []
+    corrected_value = str(payload.get("corrected_value") or "").strip()
+    per_field_detail = str(payload.get("per_field_detail") or "").strip()
+    reporter_note = str(payload.get("reporter_note") or "").strip()
+    ts = str(payload.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+    saved_local = False
+    try:
+        import tempfile, shutil
+        work_db = cdm.DB_PATH
+        use_tmp = False
+        try:
+            tc = sqlite3.connect(work_db)
+            tc.execute("CREATE TABLE IF NOT EXISTS _ping (id INT)")
+            tc.close()
+        except Exception:
+            use_tmp = True
+            work_db = os.path.join(tempfile.gettempdir(), "scada_real_work.db")
+        conn = sqlite3.connect(work_db)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                site_id TEXT,
+                cmd TEXT,
+                location TEXT,
+                pea TEXT,
+                device_type TEXT,
+                incorrect_fields TEXT,
+                corrected_value TEXT,
+                per_field_detail TEXT,
+                reporter_note TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO user_reports (
+                timestamp, site_id, cmd, location, pea, device_type,
+                incorrect_fields, corrected_value, per_field_detail, reporter_note, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts,
+                site_id,
+                cmd,
+                location,
+                pea,
+                device_type,
+                ", ".join(str(x) for x in incorrect_fields),
+                corrected_value,
+                per_field_detail,
+                reporter_note,
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        if use_tmp and os.path.exists(work_db):
+            try:
+                shutil.copy2(work_db, cdm.DB_PATH)
+            except Exception:
+                pass
+        saved_local = True
+    except Exception as db_exc:
+        print(f"[USER_REPORT DB WARNING] {db_exc}")
+
+    forwarded = False
+    webhook_url = str(payload.get("webhook_url") or cdm.USER_REPORT_GAS_WEBHOOK_URL or "").strip()
+    if webhook_url:
+        try:
+            req_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(
+                webhook_url,
+                data=req_bytes,
+                headers={"Content-Type": "text/plain;charset=utf-8"},
+                method="POST",
+            )
+            opener = cdm._build_url_opener()
+            with opener.open(req, timeout=15) as _:
+                forwarded = True
+        except Exception as wb_exc:
+            print(f"[USER_REPORT WEBHOOK WARNING] {wb_exc}")
+
+    return {
+        "success": True,
+        "saved_local": saved_local,
+        "forwarded_to_webhook": forwarded,
+        "site_id": site_id,
+        "timestamp": ts,
+    }
+
+
+@app.route("/api/user_report", methods=["GET", "POST"])
+@app.route("/api/user-report", methods=["GET", "POST"])
+def api_user_report():
+    """Endpoint สำหรับรับและบันทึกข้อมูลแจ้งแก้ไขอุปกรณ์ไม่ถูกต้อง (User_Report)"""
+    if request.method == "GET":
+        import sqlite3
+        rows_out = []
+        try:
+            conn = sqlite3.connect(cdm.DB_PATH)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_reports'")
+            if cur.fetchone():
+                cur.execute(
+                    "SELECT id, timestamp, site_id, cmd, location, pea, device_type, incorrect_fields, corrected_value, per_field_detail, reporter_note FROM user_reports ORDER BY id DESC LIMIT 100"
+                )
+                cols = [d[0] for d in cur.description]
+                rows_out = [dict(zip(cols, r)) for r in cur.fetchall()]
+            conn.close()
+        except Exception:
+            pass
+        return jsonify({"success": True, "reports": rows_out})
+
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("site_id"):
+        return jsonify({"success": False, "error": "กรุณาระบุ Site ID ของอุปกรณ์"}), 400
+    res = save_and_forward_user_report(payload)
+    return jsonify(res)
 
 
 @app.route("/api/gemini/status", methods=["GET"])
