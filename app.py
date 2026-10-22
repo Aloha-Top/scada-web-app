@@ -105,12 +105,12 @@ _SCHEDULER_INSTANCE = None
 _SCHEDULER_START_LOCK = threading.Lock()
 
 
-def refresh_scada_data_job(prefer_local=False):
+def refresh_scada_data_job(prefer_local=False, wait_if_busy=False):
     """
     [BACKGROUND TASK] ฟังก์ชันสำหรับดึงข้อมูลจาก Google Sheets, อัปเดตฐานข้อมูล SQLite,
     คำนวณค่าสรุปภาพรวม (overall_summary) และบันทึกลงใน In-Memory Cache (`GLOBAL_SCADA_CACHE`)
     """
-    if not REFRESH_IN_PROGRESS_LOCK.acquire(blocking=False):
+    if not REFRESH_IN_PROGRESS_LOCK.acquire(blocking=bool(wait_if_busy)):
         print("[INFO] มีงานอัปเดตข้อมูลกำลังทำงานอยู่แล้ว ข้ามรอบซ้ำซ้อนนี้...")
         return False
 
@@ -123,10 +123,12 @@ def refresh_scada_data_job(prefer_local=False):
         result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=True)
 
         with CACHE_LOCK:
+            prev_ver = int(GLOBAL_SCADA_CACHE.get("version") or 0)
+            new_ver = max(int(result["version"]), prev_ver + 1)
             GLOBAL_SCADA_CACHE.update({
                 "initialized": True,
                 "is_updating": False,
-                "version": result["version"],
+                "version": new_ver,
                 "last_updated": result["last_updated"],
                 "last_error": "",
                 "overall_summary": result["overall_summary"],
@@ -342,9 +344,14 @@ class _FallbackFlask:
                         "last_updated": snap["last_updated"],
                         "is_updating": snap["is_updating"],
                     })
+                elif path == "/api/refresh":
+                    refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
+                    self_req._send_json(build_api_map_data_payload())
                 elif path in ("/api/map_data", "/api/map-data"):
                     if not get_cached_scada_snapshot()["initialized"]:
-                        refresh_scada_data_job(prefer_local=True)
+                        refresh_scada_data_job(prefer_local=False)
+                    elif qs.get("refresh", [""])[0] == "1":
+                        refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
                     self_req._send_json(build_api_map_data_payload())
                 elif path == "/api/gemini/status":
                     self_req._send_json(cdm.sync_and_get_session_state())
@@ -445,17 +452,36 @@ def api_map_data():
     - report_data: ข้อมูลประวัติการเข้าตรวจสอบและแก้ไขหน้างาน
     """
     if not get_cached_scada_snapshot()["initialized"]:
-        refresh_scada_data_job(prefer_local=True)
+        refresh_scada_data_job(prefer_local=False)
 
     if request is not None and request.args.get("refresh") == "1":
-        threading.Thread(
-            target=refresh_scada_data_job,
-            kwargs={"prefer_local": False},
-            daemon=True,
-        ).start()
+        if request.args.get("async") == "1":
+            threading.Thread(
+                target=refresh_scada_data_job,
+                kwargs={"prefer_local": False},
+                daemon=True,
+            ).start()
+        else:
+            refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
 
     payload = build_api_map_data_payload()
     resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+@app.route("/api/refresh", methods=["GET", "POST"])
+def api_refresh_scada():
+    """Endpoint สำหรับสั่งซิงค์ข้อมูลสดจาก Google Sheets ทันที (Manual / Webhook Trigger)"""
+    ok = refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
+    snap = get_cached_scada_snapshot()
+    resp = jsonify({
+        "success": ok,
+        "version": snap["version"],
+        "last_updated": snap["last_updated"],
+        "overall_summary": snap["overall_summary"],
+        "error": snap["last_error"],
+    })
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
 
