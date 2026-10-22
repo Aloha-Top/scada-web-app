@@ -1255,13 +1255,21 @@
         }
       }
 
-      /* Navigate to Target System */
+      /* Navigate to Target System (อัปเดตแก้ปัญหาหน้ากระพริบ Bfcache) */
       function navigateToSystem(targetUrl, systemLabel) {
         if (!targetUrl) return;
         showToast("กำลังเปิด " + systemLabel);
+        
+        // ขยายเวลาเล็กน้อยเพื่อให้คนใช้งานมองเห็น Toast ทัน
         setTimeout(function () {
+          // 1. เคลียร์ Toast ทิ้ง "ก่อน" ที่เบราว์เซอร์จะย้ายหน้า
+          // เพื่อไม่ให้มันติดเข้าไปใน Snapshot ของ Bfcache
+          var container = document.getElementById("toastContainer");
+          if (container) container.innerHTML = "";
+
+          // 2. สั่งเปลี่ยนหน้า
           window.location.assign(targetUrl);
-        }, 120);
+        }, 300);
       }
 
       /* Event Listeners for Cards */
@@ -1382,7 +1390,7 @@
         });
       }
 
-      /* เคลียร์แจ้งเตือนตอนที่กำลังจะเปลี่ยนหน้า (ป้องกันการกระพริบแวบๆ ตอนกดย้อนกลับ) */
+      /* เคลียร์แจ้งเตือนตอนที่กำลังจะเปลี่ยนหน้า (เผื่อกรณีออกจากหน้าด้วยวิธีอื่น) */
       window.addEventListener("pagehide", function () {
         var container = document.getElementById("toastContainer");
         if (container) container.innerHTML = "";
