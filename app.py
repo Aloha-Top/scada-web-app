@@ -120,7 +120,7 @@ def refresh_scada_data_job(prefer_local=False):
     try:
         print(f"[SCHEDULER] เริ่มซิงค์ข้อมูลจาก Google Sheets และประมวลผล (prefer_local={prefer_local})...")
         write_static = (not IS_RENDER_SERVER) or (os.environ.get("SCADA_WRITE_STATIC_HTML") == "1")
-        result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static)
+        result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=False)
 
         with CACHE_LOCK:
             GLOBAL_SCADA_CACHE.update({
@@ -190,13 +190,19 @@ def build_api_map_data_payload():
 
 def render_page_html_from_cache(view_mode="map", open_ai=False):
     """
-    คืนค่า HTML หน้าเว็บแผนที่/แดชบอร์ด SCADA จาก In-Memory Cache โดยปรับโหมดการเปิดหน้าเริ่มต้น (แผนที่ / แดชบอร์ด / AI Modal)
-    ตามพารามิเตอร์ที่ส่งเข้ามา
+    [CLIENT-SIDE RENDERING SHELL]
+    เสิร์ฟโครงสร้าง HTML/JS Shell น้ำหนักเบา (หรือไฟล์ map.html) ให้กับ Browser ทันที
+    โดยไม่ต้องประกอบ Marker แผนที่หรือตารางบนฝั่ง Backend (Browser จะเรียก `/api/map_data` เพื่อ Render เอง 100%)
     """
     snap = get_cached_scada_snapshot()
     html_content = snap.get("html") or ""
     if not html_content:
-        return None
+        static_map_path = os.path.join(BASE_DIR, "map.html")
+        if os.path.exists(static_map_path):
+            with open(static_map_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+        else:
+            return None
 
     if view_mode == "dashboard":
         html_content = html_content.replace(

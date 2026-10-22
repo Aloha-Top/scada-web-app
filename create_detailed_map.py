@@ -388,22 +388,98 @@ DEFAULT_GEMINI_API_KEY = (
     or os.environ.get("GOOGLE_API_KEY")
 )
 
-# System Instruction มาตรฐานวิศวกรรม (Engineering Narrative Report Style: สาเหตุ -> การดำเนินการ -> ผลลัพธ์)
+# ==============================================================================
+# --- AI Prompt Integration: แยก System Prompt เป็น 2 ส่วนหลักตามแผนก (ผบอ. / ผอส.) ---
+# ==============================================================================
+
+# [System Prompt 1 สำหรับแผนก ผบอ.]
+SYSTEM_PROMPT_PBO = """Act as a Senior Control System & Electrical Engineer สังกัด แผนก ผบอ. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'
+ขอบเขตความรับผิดชอบของคุณคือ: ตู้คอนโทรล, อุปกรณ์ภายในตู้, หม้อแปลงแรงดัน (VT) ที่เชื่อมกับระบบ 22kV เพื่อจ่ายไฟให้ตู้, อุปกรณ์สวิตช์เกียร์ (LBS, Recloser), ชุดควบคุมโทรมาตร (FRTU), บอร์ดคอนโทรลภายใน, คอนเวอร์เตอร์ (Converter), และระบบแบตเตอรี่
+หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ
+โครงสร้างการเขียน (บังคับ):
+ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:
+1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์ใดในความรับผิดชอบของ ผบอ. ชำรุดหรือขัดข้อง
+2. การดำเนินการ: ได้แก้ไขเบื้องต้นหรือซ่อมแซมเปลี่ยนอุปกรณ์ฮาร์ดแวร์อย่างไร
+3. ผลลัพธ์: สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์
+4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผบอ. จะดำเนินการอะไรต่อไปในเชิงฮาร์ดแวร์/ระบบไฟ
+5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):
+6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะดำเนินการ... (การดำเนินการต่อไป)'
+7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):
+8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน
+9. Technical Terminology: ใช้คำศัพท์เฉพาะทางให้ถูกต้อง (เช่น FRTU, Recloser, LBS, VT 22kV, Control Board, Converter)
+10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด
+11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผบอ. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท"""
+
+# [System Prompt 2 สำหรับแผนก ผอส.]
+SYSTEM_PROMPT_POS = """Act as a Senior SCADA & Communication Engineer สังกัด แผนก ผอส. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'
+ขอบเขตความรับผิดชอบของคุณคือ: ระบบสื่อสารข้อมูล, อุปกรณ์สื่อสาร (Modem, Router), สายสัญญาณสื่อสาร, แผงสัญญาณเสาอากาศ, ซิมการ์ด, สัญญาณเครือข่าย, และการเชื่อมต่อโปรโตคอลระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA
+หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ
+โครงสร้างการเขียน (บังคับ):
+ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:
+1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์สื่อสารใดในความรับผิดชอบของ ผอส. ขัดข้อง
+2. การดำเนินการ: ได้แก้ไขเบื้องต้นอย่างไร
+3. ผลลัพธ์: สถานะการเชื่อมต่อสื่อสารปัจจุบัน
+4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผอส. จะดำเนินการอะไรต่อไปในเชิงระบบสื่อสาร
+5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):
+6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะดำเนินการ... (การดำเนินการต่อไป)'
+7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):
+8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน
+9. Technical Terminology: ใช้คำศัพท์เฉพาะทางด้านสื่อสารให้ถูกต้อง (เช่น Communication Loss, Antenna, Signal Cable, Modem, Protocol)
+10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด
+11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผอส. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท"""
+
+# รวม System Prompt มาตรฐานสำหรับอ้างอิงและตั้งค่าเริ่มต้น
 ENGINEERING_SYSTEM_PROMPT = (
-    "คุณเป็นวิศวกรผู้เชี่ยวชาญด้านระบบควบคุมและสั่งการ (SCADA) ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) "
-    "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลการตรวจสอบและแก้ไขอุปกรณ์ภาคสนาม แล้วเรียบเรียงเป็นรายงานเชิงวิศวกรรมที่มีความเป็นมืออาชีพ "
-    "ถูกหลักไวยากรณ์ภาษาไทย มีการตรวจแก้คำผิดหรือคำย่อที่พิมพ์ตกหล่นให้ถูกต้อง และเขียนเนื้อหาให้ครบถ้วนกระชับได้ใจความชัดเจน "
-    "โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •) หรือแบ่งเป็นหัวข้อย่อยแบบเดิมเด็ดขาด แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราวต่อเนื่องกันอย่างสละสลวย ประกอบด้วย 3 ส่วนสำคัญตามลำดับ ดังนี้:\n"
-    "- สาเหตุ: เกิดจากอะไร (ระบุอาการผิดปกติหรืออุปกรณ์ที่ตรวจพบว่าชำรุดเสียหาย โดยขึ้นต้นด้วยคำว่า 'เนื่องจาก...')\n"
-    "- การดำเนินการ: แก้ไขอย่างไร (ระบุวิธีการเข้าตรวจสอบ การซ่อมแซม การเปลี่ยนอุปกรณ์ หรือการตั้งค่าใหม่ โดยเชื่อมด้วยคำว่า 'จึงได้ดำเนินการ...')\n"
-    "- ผลลัพธ์: ได้ผลเป็นอย่างไร (ระบุสถานะการทำงานของอุปกรณ์และระบบสื่อสารหลังการแก้ไข หรือการส่งต่อหน่วยงานรับผิดชอบ โดยเชื่อมด้วยคำว่า 'ส่งผลให้...')\n\n"
-    "ตัวอย่างแนวทางการเขียนที่ถูกต้อง:\n"
-    "\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n\n"
-    "ข้อกำหนดสำคัญในการเรียบเรียง:\n"
-    "1. ต้องร้อยเรียงเป็นประโยคอธิบายยาวที่เชื่อมโยงกันอย่างเป็นธรรมชาติตามโครงสร้าง: \"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\" เสมอ\n"
-    "2. แก้คำผิด คำซ้ำซ้อน และจัดระเบียบคำศัพท์เทคนิคทางวิศวกรรมไฟฟ้าและระบบสื่อสาร (เช่น Recloser, LBS, AVR, FRTU, DAU, Cellular Router, Modem, VT, AC/DC, Port LAN, Online/Offline) ให้ถูกต้องตามมาตรฐานวิชาชีพ\n"
-    "3. ห้ามใช้เครื่องหมายไฮไลท์ สัญลักษณ์พิเศษ หรือหัวข้อย่อยแยกบรรทัด และห้ามแต่งเติมข้อมูลเท็จที่ไม่มีในข้อมูลต้นฉบับ หากส่วนใดไม่ปรากฏในต้นฉบับให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุด"
+    "[System Prompt 1 สำหรับแผนก ผบอ.]\n"
+    + SYSTEM_PROMPT_PBO
+    + "\n\n[System Prompt 2 สำหรับแผนก ผอส.]\n"
+    + SYSTEM_PROMPT_POS
 )
+
+
+def resolve_department_for_row(resp_str="", detail_str=""):
+    """จำแนกแผนกผู้รับผิดชอบหลัก ('PBO' สำหรับ ผบอ. หรือ 'POS' สำหรับ ผอส.) จากคอลัมน์ผู้รับผิดชอบและรายละเอียดอาการ"""
+    resp = str(resp_str or "").strip()
+    detail = str(detail_str or "").strip().upper()
+    has_pbo = "ผบอ" in resp
+    has_pos = "ผอส" in resp
+
+    if has_pbo and not has_pos:
+        return "PBO"
+    if has_pos and not has_pbo:
+        return "POS"
+
+    pbo_kw = [
+        "FRTU", "RECLOSER", "LBS", "VT", "22KV", "CONTROL BOARD", "CONVERTER",
+        "BATTERY", "แบต", "ตู้คอนโทรล", "หม้อแปลง", "ฟิวส์", "FUSE", "NO AC",
+        "ไม่มีไฟ", "บอร์ด", "การ์ด", "AVR", "BREAKER", "SWITCHGEAR"
+    ]
+    pos_kw = [
+        "MODEM", "ROUTER", "CELLULAR", "DAU", "SIM", "ซิม", "ANTENNA", "เสาอากาศ",
+        "สายสัญญาณ", "SIGNAL", "PROTOCOL", "DNP", "COMMUNICATION", "สื่อสาร",
+        "สัญญาณ", "เครือข่าย", "PORT LAN", "WRL"
+    ]
+    pbo_score = sum(1 for k in pbo_kw if k in detail)
+    pos_score = sum(1 for k in pos_kw if k in detail)
+
+    if has_pbo and has_pos:
+        return "PBO" if pbo_score >= pos_score else "POS"
+    if pbo_score > pos_score:
+        return "PBO"
+    return "POS"
+
+
+def get_system_prompt_for_department(dept_code="POS", custom_prompt=None):
+    """คืนค่า System Prompt ตามแผนกที่รับผิดชอบ (ผบอ. ใช้ SYSTEM_PROMPT_PBO / ผอส. ใช้ SYSTEM_PROMPT_POS)"""
+    if custom_prompt and str(custom_prompt).strip():
+        cp = str(custom_prompt).strip()
+        if "[System Prompt 1 สำหรับแผนก ผบอ.]" in cp and "[System Prompt 2 สำหรับแผนก ผอส.]" in cp:
+            parts = cp.split("[System Prompt 2 สำหรับแผนก ผอส.]")
+            if str(dept_code).upper() == "PBO":
+                return parts[0].replace("[System Prompt 1 สำหรับแผนก ผบอ.]", "").strip()
+            return parts[1].strip()
+        return cp
+    return SYSTEM_PROMPT_PBO if str(dept_code).upper() == "PBO" else SYSTEM_PROMPT_POS
 
 # กำหนดรายการโมเดล AI โดยให้ความสำคัญกับโมเดลที่ "ฉลาดที่สุด" เป็นอันดับแรก (Pro / วิเคราะห์ขั้นสูง -> โมเดลที่ฉลาดรองลงมาตามลำดับ)
 GEMINI_FREE_TIER_MODELS = {
@@ -883,25 +959,46 @@ def _normalize_engineering_clause_text(text):
 
 def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str=""):
     """
-    ฟังก์ชันเรียบเรียงประโยครายงานแบบวิศวกรรม (Engineering Report Style):
-    ร้อยเรียงเป็นประโยคอธิบายยาวที่มีความเป็นมืออาชีพ ถูกหลักภาษา แก้คำผิด และตัดข้อความซ้ำซ้อน
-    ตามโครงสร้าง: "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"
+    ฟังก์ชันเรียบเรียงประโยครายงานเชิงวิศวกรรม (Flowing Narrative 1 ย่อหน้า 4 องค์ประกอบ) แยกตามแผนก ผบอ. และ ผอส.:
+    'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ./ผอส. จะดำเนินการ... (การดำเนินการต่อไป)'
     """
     txt = str(raw_detail or "").strip()
     st_clean = str(status_str or "").strip()
     resp_clean = str(resp_str or "").strip()
+    dept = resolve_department_for_row(resp_clean, txt)
+    dept_label = "ผบอ." if dept == "PBO" else "ผอส."
 
-    # หากข้อความถูกจัดอยู่ในรูปแบบประโยควิศวกรรมครบทั้ง 3 ส่วนอยู่แล้ว ให้คืนค่าเดิม
-    if "(สาเหตุ)" in txt and "(การดำเนินการ)" in txt and "(ผลลัพธ์)" in txt and txt.startswith("เนื่องจาก"):
-        return txt
+    if txt.startswith("เนื่องจาก") and "ทั้งนี้ ในระยะต่อไปทางแผนก" in txt:
+        return re.sub(r"[✅❌•\-]+", " ", txt).replace("\n", " ").strip()
 
     if not txt or txt == "-":
         if "ONLINE" in st_clean.upper():
-            return "เนื่องจากมีการเข้าตรวจสอบสถานะอุปกรณ์ตามแผนบำรุงรักษา (สาเหตุ) จึงได้ดำเนินการตรวจสอบการทำงานของชุดควบคุมและระบบสื่อสาร (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานและออนไลน์ได้ตามปกติ (ผลลัพธ์)"
-        if st_clean and st_clean != "-":
-            resp_note = f" และส่งต่อให้ {resp_clean} เข้าดำเนินการแก้ไข" if resp_clean and resp_clean not in ("-", "ไม่มีค่า") else ""
-            return f"เนื่องจากตรวจพบอุปกรณ์มีสถานะ {st_clean} โดยไม่พบบันทึกรายละเอียดอาการเสียเพิ่มเติมในระบบ (สาเหตุ) จึงได้ดำเนินการตรวจสอบเบื้องต้น{resp_note} (การดำเนินการ) ส่งผลให้ปัจจุบันอุปกรณ์ยังคงมีสถานะ {st_clean} (ผลลัพธ์)"
-        return "เนื่องจากไม่มีบันทึกข้อมูลสาเหตุการชำรุดในระบบ (สาเหตุ) จึงยังไม่มีรายการบันทึกการแก้ไข (การดำเนินการ) ส่งผลให้ยังไม่สามารถระบุผลลัพธ์หลังดำเนินการได้ (ผลลัพธ์)"
+            if dept == "PBO":
+                return (
+                    "เนื่องจากตรวจพบการแจ้งเตือนสถานะการทำงานของตู้คอนโทรลและชุดควบคุมโทรมาตร (FRTU) จากระบบตรวจวัด "
+                    "จึงได้เข้าตรวจสอบระบบไฟเลี้ยง หม้อแปลงแรงดัน (VT 22kV) และอุปกรณ์สวิตช์เกียร์ในความรับผิดชอบของแผนก ผบอ. "
+                    "ส่งผลให้ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์สามารถทำงานและเชื่อมต่อระบบได้ตามปกติ "
+                    "ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะติดตามเฝ้าระวังเสถียรภาพของระบบจ่ายไฟและฮาร์ดแวร์ภายในตู้คอนโทรลตามแผนบำรุงรักษา"
+                )
+            return (
+                "เนื่องจากตรวจพบสภาวะการสูญเสียการสื่อสารข้อมูล (Communication Loss) ระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA "
+                "จึงได้เข้าตรวจสอบอุปกรณ์สื่อสาร (Modem/Router) ซิมการ์ด และระดับสัญญาณเครือข่ายในความรับผิดชอบของแผนก ผอส. "
+                "ส่งผลให้ปัจจุบันการเชื่อมต่อโปรโตคอลและระบบสื่อสารข้อมูลกลับมาออนไลน์ได้ตามปกติ "
+                "ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะเฝ้าระวังคุณภาพสัญญาณเครือข่ายและเสถียรภาพของการเชื่อมต่อสื่อสารอย่างต่อเนื่อง"
+            )
+        if dept == "PBO":
+            return (
+                f"เนื่องจากตรวจพบความผิดปกติของอุปกรณ์ภายในตู้คอนโทรลและระบบจ่ายไฟทำให้มีสถานะ {st_clean or 'Offline'} "
+                f"จึงได้เข้าตรวจสอบเบื้องต้นในส่วนของชุดควบคุมโทรมาตร (FRTU) คอนเวอร์เตอร์ และระบบแบตเตอรี่ "
+                f"ส่งผลให้ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์ยังคงมีสถานะ {st_clean or 'Offline'} "
+                f"ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะเข้าตรวจสอบเชิงลึกและซ่อมแซมหรือเปลี่ยนอุปกรณ์ฮาร์ดแวร์ที่ชำรุดเพื่อให้ระบบกลับมาใช้งานได้ตามปกติ"
+            )
+        return (
+            f"เนื่องจากตรวจพบปัญหาการเชื่อมต่อระบบสื่อสารข้อมูลขัดข้องทำให้มีสถานะ {st_clean or 'Offline'} "
+            f"จึงได้เข้าตรวจสอบเบื้องต้นในส่วนของอุปกรณ์สื่อสาร (Modem/Router) สายสัญญาณ และแผงสัญญาณเสาอากาศ "
+            f"ส่งผลให้ปัจจุบันสถานะการเชื่อมต่อสื่อสารยังคงเป็น {st_clean or 'Offline'} "
+            f"ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะเข้าตรวจสอบแก้ไขระบบสื่อสารและปรับปรุงการเชื่อมต่อโปรโตคอลกับศูนย์ควบคุม SCADA ให้กลับมาออนไลน์โดยเร็ว"
+        )
 
     raw_tokens = [
         t.strip()
@@ -945,7 +1042,6 @@ def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str="")
             continue
         u = clean_tk.upper()
 
-        # กรณีประโยคเดียวมีทั้งอาการปกติ/ONLINE และอาการเสียปนกัน ให้แยกส่วนออกมาอย่างชาญฉลาด
         if "อุปกรณ์สื่อสารทำงานปกติ" in clean_tk and any(k in u for k in ["ไม่มีไฟ", "OPEN", "ชำรุด"]):
             parts_split = clean_tk.split("อุปกรณ์สื่อสารทำงานปกติ")
             if parts_split[0].strip():
@@ -979,47 +1075,57 @@ def _deterministic_categorize_row_detail(raw_detail, resp_str="", status_str="")
             else:
                 _add_unique_clause(actions, clean_tk)
 
-    # เติมเต็มทั้ง 3 ส่วน (สาเหตุ, การดำเนินการ, ผลลัพธ์) ให้ครบถ้วนสมบูรณ์ตามหลักรายงานวิศวกรรม
     if not causes:
-        if actions:
-            causes.append("ตรวจพบความผิดปกติของอุปกรณ์ในระบบจากการเข้าตรวจสอบหน้างาน")
+        if dept == "PBO":
+            causes.append("ชุดควบคุมโทรมาตร (FRTU) และอุปกรณ์ภายในตู้คอนโทรลเกิดความผิดปกติ")
         else:
-            causes.append("ตรวจพบอาการผิดปกติของอุปกรณ์จากระบบตรวจวัดสถานะ")
+            causes.append("ระบบสื่อสารข้อมูลเกิดสภาวะสูญเสียการเชื่อมต่อ (Communication Loss) กับศูนย์ควบคุม SCADA")
 
     if not actions:
-        if any("ชำรุด" in c or "ไม่มีไฟ" in c for c in causes):
-            if resp_clean and resp_clean not in ("-", "ไม่มีค่า"):
-                actions.append(f"เข้าตรวจสอบสภาพอุปกรณ์และระบบสื่อสารเบื้องต้น พร้อมประสานงานส่งต่อให้ {resp_clean} เข้าดำเนินการแก้ไข")
-            else:
-                actions.append("เข้าตรวจสอบสภาพการทำงานของอุปกรณ์ ระบบสายสัญญาณ และแหล่งจ่ายไฟ")
+        if dept == "PBO":
+            actions.append("เข้าตรวจสอบสภาพฮาร์ดแวร์ภายในตู้คอนโทรล ระบบแบตเตอรี่ และแหล่งจ่ายไฟแรงดัน 22kV (VT)")
         else:
-            actions.append("เข้าตรวจสอบการทำงานและตั้งค่าระบบอุปกรณ์ใหม่")
+            actions.append("เข้าตรวจสอบอุปกรณ์สื่อสาร (Modem/Router) สายสัญญาณสื่อสาร แผงสัญญาณเสาอากาศ และซิมการ์ดเบื้องต้น")
 
     if not results:
         if "ONLINE" in st_clean.upper():
-            results.append("อุปกรณ์และระบบสื่อสารสามารถกลับมาทำงานและออนไลน์ได้ตามปกติ")
-        elif resp_clean and resp_clean not in ("-", "ไม่มีค่า"):
-            results.append(f"ระบบสื่อสารและอุปกรณ์อยู่ในสถานะ {st_clean or 'รอการแก้ไข'} โดยอยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไขในส่วนที่เกี่ยวข้องต่อไป")
-        elif st_clean and st_clean != "-":
-            results.append(f"ปัจจุบันอุปกรณ์อยู่ในสถานะ {st_clean}")
+            if dept == "PBO":
+                results.append("ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์กลับมาทำงานและออนไลน์ได้ตามปกติ")
+            else:
+                results.append("ปัจจุบันการเชื่อมต่อโปรโตคอลและระบบสื่อสารข้อมูลกลับมาออนไลน์ได้ตามปกติ")
         else:
-            results.append("อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ")
+            if dept == "PBO":
+                results.append(f"สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์ยังคงเป็น {st_clean or 'Offline'}")
+            else:
+                results.append(f"สถานะการเชื่อมต่อสื่อสารปัจจุบันยังคงเป็น {st_clean or 'Offline'}")
+
+    if "ONLINE" in st_clean.upper() and ("ผบอ" not in resp_clean and "ผอส" not in resp_clean):
+        if dept == "PBO":
+            next_step_str = "ติดตามเฝ้าระวังเสถียรภาพของระบบไฟเลี้ยงและอุปกรณ์ฮาร์ดแวร์ภายในตู้คอนโทรลอย่างต่อเนื่อง"
+        else:
+            next_step_str = "ติดตามเฝ้าระวังคุณภาพสัญญาณเครือข่ายและเสถียรภาพของการเชื่อมต่อโปรโตคอลกับศูนย์ควบคุม SCADA อย่างต่อเนื่อง"
     else:
-        if resp_clean and resp_clean not in ("-", "ไม่มีค่า") and "ONLINE" not in st_clean.upper():
-            has_resp_mention = any(resp_clean in r for r in results)
-            if not has_resp_mention:
-                results.append(f"ส่วนอุปกรณ์ที่ชำรุดอยู่ระหว่างรอ {resp_clean} เข้าดำเนินการแก้ไขต่อไป")
+        if dept == "PBO":
+            next_step_str = "เข้าตรวจสอบเชิงลึกเพื่อซ่อมแซมหรือเปลี่ยนอุปกรณ์ฮาร์ดแวร์ภายในตู้คอนโทรลและระบบไฟเลี้ยงที่ชำรุดให้กลับมาทำงานได้ตามมาตรฐาน"
+        else:
+            next_step_str = "เข้าตรวจสอบแก้ไขอุปกรณ์สื่อสาร สายสัญญาณ และตั้งค่าพารามิเตอร์โปรโตคอลเชื่อมต่อกับตู้ FRTU เพื่อให้ระบบกลับมาออนไลน์ได้ตามปกติ"
 
     cause_str = " และ".join(causes)
     cause_str = re.sub(r"^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*", "", cause_str).strip()
 
     action_str = " และ".join(actions)
-    action_str = re.sub(r"^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\s*", "", action_str).strip()
+    action_str = re.sub(r"^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ|ทำการ)\s*", "", action_str).strip()
 
     result_str = " และ".join(results)
     result_str = re.sub(r"^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*", "", result_str).strip()
 
-    return f"เนื่องจาก{cause_str} (สาเหตุ) จึงได้ดำเนินการ{action_str} (การดำเนินการ) ส่งผลให้{result_str} (ผลลัพธ์)"
+    narrative = (
+        f"เนื่องจาก{cause_str} จึงได้{action_str} ส่งผลให้{result_str} "
+        f"ทั้งนี้ ในระยะต่อไปทางแผนก {dept_label} จะดำเนินการ{next_step_str}"
+    )
+    narrative = re.sub(r"[✅❌•\-]+", " ", narrative)
+    narrative = re.sub(r"\s+", " ", narrative).strip()
+    return narrative
 
 
 def _build_deterministic_executive_summary(rows):
@@ -1060,29 +1166,30 @@ def _build_deterministic_executive_summary(rows):
             "category": "2. หมวดสาเหตุและอาการชำรุดที่ตรวจพบ (Fault Categorization)",
             "items": [
                 f"ระบบสื่อสารและโครงข่าย (DAU / Cellular Router / Modem / SIM / WRL / สายสัญญาณ): พบเกี่ยวข้อง {comm_issue_cnt} รายการ",
-                f"อุปกรณ์ชุดควบคุมหลัก (FRTU / Recloser / AVR / การ์ดควบคุม): พบเกี่ยวข้อง {frtu_issue_cnt} รายการ",
-                f"ระบบแหล่งจ่ายไฟและหม้อแปลงแรงดัน (VT / Battery / Fuse / ไฟเลี้ยง AC-DC): พบเกี่ยวข้อง {power_issue_cnt} รายการ",
+                f"อุปกรณ์ชุดควบคุมหลัก (FRTU / Recloser / AVR / Control Board): พบเกี่ยวข้อง {frtu_issue_cnt} รายการ",
+                f"ระบบแหล่งจ่ายไฟและหม้อแปลงแรงดัน (VT 22kV / Battery / Converter / Fuse): พบเกี่ยวข้อง {power_issue_cnt} รายการ",
             ],
         },
         {
             "category": "3. หมวดหน่วยงานผู้รับผิดชอบดำเนินการต่อ (Action Assignment)",
             "items": [
-                f"รอ ผบอ.กบษ.ฉ.2 เข้าดำเนินการแก้ไข (FRTU/อุปกรณ์ชุดควบคุม): {bo_cnt} รายการ",
-                f"รอ ผอส.กสฟ.ฉ.2 เข้าดำเนินการแก้ไข (ระบบสื่อสาร): {po_cnt} รายการ",
-                f"ดำเนินการแก้ไขเสร็จสิ้น/ไม่ต้องส่งต่อ (-): {done_cnt} รายการ",
+                f"รอ แผนก ผบอ. เข้าดำเนินการแก้ไข (ตู้คอนโทรล/FRTU/VT 22kV/สวิตช์เกียร์): {bo_cnt} รายการ",
+                f"รอ แผนก ผอส. เข้าดำเนินการแก้ไข (ระบบสื่อสาร/Modem/Router/เสาอากาศ): {po_cnt} รายการ",
+                f"ดำเนินการแก้ไขเสร็จสิ้น/ไม่ต้องส่งต่อ: {done_cnt} รายการ",
             ],
         },
     ]
 
     summary_md = (
-        f"รายงานสรุปเชิงวิศวกรรมผลการตรวจสอบและแก้ไขอุปกรณ์ในระบบ SCADA (รวมทั้งสิ้น {total} รายการ)\n\n"
-        f"จากการเข้าตรวจสอบและวิเคราะห์สาเหตุความผิดปกติของอุปกรณ์ภาคสนามจำนวน {total} รายการ พบว่าเกิดจากสาเหตุหลัก 3 ด้าน ได้แก่ "
-        f"ปัญหาด้านระบบสื่อสารและโครงข่ายจำนวน {comm_issue_cnt} รายการ ปัญหาด้านชุดควบคุมหลัก (FRTU/AVR/Recloser) จำนวน {frtu_issue_cnt} รายการ "
-        f"และปัญหาด้านระบบแหล่งจ่ายไฟหรือหม้อแปลงแรงดัน (AC/DC/VT/Battery) จำนวน {power_issue_cnt} รายการ (สาเหตุ) "
-        f"จึงได้ดำเนินการเข้าตรวจสอบแก้ไข เปลี่ยนอุปกรณ์ที่ชำรุด ตั้งค่าระบบใหม่ และประสานงานส่งต่อหน่วยงานที่เกี่ยวข้องตามขอบเขตความรับผิดชอบ (การดำเนินการ) "
-        f"ส่งผลให้อุปกรณ์สามารถกลับมาเชื่อมต่อออนไลน์และทำงานได้ตามปกติจำนวน {online_cnt} ชุด คิดเป็นร้อยละ {(online_cnt/total*100) if total else 0:.1f} "
-        f"อยู่ในสถานะกำลังเชื่อมต่อ (Connecting) จำนวน {connecting_cnt} ชุด และยังคงสถานะออฟไลน์ (Offline) เพื่อรอการเข้าแก้ไขต่อเนื่องโดย ผบอ.กบษ.ฉ.2 จำนวน {bo_cnt} รายการ "
-        f"และรอ ผอส.กสฟ.ฉ.2 จำนวน {po_cnt} รายการ (ผลลัพธ์)"
+        f"เนื่องจากผลการตรวจวิเคราะห์ข้อมูลรายงานการซ่อมบำรุงอุปกรณ์ในระบบ SCADA จำนวนทั้งสิ้น {total} รายการ "
+        f"พบสาเหตุความผิดปกติแบ่งเป็นปัญหาด้านระบบสื่อสารข้อมูลและโปรโตคอลในความรับผิดชอบของแผนก ผอส. จำนวน {comm_issue_cnt} รายการ "
+        f"ปัญหาด้านชุดควบคุมโทรมาตร (FRTU) บอร์ดคอนโทรล และอุปกรณ์สวิตช์เกียร์จำนวน {frtu_issue_cnt} รายการ "
+        f"ตลอดจนปัญหาด้านหม้อแปลงแรงดัน (VT 22kV) คอนเวอร์เตอร์ และระบบแบตเตอรี่ในความรับผิดชอบของแผนก ผบอ. จำนวน {power_issue_cnt} รายการ "
+        f"จึงได้เข้าตรวจสอบแก้ไขเบื้องต้น เปลี่ยนอุปกรณ์ฮาร์ดแวร์และอุปกรณ์สื่อสารที่ชำรุด พร้อมปรับตั้งค่าพารามิเตอร์ในระบบใหม่ "
+        f"ส่งผลให้ปัจจุบันตู้คอนโทรลและระบบสื่อสารสามารถกลับมาเชื่อมต่อออนไลน์ได้ตามปกติจำนวน {online_cnt} ชุด คิดเป็นร้อยละ {(online_cnt/total*100) if total else 0:.1f} "
+        f"อยู่ในสถานะกำลังเชื่อมต่อ (Connecting) จำนวน {connecting_cnt} ชุด และยังคงมีสถานะออฟไลน์ (Offline) จำนวน {offline_cnt} ชุด "
+        f"ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะเข้าดำเนินการซ่อมแซมเปลี่ยนฮาร์ดแวร์ตู้คอนโทรลและระบบไฟเลี้ยงจำนวน {bo_cnt} รายการ "
+        f"ควบคู่กับทางแผนก ผอส. ที่จะเข้าดำเนินการแก้ไขระบบสื่อสารและสายสัญญาณอีกจำนวน {po_cnt} รายการเพื่อให้ระบบกลับมาพร้อมใช้งานอย่างสมบูรณ์"
     )
     return {
         "summary_markdown": summary_md,
@@ -1105,11 +1212,10 @@ def _build_deterministic_executive_summary(rows):
 
 def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pro-exp", api_key=None, custom_prompt=None):
     """
-    ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API (Engineering Report Style):
-    1. ทำ Auto Chunking แบ่งข้อมูลจาก Google Sheet ออกเป็นส่วนย่อยๆ อัตโนมัติเมื่อข้อมูลยาว
-    2. ส่งแต่ละ Chunk ให้ Gemini วิเคราะห์และเรียบเรียงเป็นประโยคอธิบายยาวแบบวิศวกรรม:
-       "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"
-    3. รวบรวมผลสรุปย่อยจากทุก Chunk มาสังเคราะห์เป็นรายงานสรุปผู้บริหารแบบวิศวกรรม
+    ฟังก์ชันหลักสำหรับสรุปและเรียบเรียงรายงานการตรวจเช็คอุปกรณ์ด้วย Google Gemini API:
+    แยกระบบ System Prompt เป็น 2 ส่วนหลักตามแผนก:
+    - แผนก ผบอ. ใช้ SYSTEM_PROMPT_PBO (Senior Control System & Electrical Engineer)
+    - แผนก ผอส. ใช้ SYSTEM_PROMPT_POS (Senior SCADA & Communication Engineer)
     """
     if not rows:
         raise ValueError("ไม่พบรายการข้อมูลสำหรับสรุปรายงาน")
@@ -1117,6 +1223,7 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
     base_exec_info = _build_deterministic_executive_summary(rows)
     rewritten_rows = [dict(r) for r in rows]
     for r in rewritten_rows:
+        r["dept_code"] = resolve_department_for_row(r.get("resp", ""), r.get("detail", ""))
         r["ai_detail"] = _deterministic_categorize_row_detail(
             r.get("detail", ""), r.get("resp", ""), r.get("status", "")
         )
@@ -1127,35 +1234,46 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
     max_chars = model_cfg.get("max_chunk_chars", 4500)
     max_rows = model_cfg.get("max_chunk_rows", 22)
 
-    chunks = chunk_inspection_rows(rewritten_rows, max_chars=max_chars, max_rows=max_rows)
+    pbo_rows = [r for r in rewritten_rows if r.get("dept_code") == "PBO"]
+    pos_rows = [r for r in rewritten_rows if r.get("dept_code") != "PBO"]
+
+    dept_batches = []
+    if pbo_rows:
+        for ch in chunk_inspection_rows(pbo_rows, max_chars=max_chars, max_rows=max_rows):
+            dept_batches.append(("PBO", ch))
+    if pos_rows:
+        for ch in chunk_inspection_rows(pos_rows, max_chars=max_chars, max_rows=max_rows):
+            dept_batches.append(("POS", ch))
+
     chunk_summaries = []
     used_models_log = []
     fallback_traces = []
     ai_warning = ""
 
-    for chunk_idx, chunk in enumerate(chunks):
+    for batch_idx, (dept_code, chunk) in enumerate(dept_batches):
+        dept_name = "ผบอ." if dept_code == "PBO" else "ผอส."
+        active_sys_prompt = get_system_prompt_for_department(dept_code, custom_prompt=custom_prompt)
+
         lines_payload = []
         for item_i, r in enumerate(chunk):
             lines_payload.append(
                 f"[{item_i}] Site: {r.get('site','-')} | รหัสสั่งการ: {r.get('cmd','-')} | "
                 f"สถานที่: {r.get('loc','-')} | รายละเอียดเดิม: {r.get('detail','-')} | "
-                f"ผู้รับผิดชอบต่อ: {r.get('resp','-')} | สถานะ: {r.get('status','-')}"
+                f"ผู้รับผิดชอบต่อ: {r.get('resp','-')} | สถานะสุดท้าย: {r.get('status','-')}"
             )
         chunk_text = "\n".join(lines_payload)
 
-        active_sys_prompt = str(custom_prompt or ENGINEERING_SYSTEM_PROMPT).strip()
         chunk_prompt = (
-            f"{active_sys_prompt}\n\n"
-            "โปรดวิเคราะห์ข้อมูลการตรวจสอบอุปกรณ์ในแต่ละรายการต่อไปนี้ แก้คำผิดและคำซ้ำซ้อน แล้วเรียบเรียงเป็นประโยคอธิบายยาวแบบวิศวกรรมที่มีความเป็นมืออาชีพ "
-            "โดยไม่ต้องใช้สัญลักษณ์ไฮไลท์ แต่ให้ร้อยเรียงเรื่องราวตามโครงสร้าง:\n"
-            "\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\"\n"
-            "ตัวอย่างแนวทาง: \"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\"\n"
+            "โปรดวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุงในแต่ละรายการต่อไปนี้ และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' "
+            f"ตามโครงสร้างการเขียนบังคับของแผนก {dept_name} (Flowing Narrative 1 ย่อหน้า ครอบคลุม 4 องค์ประกอบตามลำดับ: "
+            f"'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก {dept_name} จะดำเนินการ... (การดำเนินการต่อไป)') "
+            "ห้ามใช้สัญลักษณ์พิเศษ (เช่น ✅, ❌, •, -) หรือขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n"
             "ตอบกลับเป็น JSON เท่านั้น ตามโครงสร้างนี้:\n"
             "{\n"
-            '  "rows": [ {"idx": 0, "clean_detail": "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"} ],\n'
-            '  "chunk_summary": "สรุปภาพรวมเชิงวิศวกรรมของข้อมูลชุดนี้แบบร้อยเรียงเรื่องราว (สาเหตุ การดำเนินการ และผลลัพธ์)"\n'
+            f'  "rows": [ {{"idx": 0, "clean_detail": "เนื่องจาก... จึงได้ดำเนินการ... ส่งผลให้... ทั้งนี้ ในระยะต่อไปทางแผนก {dept_name} จะดำเนินการ..."}} ],\n'
+            f'  "chunk_summary": "สรุปภาพรวมเชิงวิศวกรรมของแผนก {dept_name} แบบร้อยเรียงเรื่องราว 1 ย่อหน้า"\n'
             "}\n\n"
-            f"ข้อมูลชุดที่ {chunk_idx + 1}/{len(chunks)}:\n{chunk_text}"
+            f"ข้อมูลชุดที่ {batch_idx + 1}/{len(dept_batches)} (แผนก {dept_name}):\n{chunk_text}"
         )
 
         try:
@@ -1172,13 +1290,12 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
                 try:
                     for sc in sub_chunks:
                         sc_text = "\n".join(
-                            f"[{idx_s}] Site: {x.get('site','-')} | รายละเอียด: {x.get('detail','-')} | ผู้รับผิดชอบ: {x.get('resp','-')} | สถานะ: {x.get('status','-')}"
+                            f"[{idx_s}] Site: {x.get('site','-')} | รายละเอียด: {x.get('detail','-')} | ผู้รับผิดชอบ: {x.get('resp','-')} | สถานะสุดท้าย: {x.get('status','-')}"
                             for idx_s, x in enumerate(sc)
                         )
                         sc_prompt = (
-                            f"{active_sys_prompt}\n\n"
-                            "โปรดเรียบเรียงรายละเอียดการตรวจสอบอุปกรณ์ SCADA ต่อไปนี้เป็นประโยคอธิบายยาวแบบวิศวกรรมในรูปแบบ JSON:\n"
-                            '{"rows": [{"idx": 0, "clean_detail": "เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)"}], "chunk_summary": "..."}\n\n'
+                            f"โปรดเรียบเรียงรายงานเชิงวิศวกรรมของแผนก {dept_name} ต่อไปนี้เป็น JSON:\n"
+                            f'{{"rows": [{{"idx": 0, "clean_detail": "เนื่องจาก... จึงได้ดำเนินการ... ส่งผลให้... ทั้งนี้ ในระยะต่อไปทางแผนก {dept_name} จะดำเนินการ..."}}], "chunk_summary": "..."}}\n\n'
                             + sc_text
                         )
                         res = call_gemini_with_fallback(
@@ -1205,6 +1322,8 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
                     r_idx = r_item.get("idx")
                     c_det = str(r_item.get("clean_detail") or "").strip()
                     if isinstance(r_idx, int) and 0 <= r_idx < len(chunk) and c_det:
+                        c_det = re.sub(r"[✅❌•\-]+", " ", c_det)
+                        c_det = re.sub(r"\s+", " ", c_det).strip()
                         chunk[r_idx]["ai_detail"] = c_det
                 if parsed.get("chunk_summary"):
                     chunk_summaries.append(str(parsed["chunk_summary"]).strip())
@@ -1215,25 +1334,27 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
 
     final_summary_md = base_exec_info["summary_markdown"]
     if chunk_summaries and not ai_warning:
+        primary_dept = "PBO" if len(pbo_rows) > len(pos_rows) else "POS"
+        synth_sys_prompt = get_system_prompt_for_department(primary_dept, custom_prompt=custom_prompt)
         synth_prompt = (
-            "คุณคือวิศวกรผู้เชี่ยวชาญระบบ SCADA ของการไฟฟ้าส่วนภูมิภาค (กฟภ.)\n"
-            "โปรดเขียนรายงานสรุปเชิงวิศวกรรมสำหรับผู้บริหาร (Engineering Executive Report) จากข้อมูลสรุปย่อยต่อไปนี้\n"
-            "โดยใช้ภาษาทางการที่มีความเป็นมืออาชีพ ถูกหลักภาษา กระชับครบถ้วน และร้อยเรียงเป็นประโยคอธิบายยาวที่เชื่อมโยงกันอย่างสละสลวย "
-            "ครอบคลุมทั้ง สาเหตุ (เกิดจากอะไร) การดำเนินการ (แก้ไขอย่างไร) และผลลัพธ์ (ได้ผลเป็นอย่างไร):\n\n"
+            "โปรดสังเคราะห์ข้อมูลสรุปย่อยต่อไปนี้เป็น 'รายงานเชิงวิศวกรรม' สำหรับผู้บริหาร 1 ย่อหน้าแบบต่อเนื่อง (Flowing Narrative) "
+            "โดยครอบคลุม 4 องค์ประกอบหลักตามลำดับ (สาเหตุ, การดำเนินการ, ผลลัพธ์, และการดำเนินการต่อไปของแผนก ผบอ. และ แผนก ผอส.) "
+            "ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด:\n\n"
             f"สถิติภาพรวม: ทั้งหมด {base_exec_info['metrics']['total']} รายการ, "
             f"Online {base_exec_info['metrics']['online']} ชุด, "
             f"Connecting {base_exec_info['metrics']['connecting']} ชุด, "
             f"Offline {base_exec_info['metrics']['offline']} ชุด, "
             f"รอ ผบอ. {base_exec_info['metrics']['wait_bo']} ชุด, "
             f"รอ ผอส. {base_exec_info['metrics']['wait_po']} ชุด\n\n"
-            "ข้อมูลสรุปรายส่วน (Chunks):\n- " + "\n- ".join(chunk_summaries)
+            "ข้อมูลสรุปรายส่วน:\n" + "\n".join(chunk_summaries)
         )
         try:
             synth_res = call_gemini_with_fallback(
-                synth_prompt, preferred_model=preferred_model, api_key=api_key, system_instruction=active_sys_prompt
+                synth_prompt, preferred_model=preferred_model, api_key=api_key, system_instruction=synth_sys_prompt
             )
             if synth_res.get("text"):
-                final_summary_md = synth_res["text"].strip()
+                clean_synth = re.sub(r"[✅❌•]+", " ", synth_res["text"].strip())
+                final_summary_md = re.sub(r"\s+", " ", clean_synth).strip()
             used_models_log.append(synth_res["used_model"])
             fallback_traces.extend(synth_res.get("fallback_trace", []))
         except Exception as synth_err:
@@ -1247,7 +1368,7 @@ def summarize_inspection_report_with_gemini(rows, preferred_model="gemini-3.5-pr
         "success": len(used_models_log) > 0,
         "warning": ai_warning,
         "used_model": used_models_log[-1] if used_models_log else preferred_model,
-        "chunk_count": len(chunks),
+        "chunk_count": len(dept_batches),
         "rows": rewritten_rows,
         "summary_markdown": final_summary_md,
         "categories": base_exec_info["categories"],
@@ -2110,7 +2231,10 @@ def compute_overall_summary(dash_all_data_list):
     }
 
 
-def build_scada_map_and_data(prefer_local=False, write_files=False):
+_CLIENT_SIDE_HTML_SHELL_CACHE = None
+
+
+def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initial_data=False):
     """
     ฟังก์ชันหลักสำหรับดึงข้อมูลจาก Google Sheets / SQLite, คำนวณค่า overall_summary,
     สร้างแผนที่ Folium พร้อม UI Dashboard และคืนค่า Dictionary สำหรับเก็บใน In-Memory Cache ของ app.py
@@ -2150,14 +2274,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
     print(f"กำลังประมวลผลข้อมูลอุปกรณ์ในระบบทั้งหมด {len(df)} แถว...")
 
-    # --- 4. สร้างแผนที่ตั้งต้น ---
-    m = folium.Map(location=[15.2282, 104.8563], zoom_start=8, zoom_control=False, tiles=None, prefer_canvas=True, max_zoom=22)
-
-    base_layer_terrain = folium.TileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', attr='Google', name='แผนที่ภูมิประเทศ (Google Terrain)', overlay=False, control=True, max_zoom=22, show=True).add_to(m)
-    base_layer_street = folium.TileLayer('OpenStreetMap', name='แผนที่ถนน (Street Map)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    base_layer_satellite = folium.TileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียมล้วน (Google Satellite)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    base_layer_hybrid = folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='ภาพดาวเทียม + ถนน (Google Hybrid)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
-    base_layer_esri = folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='ภาพดาวเทียม (Esri World Imagery)', overlay=False, control=True, max_zoom=22, show=False).add_to(m)
+    # --- 4. [CLIENT-SIDE RENDERING] ยกเลิกการสร้างออบเจกต์แผนที่ Folium และ Marker บนฝั่ง Server ---
+    # ฝั่ง Backend จะประมวลผลเฉพาะข้อมูลดิบ (Raw JSON Data) เพื่อลดภาระ CPU/RAM บน Render Server
+    # และส่งให้ฝั่ง Frontend (Browser JavaScript) เป็นผู้สร้างแผนที่ Leaflet, MarkerCluster และตารางทั้งหมด
 
     # --- 5. จัดเตรียมโครงสร้างและการแสดงผล (Pre-resolved Columns เพื่อความเร็วสูงสุด) ---
     raw_parent_keys = {
@@ -2468,44 +2587,14 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
     print(f"[OK] เตรียมข้อมูลสำหรับ Report จาก Data_Check สำเร็จ: ทั้งหมด {len(report_data_list)} รายการ")
 
-    grouped_layers = {f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{raw_parent_keys[k][0]}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{k}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{raw_parent_keys[k][1]}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[k]})</span></span>": [] for k in raw_parent_keys.keys() if parent_counts[k] > 0}
-
-    mc_groups, search_data, export_data_list = {}, [], []
+    search_data, export_data_list = [], []
     thai_months_short = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
 
     for node_idx, node in enumerate(processed_nodes):
         row, lat, lon, active_status, active_status_display = node['row'], node['lat'], node['lon'], node['active_status'], node['active_status_display']
         raw_parent, icon_name, h_color = node['raw_parent'], node['icon_name'], hex_color_map.get(node['color'], '#575757')
-
-        c_hex, label = raw_parent_keys[raw_parent]
-        p_html = f"<span style='display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;'><span style='display:flex; align-items:center;'><span style='color:{c_hex}; font-size:16px; margin-right:8px; line-height:1;'>●</span><span class='parent-text' data-parent='{raw_parent}' style='font-size:14px; font-weight:600; color:#e3e3e3;'>{label}</span></span><span style='color:#9aa0a6; font-size:12px;'>({parent_counts[raw_parent]})</span></span>"
-        safe_status, safe_parent, safe_active_status_attr = "s_" + get_hash(active_status), "p_" + get_hash(raw_parent), html.escape(active_status)
-
-        if active_status not in mc_groups:
-            c_count = status_counts[active_status]
-            layer_name = f"<span style='display:flex; justify-content:space-between; align-items:flex-start; width:100%;'><span style='display:flex; align-items:flex-start; flex:1;'><i class='fa fa-{icon_name}' style='color:{h_color}; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;'></i><span class='status-text' data-status='{safe_active_status_attr}' style='font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;'>{active_status_display}</span></span><span style='color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;'>({c_count})</span></span>"
-            custom_cluster_js = f"function(c) {{ var count = c.getChildCount(); return new L.DivIcon({{ html: '<div class=\"map-cluster-inner {safe_status} {safe_parent}\" style=\"background-color:{h_color};\"><i class=\"fa fa-{icon_name} map-cluster-icon\"></i><span class=\"map-cluster-count\">' + count + '</span></div>', className: 'custom-cluster-marker', iconSize: new L.Point(44, 44), iconAnchor: new L.Point(22, 22) }}); }}"
-            mc = MarkerCluster(
-                name=layer_name,
-                show=True,
-                icon_create_function=custom_cluster_js,
-                control=False,
-                options={
-                    'disableClusteringAtZoom': 17,
-                    'maxClusterRadius': 50,
-                    'chunkedLoading': True,
-                    'chunkInterval': 100,
-                    'chunkDelay': 15,
-                    'animate': False,
-                    'animateAddingMarkers': False,
-                    'showCoverageOnHover': False,
-                    'removeOutsideVisibleBounds': True,
-                },
-            )
-            mc_groups[active_status] = mc
-            grouped_layers[p_html].append((active_status, mc))
-
-        target_group = mc_groups[active_status]
+        get_hash(active_status)
+        get_hash(raw_parent)
 
         site_id = str(row.get(site_col_report)) if site_col_report and pd.notna(row.get(site_col_report)) else 'Unknown'
         safe_site_id = "id_" + get_hash(site_id + str(lat))
@@ -2565,46 +2654,6 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             "tone": [_pre_tone_search(site_id), _pre_tone_search(cmd_code), _pre_tone_search(location_name), _pre_tone_search(extra_search_str)],
         })
 
-        popup_stub = f'<div class="custom-popup-card" data-safe-id="{safe_site_id}"></div>'
-        pin_html = f'<div class="map-pin-inner {safe_status} {safe_parent} pin-site-{safe_site_id}"><div class="pin-shape" style="background-color:{h_color};"></div><i class="fa fa-{icon_name} map-pin-icon"></i></div>'
-        folium.Marker(
-            location=[lat, lon],
-            popup=folium.Popup(popup_stub, autoPan=False),
-            tooltip=f"{site_id} ({location_name})",
-            icon=folium.DivIcon(html=pin_html, icon_size=(30, 42), icon_anchor=(15, 42), popup_anchor=(0, -42)),
-        ).add_to(target_group)
-
-    active_grouped_layers = {}
-    for p_html, items_list in grouped_layers.items():
-        if len(items_list) > 0:
-            def custom_sort(x):
-                s = x[0].upper()
-                w = 100
-                if s in ["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"]:
-                    w = 1
-                elif "รอ ผบอ. เข้าแก้ไข" in s and "ผอส" not in s:
-                    w = 2
-                elif "รอ ผบอ. และ ผอส." in s or "และ ผอส" in s:
-                    w = 3
-                elif "รอ ผอส." in s:
-                    w = 4
-                elif "ผบอ. เคยแก้ไข" in s:
-                    w = 5
-                elif "ระบบสื่อสาร" in s and "เคยแก้ไข" in s:
-                    w = 6
-                else:
-                    w = 10
-                return (w, len(s), s)
-            items_list.sort(key=custom_sort)
-            sorted_mcs = []
-            for active_status, mc in items_list:
-                m.add_child(mc)
-                sorted_mcs.append(mc)
-            active_grouped_layers[p_html] = sorted_mcs
-
-    folium.LayerControl(position='topleft', collapsed=True).add_to(m)
-    GroupedLayerControl(groups=active_grouped_layers, exclusive_groups=False, collapsed=True).add_to(m)
-
     # สร้างข้อมูลสำหรับ Dashboard ให้ครบทุกแถวในระบบ (รวมอุปกรณ์ที่ยังไม่มีพิกัด LAT, LONG เช่น Circuit Switcher 115 kV)
     _safe_id_by_site = {item["id"]: item["safe_id"] for item in search_data if item.get("id")}
     dash_all_data_list = []
@@ -2624,24 +2673,43 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             _arr.append(_vs)
         dash_all_data_list.append(_arr)
 
-    initial_version = int(time.time())
+    initial_version = int(time.time()) if embed_initial_data else 0
     overall_summary_dict = compute_overall_summary(dash_all_data_list)
-    overall_summary_json = json.dumps(overall_summary_dict, ensure_ascii=False, separators=(',', ':'))
-    dash_all_json = json.dumps(dash_all_data_list, ensure_ascii=False, separators=(',', ':'))
+
+    # ในโหมด Web Server (embed_initial_data=False) จะส่งเฉพาะโครงสร้างเริ่มต้นที่ว่างเปล่าใน HTML Shell
+    # แล้วให้ Client-Side JavaScript ดึง JSON ข้อมูลดิบผ่าน `/api/map_data` มาประมวลผลและวาดแผนที่บน Browser เอง 100%
+    overall_summary_json = json.dumps(overall_summary_dict if embed_initial_data else {}, ensure_ascii=False, separators=(',', ':'))
+    dash_all_json = json.dumps(dash_all_data_list if embed_initial_data else [], ensure_ascii=False, separators=(',', ':'))
     comm_device_groups_json = json.dumps(COMM_DEVICE_GROUPS, ensure_ascii=False, separators=(',', ':'))
-    search_json = json.dumps(search_data, ensure_ascii=False, separators=(',', ':'))
-    export_json = json.dumps(export_data_list, ensure_ascii=False, separators=(',', ':'))
-    status_hash_json = json.dumps(status_hash_map, ensure_ascii=False, separators=(',', ':'))
-    report_json_data = json.dumps(report_data_list, ensure_ascii=False, separators=(',', ':'))
+    search_json = json.dumps(search_data if embed_initial_data else [], ensure_ascii=False, separators=(',', ':'))
+    export_json = json.dumps(export_data_list if embed_initial_data else [], ensure_ascii=False, separators=(',', ':'))
+    status_hash_json = json.dumps(status_hash_map if embed_initial_data else {}, ensure_ascii=False, separators=(',', ':'))
+    report_json_data = json.dumps(report_data_list if embed_initial_data else [], ensure_ascii=False, separators=(',', ':'))
     base_layer_names_json = json.dumps({
-        "terrain": base_layer_terrain.get_name(),
-        "street": base_layer_street.get_name(),
-        "satellite": base_layer_satellite.get_name(),
-        "hybrid": base_layer_hybrid.get_name(),
-        "esri": base_layer_esri.get_name(),
+        "terrain": "tile_layer_terrain",
+        "street": "tile_layer_street",
+        "satellite": "tile_layer_satellite",
+        "hybrid": "tile_layer_hybrid",
+        "esri": "tile_layer_esri",
     }, ensure_ascii=False, separators=(',', ':'))
 
-    # --- 8. UI CSS & JavaScript ---
+    # --- 8. UI CSS & JavaScript (Client-Side Rendering Shell) ---
+    global _CLIENT_SIDE_HTML_SHELL_CACHE
+    if (not embed_initial_data) and (_CLIENT_SIDE_HTML_SHELL_CACHE is not None) and (not write_files):
+        return {
+            "version": int(time.time()),
+            "last_updated": time.time(),
+            "overall_summary": overall_summary_dict,
+            "dash_all_data": dash_all_data_list,
+            "search_data": search_data,
+            "export_data": export_data_list,
+            "report_data": report_data_list,
+            "status_hash_map": dict(status_hash_map),
+            "comm_device_groups": COMM_DEVICE_GROUPS,
+            "display_fields": [name for name, _ in resolved_display_cols],
+            "html": _CLIENT_SIDE_HTML_SHELL_CACHE,
+        }
+
     custom_ui_html = f"""
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
@@ -8200,20 +8268,76 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         window.addEventListener('scroll', function() {{ if (document.getElementById('reportWorkerDropdown').classList.contains('show')) positionReportWorkerDropdown(); }}, true);
 
         // ============================================================================
-        // === ระบบบริหารจัดการ Google Gemini API, Engineering Prompt, API Key Popover & Smartest-First Model Fallback ===
+        // === ระบบบริหารจัดการ Google Gemini API, Dual Department Engineering Prompts (ผบอ. / ผอส.) & Smartest-First Model Fallback ===
+        var SYSTEM_PROMPT_PBO_JS =
+            "Act as a Senior Control System & Electrical Engineer สังกัด แผนก ผบอ. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\n" +
+            "ขอบเขตความรับผิดชอบของคุณคือ: ตู้คอนโทรล, อุปกรณ์ภายในตู้, หม้อแปลงแรงดัน (VT) ที่เชื่อมกับระบบ 22kV เพื่อจ่ายไฟให้ตู้, อุปกรณ์สวิตช์เกียร์ (LBS, Recloser), ชุดควบคุมโทรมาตร (FRTU), บอร์ดคอนโทรลภายใน, คอนเวอร์เตอร์ (Converter), และระบบแบตเตอรี่\n" +
+            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\n" +
+            "โครงสร้างการเขียน (บังคับ):\n" +
+            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\n" +
+            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์ใดในความรับผิดชอบของ ผบอ. ชำรุดหรือขัดข้อง\n" +
+            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นหรือซ่อมแซมเปลี่ยนอุปกรณ์ฮาร์ดแวร์อย่างไร\n" +
+            "3. ผลลัพธ์: สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์\n" +
+            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผบอ. จะดำเนินการอะไรต่อไปในเชิงฮาร์ดแวร์/ระบบไฟ\n" +
+            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\n" +
+            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
+            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\n" +
+            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\n" +
+            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางให้ถูกต้อง (เช่น FRTU, Recloser, LBS, VT 22kV, Control Board, Converter)\n" +
+            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
+            "11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผบอ. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท";
+
+        var SYSTEM_PROMPT_POS_JS =
+            "Act as a Senior SCADA & Communication Engineer สังกัด แผนก ผอส. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\n" +
+            "ขอบเขตความรับผิดชอบของคุณคือ: ระบบสื่อสารข้อมูล, อุปกรณ์สื่อสาร (Modem, Router), สายสัญญาณสื่อสาร, แผงสัญญาณเสาอากาศ, ซิมการ์ด, สัญญาณเครือข่าย, และการเชื่อมต่อโปรโตคอลระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA\n" +
+            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\n" +
+            "โครงสร้างการเขียน (บังคับ):\n" +
+            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\n" +
+            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์สื่อสารใดในความรับผิดชอบของ ผอส. ขัดข้อง\n" +
+            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นอย่างไร\n" +
+            "3. ผลลัพธ์: สถานะการเชื่อมต่อสื่อสารปัจจุบัน\n" +
+            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผอส. จะดำเนินการอะไรต่อไปในเชิงระบบสื่อสาร\n" +
+            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\n" +
+            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
+            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\n" +
+            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\n" +
+            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางด้านสื่อสารให้ถูกต้อง (เช่น Communication Loss, Antenna, Signal Cable, Modem, Protocol)\n" +
+            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
+            "11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผอส. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท";
+
         var DEFAULT_ENGINEERING_PROMPT_JS =
-            "คุณเป็นวิศวกรผู้เชี่ยวชาญด้านระบบควบคุมและสั่งการ (SCADA) ของการไฟฟ้าส่วนภูมิภาค (กฟภ.) " +
-            "หน้าที่ของคุณคือการวิเคราะห์เนื้อหาการตรวจสอบและสรุปรายงานเป็นแบบ \\"วิศวกรรม\\" ที่มีความเป็นมืออาชีพ ถูกหลักภาษา มีการแก้คำผิด " +
-            "และเขียนเนื้อหาให้ครบถ้วนกระชับ โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้แต่งเป็นประโยคอธิบายยาวที่ร้อยเรียงเรื่องราว ประกอบด้วย:\\n" +
-            "- สาเหตุ: เกิดจากอะไร\\n" +
-            "- การดำเนินการ: แก้ไขอย่างไร\\n" +
-            "- ผลลัพธ์: ได้ผลเป็นอย่างไร\\n\\n" +
-            "ตัวอย่างแนวทาง:\\n" +
-            "\\"เนื่องจากอุปกรณ์ X ชำรุด (สาเหตุ) จึงได้ดำเนินการเปลี่ยนและตั้งค่าใหม่ (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ (ผลลัพธ์)\\"\\n\\n" +
-            "ข้อกำหนดสำคัญ:\\n" +
-            "1. บังคับร้อยเรียงเป็นประโยคอธิบายยาวตามโครงสร้าง: \\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\" เสมอ\\n" +
-            "2. แก้คำผิด คำซ้ำซ้อน และใช้ศัพท์เทคนิคทางวิศวกรรมให้ถูกต้องตามมาตรฐานวิชาชีพ โดยห้ามใช้สัญลักษณ์ไฮไลท์ (เช่น ✅, ❌, •)\\n" +
-            "3. กรณีข้อมูลต้นฉบับไม่ครบทั้ง 3 ส่วน ให้วิเคราะห์และเรียบเรียงจากข้อเท็จจริงและสถานะอุปกรณ์ที่มีอยู่ให้สมบูรณ์ที่สุดโดยห้ามแต่งเติมข้อมูลเท็จ";
+            "[System Prompt 1 สำหรับแผนก ผบอ.]\n" + SYSTEM_PROMPT_PBO_JS +
+            "\n\n[System Prompt 2 สำหรับแผนก ผอส.]\n" + SYSTEM_PROMPT_POS_JS;
+
+        function resolveDepartmentForRowJS(respStr, detailStr) {{
+            var resp = String(respStr || "").trim();
+            var detail = String(detailStr || "").toUpperCase();
+            var hasPbo = resp.indexOf("ผบอ") !== -1;
+            var hasPos = resp.indexOf("ผอส") !== -1;
+            if (hasPbo && !hasPos) return "PBO";
+            if (hasPos && !hasPbo) return "POS";
+            var pboKw = ["FRTU", "RECLOSER", "LBS", "VT", "22KV", "CONTROL BOARD", "CONVERTER", "BATTERY", "แบต", "ตู้คอนโทรล", "หม้อแปลง", "ฟิวส์", "FUSE", "NO AC", "ไม่มีไฟ", "บอร์ด", "การ์ด", "AVR"];
+            var posKw = ["MODEM", "ROUTER", "CELLULAR", "DAU", "SIM", "ซิม", "ANTENNA", "เสาอากาศ", "สายสัญญาณ", "SIGNAL", "PROTOCOL", "DNP", "COMMUNICATION", "สื่อสาร", "สัญญาณ", "เครือข่าย", "PORT LAN", "WRL"];
+            var pboScore = 0, posScore = 0;
+            pboKw.forEach(function(k) {{ if (detail.indexOf(k) !== -1) pboScore++; }});
+            posKw.forEach(function(k) {{ if (detail.indexOf(k) !== -1) posScore++; }});
+            if (hasPbo && hasPos) return pboScore >= posScore ? "PBO" : "POS";
+            return pboScore > posScore ? "PBO" : "POS";
+        }}
+
+        function getDepartmentSystemPromptJS(deptCode, customPromptText) {{
+            var cp = String(customPromptText || "").trim();
+            if (cp && cp !== DEFAULT_ENGINEERING_PROMPT_JS.trim()) {{
+                if (cp.indexOf("[System Prompt 1 สำหรับแผนก ผบอ.]") !== -1 && cp.indexOf("[System Prompt 2 สำหรับแผนก ผอส.]") !== -1) {{
+                    var parts = cp.split("[System Prompt 2 สำหรับแผนก ผอส.]");
+                    return deptCode === "PBO"
+                        ? parts[0].replace("[System Prompt 1 สำหรับแผนก ผบอ.]", "").trim()
+                        : parts[1].trim();
+                }}
+                return cp;
+            }}
+            return deptCode === "PBO" ? SYSTEM_PROMPT_PBO_JS : SYSTEM_PROMPT_POS_JS;
+        }}
 
         // ไม่เก็บ API Key แบบ Hardcode ในฝั่ง Frontend เพื่อความปลอดภัยของระบบ
         var INTERNAL_FALLBACK_GEMINI_KEY = "";
@@ -9033,25 +9157,27 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             var txt = String(rawDetail || "").trim();
             var stClean = String(statusStr || "").trim();
             var respClean = String(respStr || "").trim();
+            var dept = resolveDepartmentForRowJS(respClean, txt);
+            var deptLabel = dept === "PBO" ? "ผบอ." : "ผอส.";
 
-            if (txt.includes("(สาเหตุ)") && txt.includes("(การดำเนินการ)") && txt.includes("(ผลลัพธ์)") && txt.startsWith("เนื่องจาก")) {{
-                return txt;
+            if (txt.startsWith("เนื่องจาก") && txt.indexOf("ทั้งนี้ ในระยะต่อไปทางแผนก") !== -1) {{
+                return txt.replace(/[✅❌•\-]+/g, " ").replace(/\s+/g, " ").trim();
             }}
 
             if (!txt || txt === "-") {{
                 if (/ONLINE/i.test(stClean)) {{
-                    return "เนื่องจากมีการเข้าตรวจสอบสถานะอุปกรณ์ตามแผนบำรุงรักษา (สาเหตุ) จึงได้ดำเนินการตรวจสอบการทำงานของชุดควบคุมและระบบสื่อสาร (การดำเนินการ) ส่งผลให้อุปกรณ์สามารถกลับมาทำงานและออนไลน์ได้ตามปกติ (ผลลัพธ์)";
+                    if (dept === "PBO") {{
+                        return "เนื่องจากตรวจพบการแจ้งเตือนสถานะการทำงานของตู้คอนโทรลและชุดควบคุมโทรมาตร (FRTU) จากระบบตรวจวัด จึงได้เข้าตรวจสอบระบบไฟเลี้ยง หม้อแปลงแรงดัน (VT 22kV) และอุปกรณ์สวิตช์เกียร์ในความรับผิดชอบของแผนก ผบอ. ส่งผลให้ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์สามารถทำงานและเชื่อมต่อระบบได้ตามปกติ ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะติดตามเฝ้าระวังเสถียรภาพของระบบจ่ายไฟและฮาร์ดแวร์ภายในตู้คอนโทรลตามแผนบำรุงรักษา";
+                    }}
+                    return "เนื่องจากตรวจพบสภาวะการสูญเสียการสื่อสารข้อมูล (Communication Loss) ระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA จึงได้เข้าตรวจสอบอุปกรณ์สื่อสาร (Modem/Router) ซิมการ์ด และระดับสัญญาณเครือข่ายในความรับผิดชอบของแผนก ผอส. ส่งผลให้ปัจจุบันการเชื่อมต่อโปรโตคอลและระบบสื่อสารข้อมูลกลับมาออนไลน์ได้ตามปกติ ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะเฝ้าระวังคุณภาพสัญญาณเครือข่ายและเสถียรภาพของการเชื่อมต่อสื่อสารอย่างต่อเนื่อง";
                 }}
-                if (stClean && stClean !== "-") {{
-                    var respNote = (respClean && respClean !== "-" && respClean !== "ไม่มีค่า")
-                        ? (" และประสานงานส่งต่อให้ " + respClean + " เข้าดำเนินการแก้ไข")
-                        : "";
-                    return "เนื่องจากตรวจพบอุปกรณ์มีสถานะ " + stClean + " โดยไม่พบบันทึกรายละเอียดอาการเสียเพิ่มเติมในระบบ (สาเหตุ) จึงได้ดำเนินการตรวจสอบเบื้องต้น" + respNote + " (การดำเนินการ) ส่งผลให้ปัจจุบันอุปกรณ์ยังคงมีสถานะ " + stClean + " (ผลลัพธ์)";
+                if (dept === "PBO") {{
+                    return "เนื่องจากตรวจพบความผิดปกติของอุปกรณ์ภายในตู้คอนโทรลและระบบจ่ายไฟทำให้มีสถานะ " + (stClean || "Offline") + " จึงได้เข้าตรวจสอบเบื้องต้นในส่วนของชุดควบคุมโทรมาตร (FRTU) คอนเวอร์เตอร์ และระบบแบตเตอรี่ ส่งผลให้ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์ยังคงมีสถานะ " + (stClean || "Offline") + " ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะเข้าตรวจสอบเชิงลึกและซ่อมแซมหรือเปลี่ยนอุปกรณ์ฮาร์ดแวร์ที่ชำรุดเพื่อให้ระบบกลับมาใช้งานได้ตามปกติ";
                 }}
-                return "เนื่องจากไม่มีบันทึกข้อมูลสาเหตุการชำรุดในระบบ (สาเหตุ) จึงยังไม่มีรายการบันทึกการแก้ไข (การดำเนินการ) ส่งผลให้ยังไม่สามารถระบุผลลัพธ์หลังดำเนินการได้ (ผลลัพธ์)";
+                return "เนื่องจากตรวจพบปัญหาการเชื่อมต่อระบบสื่อสารข้อมูลขัดข้องทำให้มีสถานะ " + (stClean || "Offline") + " จึงได้เข้าตรวจสอบเบื้องต้นในส่วนของอุปกรณ์สื่อสาร (Modem/Router) สายสัญญาณ และแผงสัญญาณเสาอากาศ ส่งผลให้ปัจจุบันสถานะการเชื่อมต่อสื่อสารยังคงเป็น " + (stClean || "Offline") + " ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะเข้าตรวจสอบแก้ไขระบบสื่อสารและปรับปรุงการเชื่อมต่อโปรโตคอลกับศูนย์ควบคุม SCADA ให้กลับมาออนไลน์โดยเร็ว";
             }}
 
-            var rawTokens = txt.split(/[\\n\\r;|]+|,\\s*|\\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\\s*ONLINE|อุปกรณ์สื่อสาร\\s*ปกติ|No\\s*AC)/i)
+            var rawTokens = txt.split(/[\n\r;|]+|,\s*|\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\s*ONLINE|อุปกรณ์สื่อสาร\s*ปกติ|No\s*AC)/i)
                 .map(function(s) {{ return s.trim(); }})
                 .filter(Boolean);
 
@@ -9063,9 +9189,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             function addUniqueClause(targetArr, clause) {{
                 var cNorm = normalizeEngineeringClauseJS(clause);
                 if (!cNorm) return;
-                var cKey = cNorm.toLowerCase().replace(/\\s+/g, "");
+                var cKey = cNorm.toLowerCase().replace(/\s+/g, "");
                 for (var i = 0; i < targetArr.length; i++) {{
-                    var exKey = targetArr[i].toLowerCase().replace(/\\s+/g, "");
+                    var exKey = targetArr[i].toLowerCase().replace(/\s+/g, "");
                     if (cKey === exKey || exKey.includes(cKey) || (cKey.includes("ไม่มีไฟเลี้ยงac") && exKey.includes("ไม่มีไฟac"))) return;
                     if (cKey.includes(exKey)) {{
                         targetArr[i] = cNorm;
@@ -9092,7 +9218,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
                 if (/^(เปลี่ยน|ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|รีเซ็ต|ตั้งค่า|ซ่อม|ย้ำสาย|ทำความสะอาด|ปรับตั้ง)/i.test(cleanTk)) {{
                     if (cleanTk.includes("ชำรุด") && cleanTk.includes("ทดแทน")) {{
-                        var subParts = cleanTk.split(/(?=Port\\s*LAN|อุปกรณ์\\s*DAU|เนื่องจาก)/i);
+                        var subParts = cleanTk.split(/(?=Port\s*LAN|อุปกรณ์\s*DAU|เนื่องจาก)/i);
                         addUniqueClause(actions, subParts[0]);
                         for (var sIdx = 1; sIdx < subParts.length; sIdx++) {{
                             addUniqueClause(causes, subParts[sIdx]);
@@ -9114,37 +9240,44 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }});
 
             if (causes.length === 0) {{
-                causes.push("ตรวจพบความผิดปกติของอุปกรณ์ในระบบจากการเข้าตรวจสอบหน้างาน");
+                causes.push(dept === "PBO"
+                    ? "ชุดควบคุมโทรมาตร (FRTU) และอุปกรณ์ภายในตู้คอนโทรลเกิดความผิดปกติ"
+                    : "ระบบสื่อสารข้อมูลเกิดสภาวะสูญเสียการเชื่อมต่อ (Communication Loss) กับศูนย์ควบคุม SCADA");
             }}
             if (actions.length === 0) {{
-                if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า") {{
-                    actions.push("เข้าตรวจสอบสภาพอุปกรณ์และระบบสื่อสารเบื้องต้น พร้อมประสานงานส่งต่อให้ " + respClean + " เข้าดำเนินการแก้ไข");
-                }} else {{
-                    actions.push("เข้าตรวจสอบสภาพการทำงานของอุปกรณ์ ระบบสายสัญญาณ และแหล่งจ่ายไฟ");
-                }}
+                actions.push(dept === "PBO"
+                    ? "เข้าตรวจสอบสภาพฮาร์ดแวร์ภายในตู้คอนโทรล ระบบแบตเตอรี่ และแหล่งจ่ายไฟแรงดัน 22kV (VT)"
+                    : "เข้าตรวจสอบอุปกรณ์สื่อสาร (Modem/Router) สายสัญญาณสื่อสาร แผงสัญญาณเสาอากาศ และซิมการ์ดเบื้องต้น");
             }}
             if (results.length === 0) {{
                 if (/ONLINE/i.test(stClean)) {{
-                    results.push("อุปกรณ์และระบบสื่อสารสามารถกลับมาทำงานและออนไลน์ได้ตามปกติ");
-                }} else if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า") {{
-                    results.push("ระบบสื่อสารและอุปกรณ์อยู่ในสถานะ " + (stClean || "รอการแก้ไข") + " โดยอยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไขในส่วนที่เกี่ยวข้องต่อไป");
-                }} else if (stClean && stClean !== "-") {{
-                    results.push("ปัจจุบันอุปกรณ์อยู่ในสถานะ " + stClean);
+                    results.push(dept === "PBO"
+                        ? "ปัจจุบันตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์กลับมาทำงานและออนไลน์ได้ตามปกติ"
+                        : "ปัจจุบันการเชื่อมต่อโปรโตคอลและระบบสื่อสารข้อมูลกลับมาออนไลน์ได้ตามปกติ");
                 }} else {{
-                    results.push("อุปกรณ์สามารถกลับมาทำงานได้ตามปกติ");
-                }}
-            }} else if (respClean && respClean !== "-" && respClean !== "ไม่มีค่า" && !/ONLINE/i.test(stClean)) {{
-                var hasResp = results.some(function(r) {{ return r.includes(respClean); }});
-                if (!hasResp) {{
-                    results.push("ส่วนอุปกรณ์ที่ชำรุดอยู่ระหว่างรอ " + respClean + " เข้าดำเนินการแก้ไขต่อไป");
+                    results.push(dept === "PBO"
+                        ? ("สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์ยังคงเป็น " + (stClean || "Offline"))
+                        : ("สถานะการเชื่อมต่อสื่อสารปัจจุบันยังคงเป็น " + (stClean || "Offline")));
                 }}
             }}
 
-            var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\\s*/, "").trim();
-            var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ)\\s*/, "").trim();
-            var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\\s*/, "").trim();
+            var nextStepStr = "";
+            if (/ONLINE/i.test(stClean) && respClean.indexOf("ผบอ") === -1 && respClean.indexOf("ผอส") === -1) {{
+                nextStepStr = dept === "PBO"
+                    ? "ติดตามเฝ้าระวังเสถียรภาพของระบบไฟเลี้ยงและอุปกรณ์ฮาร์ดแวร์ภายในตู้คอนโทรลอย่างต่อเนื่อง"
+                    : "ติดตามเฝ้าระวังคุณภาพสัญญาณเครือข่ายและเสถียรภาพของการเชื่อมต่อโปรโตคอลกับศูนย์ควบคุม SCADA อย่างต่อเนื่อง";
+            }} else {{
+                nextStepStr = dept === "PBO"
+                    ? "เข้าตรวจสอบเชิงลึกเพื่อซ่อมแซมหรือเปลี่ยนอุปกรณ์ฮาร์ดแวร์ภายในตู้คอนโทรลและระบบไฟเลี้ยงที่ชำรุดให้กลับมาทำงานได้ตามมาตรฐาน"
+                    : "เข้าตรวจสอบแก้ไขอุปกรณ์สื่อสาร สายสัญญาณ และตั้งค่าพารามิเตอร์โปรโตคอลเชื่อมต่อกับตู้ FRTU เพื่อให้ระบบกลับมาออนไลน์ได้ตามปกติ";
+            }}
 
-            return "เนื่องจาก" + causeStr + " (สาเหตุ) จึงได้ดำเนินการ" + actionStr + " (การดำเนินการ) ส่งผลให้" + resultStr + " (ผลลัพธ์)";
+            var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*/, "").trim();
+            var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ|ทำการ)\s*/, "").trim();
+            var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*/, "").trim();
+
+            var out = "เนื่องจาก" + causeStr + " จึงได้" + actionStr + " ส่งผลให้" + resultStr + " ทั้งนี้ ในระยะต่อไปทางแผนก " + deptLabel + " จะดำเนินการ" + nextStepStr;
+            return out.replace(/[✅❌•\-]+/g, " ").replace(/\s+/g, " ").trim();
         }}
 
         function buildDeterministicSummaryJS(rows) {{
@@ -9225,7 +9358,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
             }};
         }}
 
-        async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey) {{
+        async function callDirectGeminiRestFromBrowser(promptText, preferredModel, apiKey, sysPromptOverride) {{
             var effectiveKey = String(apiKey || INTERNAL_FALLBACK_GEMINI_KEY).trim();
             if (!effectiveKey) {{
                 throw new Error("กรุณาระบุ Gemini API Key ของตนเองในหน้าต่างตั้งค่า AI ก่อนเรียกใช้งาน");
@@ -9237,7 +9370,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 ? GEMINI_FALLBACK_LIST.slice()
                 : [preferredModel].concat(GEMINI_FALLBACK_LIST.filter(function(m) {{ return m !== preferredModel; }}));
 
-            var sysPrompt = getActiveEngineeringPrompt();
+            var sysPrompt = sysPromptOverride || getActiveEngineeringPrompt();
             var lastErr = "";
             for (var i = 0; i < order.length; i++) {{
                 var logicalModel = order[i];
@@ -9340,19 +9473,22 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
 
             for (var cIdx = 0; cIdx < chunks.length; cIdx++) {{
                 var ch = chunks[cIdx];
+                var pboCountInChunk = ch.filter(function(r) {{ return resolveDepartmentForRowJS(r.resp, r.detail) === "PBO"; }}).length;
+                var chunkDeptCode = (pboCountInChunk >= Math.ceil(ch.length / 2)) ? "PBO" : "POS";
+                var chunkDeptLabel = chunkDeptCode === "PBO" ? "ผบอ." : "ผอส.";
+                var deptSysPrompt = getDepartmentSystemPromptJS(chunkDeptCode, customPrompt);
                 var linesStr = ch.map(function(r, idx) {{
-                    return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะ: " + r.status;
-                }}).join("\\n");
+                    return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะสุดท้าย: " + r.status;
+                }}).join("\n");
 
                 var prompt =
-                    customPrompt + "\\n\\n" +
-                    "โปรดวิเคราะห์และปรับแก้ข้อความแต่ละรายการต่อไปนี้ให้เป็นประโยคอธิบายยาวแบบวิศวกรรมที่มีความเป็นมืออาชีพ ถูกหลักภาษา แก้คำผิด " +
-                    "โดยไม่ต้องใช้การไฮไลท์แบบเดิม แต่ให้ร้อยเรียงตามโครงสร้าง:\\n" +
-                    "\\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\"\\n" +
-                    "ตอบเป็น JSON เท่านั้น: {{\\"rows\\":[{{\\"idx\\":0,\\"clean_detail\\":\\"เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์)\\"}}],\\"chunk_summary\\":\\"...\\"}}\\n\\n" +
+                    "โปรดวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุงในแต่ละรายการต่อไปนี้ และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' แบบต่อเนื่อง 1 ย่อหน้า (Flowing Narrative) ตามโครงสร้างบังคับ:\n" +
+                    "'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก " + chunkDeptLabel + " จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
+                    "ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
+                    "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"เนื่องจาก... จึงได้ดำเนินการ... ส่งผลให้... ทั้งนี้ ในระยะต่อไปทางแผนก " + chunkDeptLabel + " จะดำเนินการ...\"}}],\"chunk_summary\":\"...\"}}\n\n" +
                     linesStr;
                 try {{
-                    var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, userTypedKey);
+                    var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, userTypedKey, deptSysPrompt);
                     usedModelName = aiRes.used_model;
                     var mJson = aiRes.text.match(/\\{{[\\s\\S]*\\}}/);
                     if (mJson) {{
@@ -13684,16 +13820,391 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
                 }});
         }};
 
+        // ============================================================================
+        // === [CLIENT-SIDE RENDERING ENGINE] สร้างแผนที่, MarkerCluster และตัวกรองบน Browser ===
+        // ============================================================================
+        var RAW_PARENT_META_JS = {{
+            "Telemetry Failure": ["#ffc107", "Telemetry Failure"],
+            "Offline": ["#d33d2a", "Offline"],
+            "Online": ["#008000", "Online"],
+            "Initializing": ["#82c91e", "Initializing"],
+            "Connecting": ["#f3943b", "Connecting"],
+            "สถานะอื่นๆ": ["#575757", "สถานะอื่นๆ"]
+        }};
+
+        function getClientStatusWeight(sUpper) {{
+            var s = String(sUpper || "").toUpperCase();
+            if (["ONLINE", "OFFLINE", "INITIALIZING", "CONNECTING", "TELEMETRY FAILURE"].indexOf(s) !== -1) return 1;
+            if (s.indexOf("รอ ผบอ. เข้าแก้ไข") !== -1 && s.indexOf("ผอส") === -1) return 2;
+            if (s.indexOf("รอ ผบอ. และ ผอส.") !== -1 || s.indexOf("และ ผอส") !== -1) return 3;
+            if (s.indexOf("รอ ผอส.") !== -1) return 4;
+            if (s.indexOf("ผบอ. เคยแก้ไข") !== -1) return 5;
+            if (s.indexOf("ระบบสื่อสาร") !== -1 && s.indexOf("เคยแก้ไข") !== -1) return 6;
+            return 10;
+        }}
+
+        window.clientMcGroups = Object.create(null);
+
+        window.rebuildLeafletMapClientSide = function() {{
+            var map = window.map_scada_client;
+            if (!map || !Array.isArray(sData)) return;
+
+            // ล้าง Cluster เดิมออกจากแผนที่ก่อนสร้างใหม่จากข้อมูล JSON
+            Object.keys(window.clientMcGroups).forEach(function(stKey) {{
+                var oldMc = window.clientMcGroups[stKey];
+                if (oldMc && map.hasLayer(oldMc)) {{
+                    map.removeLayer(oldMc);
+                }}
+            }});
+            window.clientMcGroups = Object.create(null);
+
+            var statusCounts = Object.create(null);
+            var parentCounts = {{
+                "Telemetry Failure": 0,
+                "Offline": 0,
+                "Online": 0,
+                "Initializing": 0,
+                "Connecting": 0,
+                "สถานะอื่นๆ": 0
+            }};
+            var statusMetaByStatus = Object.create(null);
+
+            sData.forEach(function(item) {{
+                var st = item.status || "Unknown";
+                var rp = item.raw_parent || classifyRawParentState(st);
+                statusCounts[st] = (statusCounts[st] || 0) + 1;
+                if (parentCounts[rp] === undefined) parentCounts[rp] = 0;
+                parentCounts[rp]++;
+                if (!statusMetaByStatus[st]) {{
+                    statusMetaByStatus[st] = {{
+                        raw_parent: rp,
+                        color: item.color || "#575757",
+                        icon: item.icon || "info-circle"
+                    }};
+                }}
+            }});
+
+            var markersByStatus = Object.create(null);
+            sData.forEach(function(item) {{
+                var st = item.status || "Unknown";
+                var rp = item.raw_parent || classifyRawParentState(st);
+                var safeSt = "s_" + (statusHashMap[st] || "0");
+                var safePr = "p_" + (statusHashMap[rp] || "0");
+                if (!markersByStatus[st]) markersByStatus[st] = [];
+
+                var pinHtml =
+                    '<div class="map-pin-inner ' + safeSt + ' ' + safePr + ' pin-site-' + item.safe_id + '">' +
+                        '<div class="pin-shape" style="background-color:' + item.color + ';"></div>' +
+                        '<i class="fa fa-' + item.icon + ' map-pin-icon"></i>' +
+                    '</div>';
+                var iconObj = L.divIcon({{
+                    html: pinHtml,
+                    iconSize: [30, 42],
+                    iconAnchor: [15, 42],
+                    popupAnchor: [0, -42],
+                    className: "empty"
+                }});
+                var popupStub = '<div class="custom-popup-card" data-safe-id="' + item.safe_id + '"></div>';
+                var tipHtml = '<div>' + escapeHtmlSafe(item.id + ' (' + (item.name || '') + ')') + '</div>';
+
+                var mk = L.marker([item.lat, item.lon], {{ icon: iconObj }})
+                    .bindPopup(popupStub, {{ maxWidth: "100%", autoPan: false }})
+                    .bindTooltip(tipHtml, {{ sticky: true }});
+                markersByStatus[st].push(mk);
+            }});
+
+            var statusGroupsByParent = Object.create(null);
+            Object.keys(RAW_PARENT_META_JS).forEach(function(pk) {{
+                statusGroupsByParent[pk] = [];
+            }});
+
+            Object.keys(markersByStatus).forEach(function(st) {{
+                var meta = statusMetaByStatus[st];
+                var rp = meta.raw_parent;
+                var safeSt = "s_" + (statusHashMap[st] || "0");
+                var safePr = "p_" + (statusHashMap[rp] || "0");
+                var hColor = meta.color;
+                var iconName = meta.icon;
+
+                var mc = L.markerClusterGroup({{
+                    disableClusteringAtZoom: 17,
+                    maxClusterRadius: 50,
+                    chunkedLoading: true,
+                    chunkInterval: 100,
+                    chunkDelay: 15,
+                    animate: false,
+                    animateAddingMarkers: false,
+                    showCoverageOnHover: false,
+                    removeOutsideVisibleBounds: true,
+                    iconCreateFunction: function(c) {{
+                        var count = c.getChildCount();
+                        return new L.DivIcon({{
+                            html: '<div class="map-cluster-inner ' + safeSt + ' ' + safePr + '" style="background-color:' + hColor + ';"><i class="fa fa-' + iconName + ' map-cluster-icon"></i><span class="map-cluster-count">' + count + '</span></div>',
+                            className: 'custom-cluster-marker',
+                            iconSize: new L.Point(44, 44),
+                            iconAnchor: new L.Point(22, 22)
+                        }});
+                    }}
+                }});
+                mc.addLayers(markersByStatus[st]);
+                mc.addTo(map);
+                window.clientMcGroups[st] = mc;
+                if (!statusGroupsByParent[rp]) statusGroupsByParent[rp] = [];
+                statusGroupsByParent[rp].push({{
+                    status: st,
+                    mc: mc,
+                    count: statusCounts[st] || 0,
+                    color: hColor,
+                    icon: iconName
+                }});
+            }});
+
+            // สร้าง UI ตัวกรองสถานะบนแผนที่ (#customFilterWrapper) บนฝั่ง Client-Side
+            var filterForm = document.getElementById("clientLayersForm");
+            var overlaysContainer = document.getElementById("clientLayersOverlays");
+            if (filterForm && overlaysContainer) {{
+                overlaysContainer.innerHTML = "";
+                Object.keys(RAW_PARENT_META_JS).forEach(function(parentKey) {{
+                    var pCount = parentCounts[parentKey] || 0;
+                    var items = statusGroupsByParent[parentKey] || [];
+                    if (pCount <= 0 || items.length === 0) return;
+
+                    items.sort(function(a, b) {{
+                        var wA = getClientStatusWeight(a.status);
+                        var wB = getClientStatusWeight(b.status);
+                        if (wA !== wB) return wA - wB;
+                        if (a.status.length !== b.status.length) return a.status.length - b.status.length;
+                        return a.status.localeCompare(b.status, "th");
+                    }});
+
+                    var cHex = RAW_PARENT_META_JS[parentKey][0];
+                    var pLabel = RAW_PARENT_META_JS[parentKey][1];
+
+                    var groupDiv = document.createElement("div");
+                    groupDiv.className = "leaflet-control-layers-group";
+
+                    var groupLabel = document.createElement("label");
+                    groupLabel.className = "leaflet-control-layers-group-label";
+                    groupLabel.title = "คลิกเพื่อเลือกหรือยกเลิกสถานะย่อยทั้งหมดในกลุ่มนี้";
+                    groupLabel.innerHTML =
+                        '<input type="checkbox" class="leaflet-control-layers-group-selector" checked> ' +
+                        '<span class="leaflet-control-layers-group-name">' +
+                            '<span style="display:flex; justify-content:space-between; align-items:center; width:100%; padding: 10px 16px; border-bottom: 1px solid #444746;">' +
+                                '<span style="display:flex; align-items:center;">' +
+                                    '<span style="color:' + cHex + '; font-size:16px; margin-right:8px; line-height:1;">●</span>' +
+                                    '<span class="parent-text" data-parent="' + escapeHtmlSafe(parentKey) + '" style="font-size:14px; font-weight:600; color:#e3e3e3;">' + escapeHtmlSafe(pLabel) + '</span>' +
+                                '</span>' +
+                                '<span style="color:#9aa0a6; font-size:12px;">(' + pCount + ')</span>' +
+                            '</span>' +
+                        '</span>';
+                    groupDiv.appendChild(groupLabel);
+
+                    items.forEach(function(it) {{
+                        var itemLbl = document.createElement("label");
+                        var cb = document.createElement("input");
+                        cb.type = "checkbox";
+                        cb.className = "leaflet-control-layers-selector";
+                        cb.checked = true;
+                        cb.setAttribute("data-status-key", it.status);
+                        cb.addEventListener("change", function() {{
+                            var targetMc = window.clientMcGroups[it.status];
+                            if (!targetMc) return;
+                            if (this.checked) {{
+                                if (!map.hasLayer(targetMc)) map.addLayer(targetMc);
+                            }} else {{
+                                if (map.hasLayer(targetMc)) map.removeLayer(targetMc);
+                            }}
+                        }});
+
+                        var spanWrap = document.createElement("span");
+                        spanWrap.innerHTML =
+                            ' <span style="display:flex; justify-content:space-between; align-items:flex-start; width:100%;">' +
+                                '<span style="display:flex; align-items:flex-start; flex:1;">' +
+                                    '<i class="fa fa-' + it.icon + '" style="color:' + it.color + '; width:16px; text-align:center; margin-right:12px; margin-top:3px; flex-shrink:0;"></i>' +
+                                    '<span class="status-text" data-status="' + escapeHtmlSafe(it.status) + '" style="font-size:13.5px; color:#e3e3e3; line-height:1.4; word-break:keep-all; overflow-wrap:break-word; text-wrap:balance;">' + escapeHtmlSafe(it.status) + '</span>' +
+                                '</span>' +
+                                '<span style="color:#9aa0a6; font-size:12px; margin-left:8px; flex-shrink:0;">(' + it.count + ')</span>' +
+                            '</span>';
+
+                        itemLbl.appendChild(cb);
+                        itemLbl.appendChild(spanWrap);
+                        groupDiv.appendChild(itemLbl);
+                    }});
+
+                    overlaysContainer.appendChild(groupDiv);
+                }});
+
+                if (typeof window.bindClientFilterEvents === "function") {{
+                    window.bindClientFilterEvents();
+                }}
+            }}
+        }};
+
+        // ผูก Event Hover และ Group Checkbox สำหรับตัวกรองแผนที่ที่สร้างขึ้นแบบไดนามิกบนฝั่ง Client
+        window.bindClientFilterEvents = function() {{
+            var filterWrapper = document.getElementById("customFilterWrapper");
+            if (!filterWrapper) return;
+
+            function syncFilterGroupCheckboxes() {{
+                filterWrapper.querySelectorAll('.leaflet-control-layers-group').forEach(function(group) {{
+                    var header = group.querySelector('.leaflet-control-layers-group-label input[type="checkbox"]');
+                    var children = Array.from(group.querySelectorAll('input.leaflet-control-layers-selector[type="checkbox"]'))
+                        .filter(function(cb) {{ return !cb.closest('.leaflet-control-layers-group-label'); }});
+                    if (!header || !children.length) return;
+                    var checkedCount = children.filter(function(cb) {{ return cb.checked; }}).length;
+                    header.checked = checkedCount === children.length;
+                    header.indeterminate = checkedCount > 0 && checkedCount < children.length;
+                }});
+            }}
+
+            function clearActiveHoverElements() {{
+                for (var i = 0; i < activeHoverElements.length; i++) {{
+                    var el = activeHoverElements[i];
+                    el.classList.remove('highlight-active');
+                    if (el.parentElement) el.parentElement.style.zIndex = '';
+                }}
+                activeHoverElements = [];
+            }}
+
+            function applyHoverSelector(selector) {{
+                clearActiveHoverElements();
+                currentHoveredSelector = selector;
+                if (!selector) return;
+                document.body.classList.add('filter-hover-active');
+                var nodes = document.querySelectorAll(selector);
+                for (var i = 0; i < nodes.length; i++) {{
+                    var el = nodes[i];
+                    el.classList.add('highlight-active');
+                    if (el.parentElement) el.parentElement.style.zIndex = 9999;
+                    activeHoverElements.push(el);
+                }}
+            }}
+
+            filterWrapper.querySelectorAll('.leaflet-control-layers-selector').forEach(function(cb) {{
+                cb.addEventListener('change', function() {{ syncFilterGroupCheckboxes(); reapplyHighlight(); }});
+            }});
+
+            filterWrapper.querySelectorAll('label:not(.leaflet-control-layers-group-label)').forEach(function(lbl) {{
+                lbl.addEventListener('mouseenter', function() {{
+                    var statusNode = this.querySelector('.status-text');
+                    var targetStr = statusNode ? statusNode.getAttribute('data-status') : this.textContent.replace(/●/g,'').trim();
+                    if (statusHashMap[targetStr]) {{
+                        applyHoverSelector(".s_" + statusHashMap[targetStr]);
+                    }}
+                }});
+                lbl.addEventListener('mouseleave', function() {{
+                    currentHoveredSelector = null;
+                    if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                    clearActiveHoverElements();
+                }});
+            }});
+
+            filterWrapper.querySelectorAll('.leaflet-control-layers-group-label').forEach(function(lbl) {{
+                lbl.addEventListener('click', function(e) {{
+                    e.preventDefault(); e.stopPropagation();
+                    var parentGroup = this.closest('.leaflet-control-layers-group');
+                    if (!parentGroup) return;
+                    var checkboxes = Array.from(parentGroup.querySelectorAll('input.leaflet-control-layers-selector[type="checkbox"]'))
+                        .filter(function(cb) {{ return !cb.closest('.leaflet-control-layers-group-label'); }});
+                    if (!checkboxes.length) return;
+                    var allChecked = checkboxes.every(function(cb) {{ return cb.checked; }});
+                    var shouldCheck = !allChecked;
+                    checkboxes.forEach(function(cb) {{ if (cb.checked !== shouldCheck) cb.click(); }});
+                    syncFilterGroupCheckboxes();
+                    reapplyHighlight();
+                }});
+                lbl.addEventListener('mouseenter', function() {{
+                    var parentNode = this.querySelector('.parent-text');
+                    if (parentNode) {{
+                        var parentStr = parentNode.getAttribute('data-parent');
+                        if (statusHashMap[parentStr]) {{
+                            applyHoverSelector(".p_" + statusHashMap[parentStr]);
+                        }}
+                    }}
+                }});
+                lbl.addEventListener('mouseleave', function() {{
+                    currentHoveredSelector = null;
+                    if (!window.currentSelectedSafeId) {{ document.body.classList.remove('filter-hover-active'); }}
+                    clearActiveHoverElements();
+                }});
+            }});
+
+            syncFilterGroupCheckboxes();
+        }};
+
+        // อัปเกรด applySeamlessMapData ให้รองรับการสร้างแผนที่และตารางครั้งแรกบน Client-Side ทันทีที่ได้รับ JSON
+        var _origApplySeamlessMapData = window.applySeamlessMapData;
+        window.applySeamlessMapData = function(payload) {{
+            var isFirstHydration = (!sData || sData.length === 0);
+            _origApplySeamlessMapData(payload);
+            if (isFirstHydration || (payload && Array.isArray(payload.search_data))) {{
+                window.rebuildLeafletMapClientSide();
+            }}
+        }};
+
+        // หากเปิดหน้าเว็บแบบ Client-Side Shell (ข้อมูลเริ่มต้นว่างเปล่า) ให้ตรวจสอบ sessionStorage ก่อน แล้วดึง JSON สดจาก `/api/map_data`
+        if (!dashAllCompact || dashAllCompact.length === 0) {{
+            try {{
+                var cachedRawStr = sessionStorage.getItem('scada_raw_cache_v1');
+                if (cachedRawStr) {{
+                    var cachedPayload = JSON.parse(cachedRawStr);
+                    if (cachedPayload && Array.isArray(cachedPayload.dash_all_data) && cachedPayload.dash_all_data.length > 0) {{
+                        window.applySeamlessMapData(cachedPayload);
+                    }}
+                }}
+            }} catch (e) {{}}
+            window.fetchSeamlessMapData(true);
+        }} else {{
+            setTimeout(function() {{
+                window.rebuildLeafletMapClientSide();
+            }}, 50);
+        }}
+
         // ตั้งเวลาดึงข้อมูลอัปเดตอัตโนมัติผ่าน Fetch API ทุกๆ 60 วินาที (Seamless Background Polling)
         setInterval(function() {{
             window.fetchSeamlessMapData(false);
         }}, 60000);
         </script>
     """
-    m.get_root().html.add_child(folium.Element(custom_ui_html))
 
-
-    rendered_html = m.get_root().render()
+    rendered_html = (
+        '<!DOCTYPE html>\n<html lang="th">\n<head>\n'
+        '    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />\n'
+        '    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />\n'
+        '    <title>รายงานความพร้อมใช้งานอุปกรณ์ในระบบ SCADA NE2 (%AVA)</title>\n'
+        '    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>\n'
+        '    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>\n'
+        '    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>\n'
+        '    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>\n'
+        '    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>\n'
+        '    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>\n'
+        '    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>\n'
+        '    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>\n'
+        '    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>\n'
+        '    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>\n'
+        '    <style>#map_scada_client { position: relative; width: 100.0%; height: 100.0%; left: 0.0%; top: 0.0%; } .leaflet-container { font-size: 1rem; } html, body { width: 100%; height: 100%; margin: 0; padding: 0; } #map { position:absolute; top:0; bottom:0; right:0; left:0; }</style>\n'
+        '    <script>L_NO_TOUCH = false; L_DISABLE_3D = false;</script>\n'
+        '    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js"></script>\n'
+        '    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css"/>\n'
+        '    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css"/>\n'
+        '</head>\n<body>\n'
+        '    <!-- โครงสร้างฟอร์มตัวกรองเริ่มต้นสำหรับให้ Client-Side JS ย้ายเข้าไปใน #customFilterWrapper -->\n'
+        '    <div class="leaflet-control-layers" style="display:none;">\n'
+        '        <form id="clientLayersForm" class="leaflet-control-layers-list">\n'
+        '            <div id="clientLayersOverlays" class="leaflet-control-layers-overlays"></div>\n'
+        '        </form>\n'
+        '    </div>\n'
+        '    <div class="folium-map" id="map_scada_client"></div>\n'
+        '    <script>\n'
+        '    var map_scada_client = L.map("map_scada_client", { center: [15.2282, 104.8563], crs: L.CRS.EPSG3857, zoom: 8, zoomControl: false, preferCanvas: true });\n'
+        '    var tile_layer_terrain = L.tileLayer("https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}", {"minZoom": 0, "maxZoom": 22, "maxNativeZoom": 22, "noWrap": false, "attribution": "Google", "subdomains": "abc", "detectRetina": false, "tms": false, "opacity": 1}).addTo(map_scada_client);\n'
+        '    var tile_layer_street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {"minZoom": 0, "maxZoom": 22, "maxNativeZoom": 22, "noWrap": false, "attribution": "OpenStreetMap", "subdomains": "abc", "detectRetina": false, "tms": false, "opacity": 1});\n'
+        '    var tile_layer_satellite = L.tileLayer("https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {"minZoom": 0, "maxZoom": 22, "maxNativeZoom": 22, "noWrap": false, "attribution": "Google", "subdomains": "abc", "detectRetina": false, "tms": false, "opacity": 1});\n'
+        '    var tile_layer_hybrid = L.tileLayer("https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", {"minZoom": 0, "maxZoom": 22, "maxNativeZoom": 22, "noWrap": false, "attribution": "Google", "subdomains": "abc", "detectRetina": false, "tms": false, "opacity": 1});\n'
+        '    var tile_layer_esri = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {"minZoom": 0, "maxZoom": 22, "maxNativeZoom": 22, "noWrap": false, "attribution": "Esri", "subdomains": "abc", "detectRetina": false, "tms": false, "opacity": 1});\n'
+        '    </script>\n'
+        + custom_ui_html + '\n</body>\n</html>'
+    )
 
     if write_files:
         try:
@@ -13713,8 +14224,11 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
         except Exception as _e:
             print(f"[ERROR] ไม่สามารถสร้างไฟล์ {DASHBOARD_OUTPUT_FILE} และ {DETAILED_MAP_OUTPUT_FILE} ได้: {_e}")
 
+    if not embed_initial_data:
+        _CLIENT_SIDE_HTML_SHELL_CACHE = rendered_html
+
     return {
-        "version": initial_version,
+        "version": int(time.time()),
         "last_updated": time.time(),
         "overall_summary": overall_summary_dict,
         "dash_all_data": dash_all_data_list,
@@ -13728,8 +14242,31 @@ def build_scada_map_and_data(prefer_local=False, write_files=False):
     }
 
 
+def get_client_side_shell_html(view_mode="map", open_ai=False, embed_data_payload=None):
+    """
+    คืนค่า HTML Shell น้ำหนักเบาสำหรับทำ Client-Side Rendering
+    โดยฝั่ง Browser จะดึง JSON ข้อมูลดิบจาก `/api/map_data` มาประมวลผลและสร้างแผนที่/ตารางเอง
+    """
+    res = build_scada_map_and_data(prefer_local=True, write_files=False, embed_initial_data=bool(embed_data_payload))
+    html_content = res["html"]
+    if view_mode == "dashboard":
+        html_content = html_content.replace(
+            "var dashDemoMode = false;",
+            "window.DEFAULT_START_DASHBOARD = true;\nvar dashDemoMode = false;",
+            1,
+        )
+    if open_ai:
+        html_content = html_content.replace(
+            "var dashDemoMode = false;",
+            "window.DEFAULT_OPEN_AI_MODAL = true;\nvar dashDemoMode = false;",
+            1,
+        )
+    return html_content
+
+
 if __name__ == '__main__':
     build_scada_map_and_data(
         prefer_local=('--offline' in sys.argv or '--use-cache' in sys.argv),
         write_files=True,
+        embed_initial_data=('--embed-data' in sys.argv),
     )
