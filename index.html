@@ -1252,7 +1252,7 @@
       /* Navigate to Target System */
       function navigateToSystem(targetUrl, systemLabel) {
         if (!targetUrl) return;
-        showToast("กำลังเปิด " + systemLabel + " (" + targetUrl + ")...");
+        showToast("กำลังเปิด " + systemLabel);
         setTimeout(function () {
           window.location.assign(targetUrl);
         }, 120);
