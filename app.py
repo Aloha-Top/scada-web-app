@@ -1,6 +1,6 @@
 """
-app.py - ระบบ Web Server, REST API และ Background Scheduler สำหรับระบบแผนที่และแดชบอร์ด SCADA (%AVA)
-ออกแบบมาเพื่อทำงานร่วมกับไฟล์ create_detailed_map.py และรองรับการ Deploy บนแพลตฟอร์ม Render
+app.py - ระบบ Web Server, REST API และ Background Scheduler สำหรับระบบ Web Portal, ระบบจัดซื้อจัดจ้าง และแผนที่/แดชบอร์ด SCADA (%AVA)
+ออกแบบมาเพื่อทำงานร่วมกับไฟล์ index.html, procurement.html, create_detailed_map.py และรองรับการ Deploy บนแพลตฟอร์ม Render
 
 จุดเด่นและการปรับปรุงหลัก:
 1. Web Server & Render Deployment:
@@ -9,9 +9,11 @@ app.py - ระบบ Web Server, REST API และ Background Scheduler สำ
 2. Background Task & In-Memory Cache (ป้องกัน Google Sheets Rate Limit):
    - ใช้ `APScheduler` (`BackgroundScheduler`) ตั้งเวลาดึงข้อมูลจาก Google Sheets และประมวลผลอัตโนมัติทุกๆ 5 นาที (ปรับค่าได้ผ่าน `SCADA_REFRESH_MINUTES`)
    - เก็บผลลัพธ์ทั้งหมดไว้ในตัวแปรหน่วยความจำ (`GLOBAL_SCADA_CACHE`) เพื่อให้ทุก API เรียกใช้ข้อมูลได้ทันทีโดยไม่ต้องยิงตรงไปที่ Google Sheets ทุกครั้งที่มีคนเปิดหน้าเว็บ
-3. API Endpoint สำหรับ Seamless Map & Dashboard Update:
-   - `/api/map_data` (และ `/api/map-data`): คืนค่า JSON ที่ประกอบด้วย `overall_summary` (ยอดรวมทั้งระบบ), พิกัดแผนที่ Lat/Long (`search_data`), ข้อมูลตารางอุปกรณ์ทั้งหมด (`dash_all_data`, `export_data`), และข้อมูลรายงาน (`report_data`)
-   - `/` (รวมถึง `/dashboard` และ `/ai-report`): เสิร์ฟหน้าเว็บหลักที่เชื่อมต่อกับ `/api/map_data` ผ่าน Fetch API เพื่ออัปเดตข้อมูลแบบไม่รีเฟรชหน้า (Seamless Update)
+3. Web Portal & API Endpoints:
+   - `/` (และ `/index.html`, `/portal`): เสิร์ฟหน้า Web Portal หลักของหน่วยงาน (index.html)
+   - `/procurement.html` (และ `/procurement`): เสิร์ฟหน้าระบบบริหารและติดตามงานจัดซื้อจัดจ้าง (procurement.html)
+   - `/map.html` และ `/dashboard.html` (รวมถึง `/map`, `/dashboard`, `/ai-report`): เสิร์ฟหน้าแผนที่และแดชบอร์ด SCADA (%AVA)
+   - `/api/map_data` (และ `/api/map-data`): คืนค่า JSON สำหรับอัปเดตข้อมูลแผนที่และแดชบอร์ดแบบ Seamless Update
 """
 
 import io
@@ -188,7 +190,7 @@ def build_api_map_data_payload():
 
 def render_page_html_from_cache(view_mode="map", open_ai=False):
     """
-    คืนค่า HTML หน้าเว็บหลักจาก In-Memory Cache โดยปรับโหมดการเปิดหน้าเริ่มต้น (แผนที่ / แดชบอร์ด / AI Modal)
+    คืนค่า HTML หน้าเว็บแผนที่/แดชบอร์ด SCADA จาก In-Memory Cache โดยปรับโหมดการเปิดหน้าเริ่มต้น (แผนที่ / แดชบอร์ด / AI Modal)
     ตามพารามิเตอร์ที่ส่งเข้ามา
     """
     snap = get_cached_scada_snapshot()
@@ -300,6 +302,19 @@ class _FallbackFlask:
                 self_req.end_headers()
                 self_req.wfile.write(body)
 
+            def _send_static_file(self_req, filename, content_type):
+                fpath = os.path.join(BASE_DIR, filename)
+                if not os.path.exists(fpath):
+                    self_req.send_response(404)
+                    self_req.end_headers()
+                    return
+                with open(fpath, "rb") as f:
+                    data = f.read()
+                self_req.send_response(200)
+                self_req.send_header("Content-Type", content_type)
+                self_req.end_headers()
+                self_req.wfile.write(data)
+
             def do_GET(self_req):
                 parsed = urlparse(self_req.path)
                 path = parsed.path
@@ -327,10 +342,37 @@ class _FallbackFlask:
                     self_req._send_json(build_api_map_data_payload())
                 elif path == "/api/gemini/status":
                     self_req._send_json(cdm.sync_and_get_session_state())
-                elif path in ("/", "/dashboard", "/ai-report", "/map-data"):
+                elif path in ("/", "/index.html", "/portal"):
+                    if os.path.exists(os.path.join(BASE_DIR, "index.html")):
+                        self_req._send_static_file("index.html", "text/html; charset=utf-8")
+                    else:
+                        self_req.send_response(404)
+                        self_req.end_headers()
+                elif path in ("/procurement", "/procurement.html"):
+                    self_req._send_static_file("procurement.html", "text/html; charset=utf-8")
+                elif path in ("/logo.webp", "/logo.jpg"):
+                    target = path.lstrip("/")
+                    if os.path.exists(os.path.join(BASE_DIR, target)):
+                        mime = "image/webp" if target.endswith(".webp") else "image/jpeg"
+                        self_req._send_static_file(target, mime)
+                    elif os.path.exists(os.path.join(BASE_DIR, "logo.webp")):
+                        self_req._send_static_file("logo.webp", "image/webp")
+                    else:
+                        self_req._send_static_file("logo.jpg", "image/jpeg")
+                elif path in (
+                    "/map",
+                    "/map.html",
+                    "/scada_detailed_map.html",
+                    "/dashboard",
+                    "/dashboard.html",
+                    "/scada_dashboard.html",
+                    "/ai-report",
+                    "/map-data",
+                ):
                     if not get_cached_scada_snapshot()["initialized"]:
                         refresh_scada_data_job(prefer_local=True)
-                    view_mode = "dashboard" if (path == "/dashboard" or qs.get("view", [""])[0] == "dashboard") else "map"
+                    is_dash = path in ("/dashboard", "/dashboard.html", "/scada_dashboard.html") or qs.get("view", [""])[0] == "dashboard"
+                    view_mode = "dashboard" if is_dash else "map"
                     open_ai = (path == "/ai-report") or (qs.get("ai", [""])[0] == "1") or (qs.get("open_ai", [""])[0] == "1")
                     html_txt = render_page_html_from_cache(view_mode=view_mode, open_ai=open_ai)
                     if not html_txt:
@@ -413,19 +455,75 @@ def api_map_data():
 
 
 @app.route("/")
+@app.route("/index.html")
+@app.route("/portal")
+def portal_home():
+    """
+    Route หลักสำหรับเสิร์ฟหน้า Web Portal ของหน่วยงาน (index.html)
+    หากเปิดด้วยพารามิเตอร์ ?view=dashboard หรือ ?ai=1 จะสลับไปเปิดหน้า SCADA ให้ทันที
+    """
+    if request is not None and (
+        request.args.get("view") in ("dashboard", "map")
+        or request.args.get("ai") == "1"
+        or request.args.get("open_ai") == "1"
+    ):
+        return scada_app()
+
+    portal_path = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(portal_path):
+        return send_file(portal_path, mimetype="text/html; charset=utf-8")
+
+    # Fallback ไปยังหน้าแผนที่ SCADA กรณีไม่พบไฟล์ index.html
+    return scada_app()
+
+
+@app.route("/procurement")
+@app.route("/procurement.html")
+def procurement_page():
+    """Route สำหรับเสิร์ฟหน้าระบบบริหารและติดตามงานจัดซื้อจัดจ้าง (procurement.html)"""
+    proc_path = os.path.join(BASE_DIR, "procurement.html")
+    if os.path.exists(proc_path):
+        return send_file(proc_path, mimetype="text/html; charset=utf-8")
+    return "ไม่พบไฟล์ procurement.html", 404
+
+
+@app.route("/logo.webp")
+@app.route("/logo.jpg")
+def serve_logo():
+    """Route สำหรับเสิร์ฟไฟล์โลโก้หน่วยงานบนหน้า Web Portal"""
+    req_file = request.path.lstrip("/")
+    file_path = os.path.join(BASE_DIR, req_file)
+    if os.path.exists(file_path):
+        mime = "image/webp" if req_file.endswith(".webp") else "image/jpeg"
+        return send_file(file_path, mimetype=mime)
+
+    for fallback_name, mime in [("logo.webp", "image/webp"), ("logo.jpg", "image/jpeg")]:
+        fb_path = os.path.join(BASE_DIR, fallback_name)
+        if os.path.exists(fb_path):
+            return send_file(fb_path, mimetype=mime)
+
+    return "ไม่พบไฟล์โลโก้", 404
+
+
+@app.route("/map")
+@app.route("/map.html")
+@app.route("/scada_detailed_map.html")
 @app.route("/dashboard")
+@app.route("/dashboard.html")
+@app.route("/scada_dashboard.html")
 @app.route("/ai-report")
 @app.route("/map-data")
-def index():
+def scada_app():
     """
-    [FEATURE 4] Route หลักสำหรับเสิร์ฟหน้าเว็บแผนที่และแดชบอร์ด SCADA
+    [FEATURE 4] Route สำหรับเสิร์ฟหน้าเว็บแผนที่และแดชบอร์ด SCADA (%AVA)
+    รองรับการคลิกจากหน้า Web Portal (map.html / dashboard.html)
     โดยฝั่ง Frontend จะเรียกใช้ Fetch API (`/api/map_data`) เพื่อดึงข้อมูลมาอัปเดตแบบไม่รีเฟรชหน้า (Seamless Update)
     """
     if not get_cached_scada_snapshot()["initialized"]:
         refresh_scada_data_job(prefer_local=True)
 
     is_dash = (
-        request.path.endswith("/dashboard")
+        request.path in ("/dashboard", "/dashboard.html", "/scada_dashboard.html")
         or request.args.get("view") == "dashboard"
     )
     open_ai = (
