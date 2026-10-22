@@ -120,7 +120,7 @@ def refresh_scada_data_job(prefer_local=False):
     try:
         print(f"[SCHEDULER] เริ่มซิงค์ข้อมูลจาก Google Sheets และประมวลผล (prefer_local={prefer_local})...")
         write_static = (not IS_RENDER_SERVER) or (os.environ.get("SCADA_WRITE_STATIC_HTML") == "1")
-        result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=False)
+        result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=True)
 
         with CACHE_LOCK:
             GLOBAL_SCADA_CACHE.update({

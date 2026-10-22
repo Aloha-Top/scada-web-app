@@ -2234,7 +2234,7 @@ def compute_overall_summary(dash_all_data_list):
 _CLIENT_SIDE_HTML_SHELL_CACHE = None
 
 
-def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initial_data=False):
+def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initial_data=True):
     """
     ฟังก์ชันหลักสำหรับดึงข้อมูลจาก Google Sheets / SQLite, คำนวณค่า overall_summary,
     สร้างแผนที่ Folium พร้อม UI Dashboard และคืนค่า Dictionary สำหรับเก็บใน In-Memory Cache ของ app.py
@@ -7413,10 +7413,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
         </div>
 
         <script>
-        var statusHashMap = {status_hash_json};
-        var expDataCompact = {export_json};
-        var sData = {search_json};
-        var reportRawData = {report_json_data};
+        var statusHashMap = window.statusHashMap = {status_hash_json};
+        var expDataCompact = window.expDataCompact = {export_json};
+        var sData = window.sData = {search_json};
+        var reportRawData = window.reportRawData = {report_json_data};
         var baseLayerNames = {base_layer_names_json};
         var currentHoveredSelector = null;
         var activeHoverElements = [];
@@ -8270,44 +8270,44 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
         // ============================================================================
         // === ระบบบริหารจัดการ Google Gemini API, Dual Department Engineering Prompts (ผบอ. / ผอส.) & Smartest-First Model Fallback ===
         var SYSTEM_PROMPT_PBO_JS =
-            "Act as a Senior Control System & Electrical Engineer สังกัด แผนก ผบอ. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\n" +
-            "ขอบเขตความรับผิดชอบของคุณคือ: ตู้คอนโทรล, อุปกรณ์ภายในตู้, หม้อแปลงแรงดัน (VT) ที่เชื่อมกับระบบ 22kV เพื่อจ่ายไฟให้ตู้, อุปกรณ์สวิตช์เกียร์ (LBS, Recloser), ชุดควบคุมโทรมาตร (FRTU), บอร์ดคอนโทรลภายใน, คอนเวอร์เตอร์ (Converter), และระบบแบตเตอรี่\n" +
-            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\n" +
-            "โครงสร้างการเขียน (บังคับ):\n" +
-            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\n" +
-            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์ใดในความรับผิดชอบของ ผบอ. ชำรุดหรือขัดข้อง\n" +
-            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นหรือซ่อมแซมเปลี่ยนอุปกรณ์ฮาร์ดแวร์อย่างไร\n" +
-            "3. ผลลัพธ์: สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์\n" +
-            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผบอ. จะดำเนินการอะไรต่อไปในเชิงฮาร์ดแวร์/ระบบไฟ\n" +
-            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\n" +
-            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
-            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\n" +
-            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\n" +
-            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางให้ถูกต้อง (เช่น FRTU, Recloser, LBS, VT 22kV, Control Board, Converter)\n" +
-            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
+            "Act as a Senior Control System & Electrical Engineer สังกัด แผนก ผบอ. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\\n" +
+            "ขอบเขตความรับผิดชอบของคุณคือ: ตู้คอนโทรล, อุปกรณ์ภายในตู้, หม้อแปลงแรงดัน (VT) ที่เชื่อมกับระบบ 22kV เพื่อจ่ายไฟให้ตู้, อุปกรณ์สวิตช์เกียร์ (LBS, Recloser), ชุดควบคุมโทรมาตร (FRTU), บอร์ดคอนโทรลภายใน, คอนเวอร์เตอร์ (Converter), และระบบแบตเตอรี่\\n" +
+            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\\n" +
+            "โครงสร้างการเขียน (บังคับ):\\n" +
+            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\\n" +
+            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์ใดในความรับผิดชอบของ ผบอ. ชำรุดหรือขัดข้อง\\n" +
+            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นหรือซ่อมแซมเปลี่ยนอุปกรณ์ฮาร์ดแวร์อย่างไร\\n" +
+            "3. ผลลัพธ์: สถานะปัจจุบันของตู้คอนโทรลและอุปกรณ์สวิตช์เกียร์\\n" +
+            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผบอ. จะดำเนินการอะไรต่อไปในเชิงฮาร์ดแวร์/ระบบไฟ\\n" +
+            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\\n" +
+            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผบอ. จะดำเนินการ... (การดำเนินการต่อไป)'\\n" +
+            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\\n" +
+            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\\n" +
+            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางให้ถูกต้อง (เช่น FRTU, Recloser, LBS, VT 22kV, Control Board, Converter)\\n" +
+            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\\n" +
             "11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผบอ. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท";
 
         var SYSTEM_PROMPT_POS_JS =
-            "Act as a Senior SCADA & Communication Engineer สังกัด แผนก ผอส. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\n" +
-            "ขอบเขตความรับผิดชอบของคุณคือ: ระบบสื่อสารข้อมูล, อุปกรณ์สื่อสาร (Modem, Router), สายสัญญาณสื่อสาร, แผงสัญญาณเสาอากาศ, ซิมการ์ด, สัญญาณเครือข่าย, และการเชื่อมต่อโปรโตคอลระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA\n" +
-            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\n" +
-            "โครงสร้างการเขียน (บังคับ):\n" +
-            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\n" +
-            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์สื่อสารใดในความรับผิดชอบของ ผอส. ขัดข้อง\n" +
-            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นอย่างไร\n" +
-            "3. ผลลัพธ์: สถานะการเชื่อมต่อสื่อสารปัจจุบัน\n" +
-            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผอส. จะดำเนินการอะไรต่อไปในเชิงระบบสื่อสาร\n" +
-            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\n" +
-            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
-            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\n" +
-            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\n" +
-            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางด้านสื่อสารให้ถูกต้อง (เช่น Communication Loss, Antenna, Signal Cable, Modem, Protocol)\n" +
-            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
+            "Act as a Senior SCADA & Communication Engineer สังกัด แผนก ผอส. ของการไฟฟ้าส่วนภูมิภาค (PEA) ควบคู่กับบทบาท 'ผู้ชำนาญการระดับสูงด้านการใช้ภาษาไทยเชิงวิชาการ'\\n" +
+            "ขอบเขตความรับผิดชอบของคุณคือ: ระบบสื่อสารข้อมูล, อุปกรณ์สื่อสาร (Modem, Router), สายสัญญาณสื่อสาร, แผงสัญญาณเสาอากาศ, ซิมการ์ด, สัญญาณเครือข่าย, และการเชื่อมต่อโปรโตคอลระหว่างตู้ FRTU กับศูนย์ควบคุม SCADA\\n" +
+            "หน้าที่ของคุณคือการวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุง และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' ที่มีความเป็นมืออาชีพ สละสลวย และเนื้อหากระชับ\\n" +
+            "โครงสร้างการเขียน (บังคับ):\\n" +
+            "ให้ร้อยเรียงเรื่องราวเป็นประโยคอธิบายยาวแบบต่อเนื่อง (Flowing Narrative) 1 ย่อหน้า โดยต้องครอบคลุม 4 องค์ประกอบหลักตามลำดับนี้เสมอ:\\n" +
+            "1. สาเหตุ: ปัญหาเกิดจากอุปกรณ์สื่อสารใดในความรับผิดชอบของ ผอส. ขัดข้อง\\n" +
+            "2. การดำเนินการ: ได้แก้ไขเบื้องต้นอย่างไร\\n" +
+            "3. ผลลัพธ์: สถานะการเชื่อมต่อสื่อสารปัจจุบัน\\n" +
+            "4. การดำเนินการต่อไป: ระบุอย่างชัดเจนว่า แผนก ผอส. จะดำเนินการอะไรต่อไปในเชิงระบบสื่อสาร\\n" +
+            "5. รูปแบบประโยคหลักที่ต้องยึดถือ (ปรับคำเชื่อมให้สละสลวยได้):\\n" +
+            "6. 'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะดำเนินการ... (การดำเนินการต่อไป)'\\n" +
+            "7. ข้อกำหนดสำคัญระดับสูง (Rules & Constraints):\\n" +
+            "8. ความสมบูรณ์แบบทางภาษา (Linguistic Excellence): ตัดคำฟุ่มเฟือย คำวกวน หรือการใช้คำซ้ำซ้อนทางความหมายออกอย่างเด็ดขาด (เช่น หลีกเลี่ยงการใช้คำว่า 'ทำการ' หรือ 'ดำเนินการ' ซ้ำซ้อนกันหลายรอบ) ประโยคต้องกระชับ อ่านลื่นไหล แต่ยังคงรายละเอียดทางเทคนิคไว้อย่างครบถ้วน\\n" +
+            "9. Technical Terminology: ใช้คำศัพท์เฉพาะทางด้านสื่อสารให้ถูกต้อง (เช่น Communication Loss, Antenna, Signal Cable, Modem, Protocol)\\n" +
+            "10. Professional Formatting: ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\\n" +
             "11. Handling Missing Data: หากข้อมูลไม่ครบ ให้ใช้ตรรกะทางวิศวกรรมประเมินจาก 'สถานะสุดท้าย' และกำหนดแผนการดำเนินงานของ ผอส. ตามมาตรฐาน ห้ามแต่งเติมชื่ออุปกรณ์ที่ไม่มีในบริบท";
 
         var DEFAULT_ENGINEERING_PROMPT_JS =
-            "[System Prompt 1 สำหรับแผนก ผบอ.]\n" + SYSTEM_PROMPT_PBO_JS +
-            "\n\n[System Prompt 2 สำหรับแผนก ผอส.]\n" + SYSTEM_PROMPT_POS_JS;
+            "[System Prompt 1 สำหรับแผนก ผบอ.]\\n" + SYSTEM_PROMPT_PBO_JS +
+            "\\n\\n[System Prompt 2 สำหรับแผนก ผอส.]\\n" + SYSTEM_PROMPT_POS_JS;
 
         function resolveDepartmentForRowJS(respStr, detailStr) {{
             var resp = String(respStr || "").trim();
@@ -9161,7 +9161,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             var deptLabel = dept === "PBO" ? "ผบอ." : "ผอส.";
 
             if (txt.startsWith("เนื่องจาก") && txt.indexOf("ทั้งนี้ ในระยะต่อไปทางแผนก") !== -1) {{
-                return txt.replace(/[✅❌•\-]+/g, " ").replace(/\s+/g, " ").trim();
+                return txt.replace(/[✅❌•\\-]+/g, " ").replace(/\\s+/g, " ").trim();
             }}
 
             if (!txt || txt === "-") {{
@@ -9177,7 +9177,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                 return "เนื่องจากตรวจพบปัญหาการเชื่อมต่อระบบสื่อสารข้อมูลขัดข้องทำให้มีสถานะ " + (stClean || "Offline") + " จึงได้เข้าตรวจสอบเบื้องต้นในส่วนของอุปกรณ์สื่อสาร (Modem/Router) สายสัญญาณ และแผงสัญญาณเสาอากาศ ส่งผลให้ปัจจุบันสถานะการเชื่อมต่อสื่อสารยังคงเป็น " + (stClean || "Offline") + " ทั้งนี้ ในระยะต่อไปทางแผนก ผอส. จะเข้าตรวจสอบแก้ไขระบบสื่อสารและปรับปรุงการเชื่อมต่อโปรโตคอลกับศูนย์ควบคุม SCADA ให้กลับมาออนไลน์โดยเร็ว";
             }}
 
-            var rawTokens = txt.split(/[\n\r;|]+|,\s*|\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\s*ONLINE|อุปกรณ์สื่อสาร\s*ปกติ|No\s*AC)/i)
+            var rawTokens = txt.split(/[\\n\\r;|]+|,\\s*|\\s+(?=เปลี่ยน|ดำเนินการ|ตรวจสอบ|รีเซ็ต|ตั้งค่า|ระบบสื่อสาร\\s*ONLINE|อุปกรณ์สื่อสาร\\s*ปกติ|No\\s*AC)/i)
                 .map(function(s) {{ return s.trim(); }})
                 .filter(Boolean);
 
@@ -9189,9 +9189,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             function addUniqueClause(targetArr, clause) {{
                 var cNorm = normalizeEngineeringClauseJS(clause);
                 if (!cNorm) return;
-                var cKey = cNorm.toLowerCase().replace(/\s+/g, "");
+                var cKey = cNorm.toLowerCase().replace(/\\s+/g, "");
                 for (var i = 0; i < targetArr.length; i++) {{
-                    var exKey = targetArr[i].toLowerCase().replace(/\s+/g, "");
+                    var exKey = targetArr[i].toLowerCase().replace(/\\s+/g, "");
                     if (cKey === exKey || exKey.includes(cKey) || (cKey.includes("ไม่มีไฟเลี้ยงac") && exKey.includes("ไม่มีไฟac"))) return;
                     if (cKey.includes(exKey)) {{
                         targetArr[i] = cNorm;
@@ -9218,7 +9218,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
 
                 if (/^(เปลี่ยน|ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|รีเซ็ต|ตั้งค่า|ซ่อม|ย้ำสาย|ทำความสะอาด|ปรับตั้ง)/i.test(cleanTk)) {{
                     if (cleanTk.includes("ชำรุด") && cleanTk.includes("ทดแทน")) {{
-                        var subParts = cleanTk.split(/(?=Port\s*LAN|อุปกรณ์\s*DAU|เนื่องจาก)/i);
+                        var subParts = cleanTk.split(/(?=Port\\s*LAN|อุปกรณ์\\s*DAU|เนื่องจาก)/i);
                         addUniqueClause(actions, subParts[0]);
                         for (var sIdx = 1; sIdx < subParts.length; sIdx++) {{
                             addUniqueClause(causes, subParts[sIdx]);
@@ -9272,12 +9272,12 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                     : "เข้าตรวจสอบแก้ไขอุปกรณ์สื่อสาร สายสัญญาณ และตั้งค่าพารามิเตอร์โปรโตคอลเชื่อมต่อกับตู้ FRTU เพื่อให้ระบบกลับมาออนไลน์ได้ตามปกติ";
             }}
 
-            var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\s*/, "").trim();
-            var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ|ทำการ)\s*/, "").trim();
-            var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\s*/, "").trim();
+            var causeStr = causes.join(" และ").replace(/^(เนื่องจาก|สาเหตุเกิดจาก|เพราะ)\\s*/, "").trim();
+            var actionStr = actions.join(" และ").replace(/^(จึงได้ดำเนินการ|จึงดำเนินการ|ได้ดำเนินการ|ดำเนินการ|ทำการ)\\s*/, "").trim();
+            var resultStr = results.join(" และ").replace(/^(ส่งผลให้|ผลลัพธ์คือ|ทำให้)\\s*/, "").trim();
 
             var out = "เนื่องจาก" + causeStr + " จึงได้" + actionStr + " ส่งผลให้" + resultStr + " ทั้งนี้ ในระยะต่อไปทางแผนก " + deptLabel + " จะดำเนินการ" + nextStepStr;
-            return out.replace(/[✅❌•\-]+/g, " ").replace(/\s+/g, " ").trim();
+            return out.replace(/[✅❌•\\-]+/g, " ").replace(/\\s+/g, " ").trim();
         }}
 
         function buildDeterministicSummaryJS(rows) {{
@@ -9479,13 +9479,13 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                 var deptSysPrompt = getDepartmentSystemPromptJS(chunkDeptCode, customPrompt);
                 var linesStr = ch.map(function(r, idx) {{
                     return "[" + idx + "] Site: " + r.site + " | สถานที่: " + r.loc + " | รายละเอียดเดิม: " + r.detail + " | ผู้รับผิดชอบ: " + r.resp + " | สถานะสุดท้าย: " + r.status;
-                }}).join("\n");
+                }}).join("\\n");
 
                 var prompt =
-                    "โปรดวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุงในแต่ละรายการต่อไปนี้ และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' แบบต่อเนื่อง 1 ย่อหน้า (Flowing Narrative) ตามโครงสร้างบังคับ:\n" +
-                    "'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก " + chunkDeptLabel + " จะดำเนินการ... (การดำเนินการต่อไป)'\n" +
-                    "ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\n" +
-                    "ตอบเป็น JSON เท่านั้น: {{\"rows\":[{{\"idx\":0,\"clean_detail\":\"เนื่องจาก... จึงได้ดำเนินการ... ส่งผลให้... ทั้งนี้ ในระยะต่อไปทางแผนก " + chunkDeptLabel + " จะดำเนินการ...\"}}],\"chunk_summary\":\"...\"}}\n\n" +
+                    "โปรดวิเคราะห์ข้อมูลดิบจากรายงานการซ่อมบำรุงในแต่ละรายการต่อไปนี้ และเรียบเรียงเป็น 'รายงานเชิงวิศวกรรม' แบบต่อเนื่อง 1 ย่อหน้า (Flowing Narrative) ตามโครงสร้างบังคับ:\\n" +
+                    "'เนื่องจาก... (สาเหตุ) จึงได้ดำเนินการ... (การดำเนินการ) ส่งผลให้... (ผลลัพธ์) ทั้งนี้ ในระยะต่อไปทางแผนก " + chunkDeptLabel + " จะดำเนินการ... (การดำเนินการต่อไป)'\\n" +
+                    "ห้ามใช้สัญลักษณ์ (เช่น ✅, ❌, •, -) หรือการขึ้นบรรทัดใหม่แบบหัวข้อย่อยเด็ดขาด\\n" +
+                    'ตอบเป็น JSON เท่านั้น: {{"rows":[{{"idx":0,"clean_detail":"เนื่องจาก... จึงได้ดำเนินการ... ส่งผลให้... ทั้งนี้ ในระยะต่อไปทางแผนก ' + chunkDeptLabel + ' จะดำเนินการ..."}}],"chunk_summary":"..."}}\\n\\n' +
                     linesStr;
                 try {{
                     var aiRes = await callDirectGeminiRestFromBrowser(prompt, preferredModel, userTypedKey, deptSysPrompt);
@@ -13810,13 +13810,17 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                     return res.json();
                 }})
                 .then(function(data) {{
-                    if (!data || !data.version) return;
-                    if (forceUpdate || data.version !== window.currentScadaDataVersion) {{
+                    if (!data || !Array.isArray(data.dash_all_data)) return;
+                    try {{
+                        sessionStorage.setItem('scada_raw_cache_v1', JSON.stringify(data));
+                    }} catch (e) {{}}
+                    var needsInitialHydration = (!sData || sData.length === 0 || !dashAllCompact || dashAllCompact.length === 0);
+                    if (forceUpdate || needsInitialHydration || data.version !== window.currentScadaDataVersion) {{
                         window.applySeamlessMapData(data);
                     }}
                 }})
                 .catch(function(err) {{
-                    // กรณีรันแบบไฟล์ HTML ออฟไลน์จะข้ามการดึง API โดยไม่แสดง Error รบกวนผู้ใช้
+                    console.warn('fetchSeamlessMapData warning:', err);
                 }});
         }};
 
@@ -14268,5 +14272,5 @@ if __name__ == '__main__':
     build_scada_map_and_data(
         prefer_local=('--offline' in sys.argv or '--use-cache' in sys.argv),
         write_files=True,
-        embed_initial_data=('--embed-data' in sys.argv),
+        embed_initial_data=('--no-embed-data' not in sys.argv),
     )
