@@ -77,8 +77,10 @@ REFRESH_IN_PROGRESS_LOCK = threading.Lock()
 GLOBAL_SCADA_CACHE = {
     "initialized": False,
     "is_updating": False,
+    "remote_synced": False,
     "version": 0,
     "last_updated": 0.0,
+    "last_remote_sync": 0.0,
     "last_error": "",
     "overall_summary": {
         "total": 0,
@@ -123,12 +125,17 @@ def refresh_scada_data_job(prefer_local=False, wait_if_busy=False):
         result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=True)
 
         with CACHE_LOCK:
-            new_ver = int(result["version"])
+            prev_ver = int(GLOBAL_SCADA_CACHE.get("version") or 0)
+            new_ver = max(int(result["version"]), prev_ver + 1)
+            is_remote_ok = bool((not prefer_local) and result.get("remote_synced"))
+            last_remote_ts = result["last_updated"] if is_remote_ok else float(GLOBAL_SCADA_CACHE.get("last_remote_sync") or 0.0)
             GLOBAL_SCADA_CACHE.update({
                 "initialized": True,
                 "is_updating": False,
+                "remote_synced": bool(GLOBAL_SCADA_CACHE.get("remote_synced") or is_remote_ok),
                 "version": new_ver,
                 "last_updated": result["last_updated"],
+                "last_remote_sync": last_remote_ts,
                 "last_error": "",
                 "overall_summary": result["overall_summary"],
                 "dash_all_data": result["dash_all_data"],
@@ -142,7 +149,8 @@ def refresh_scada_data_job(prefer_local=False, wait_if_busy=False):
             })
 
         print(
-            f"[SCHEDULER] อัปเดต In-Memory Cache สำเร็จ! (Version: {result['version']}, "
+            f"[SCHEDULER] อัปเดต In-Memory Cache สำเร็จ! (Version: {new_ver}, "
+            f"remote_synced={is_remote_ok}, "
             f"จำนวนอุปกรณ์ทั้งระบบ: {result['overall_summary'].get('total', 0)} ชุด, "
             f"%AVA รวม: {result['overall_summary'].get('ava_pct', 0.0)}%)"
         )
@@ -166,15 +174,20 @@ def get_cached_scada_snapshot():
 
 def ensure_fresh_scada_cache(blocking=False):
     """
-    ตรวจสอบอายุของข้อมูลใน In-Memory Cache ทุกครั้งที่มี Request เข้ามา (เช่น จาก cron-job.org หรือ Browser)
-    หากข้อมูลมีอายุเกิน REFRESH_INTERVAL_SECONDS (ค่าเริ่มต้น 5 นาที) และยังไม่มีการอัปเดตอยู่
-    จะสั่งรัน refresh_scada_data_job(prefer_local=False) ใน Background Thread ทันทีโดยไม่บล็อก Request
-    แก้ปัญหา Daemon Thread ถูกพักการทำงานบน Render Free Tier หรือกรณีรันหลาย Gunicorn Workers
+    ตรวจสอบอายุของการซิงค์ข้อมูลสดจาก Google Sheets (`last_remote_sync`) ทุกครั้งที่มี Request เข้ามา (เช่น จาก cron-job.org หรือ Browser)
+    - หากยังไม่เคยโหลดข้อมูลตั้งต้น จะทำ Fast Warm-up ก่อน
+    - หากยังไม่เคยซิงค์จาก Google Sheets สำเร็จ (`not remote_synced`) หรืออายุเกิน `REFRESH_INTERVAL_SECONDS` (5 นาที)
+      จะสั่งดึงข้อมูลสดจาก Google Sheets ทันที
     """
     snap = get_cached_scada_snapshot()
     now_ts = time.time()
-    age = now_ts - float(snap.get("last_updated") or 0.0)
-    if (not snap["initialized"]) or (age >= REFRESH_INTERVAL_SECONDS and not snap["is_updating"]):
+    if not snap["initialized"]:
+        refresh_scada_data_job(prefer_local=True)
+        snap = get_cached_scada_snapshot()
+
+    remote_age = now_ts - float(snap.get("last_remote_sync") or 0.0)
+    needs_remote_sync = (not snap.get("remote_synced")) or (remote_age >= REFRESH_INTERVAL_SECONDS)
+    if needs_remote_sync and not snap["is_updating"]:
         if blocking:
             refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
         else:
@@ -195,8 +208,10 @@ def build_api_map_data_payload():
     snap = get_cached_scada_snapshot()
     return {
         "success": snap["initialized"],
+        "remote_synced": snap.get("remote_synced", False),
         "version": snap["version"],
         "last_updated": snap["last_updated"],
+        "last_remote_sync": snap.get("last_remote_sync", 0.0),
         "is_updating": snap["is_updating"],
         "error": snap["last_error"],
         "overall_summary": snap["overall_summary"],
