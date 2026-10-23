@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ระบบสารสนเทศกลาง (Web Portal) — แผนกอุปกรณ์เชื่อมต่อโครงข่ายสื่อสาร (ผอส.) กฟฉ.2</title>
+  <title>ผอส.กฟฉ.2 — แผนกอุปกรณ์เชื่อมต่อโครงข่ายสื่อสาร (ผอส.) กฟฉ.2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@300;400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -840,8 +840,8 @@
   <header class="site-header">
     <div class="header-container">
       <div class="brand-identity">
-        <!-- โลโก้หน่วยงานแบบตายตัว ไม่สามารถกดเปลี่ยนได้ -->
-        <div class="logo-container" title="โลโก้หน่วยงาน การไฟฟ้าส่วนภูมิภาค">
+        <!-- โลโก้หน่วยงานแบบตายตัว เรียกไฟล์ logo.webp -->
+        <div class="logo-container" title="โลโก้หน่วยงาน">
           <img src="logo.webp" alt="โลโก้หน่วยงาน การไฟฟ้าส่วนภูมิภาค" />
         </div>
 
@@ -1169,10 +1169,16 @@
       function showToast(msg) {
         var container = document.getElementById("toastContainer");
         if (!container) return;
+        
+        // ล้างข้อความเก่าออกก่อน (ถ้ามี) เพื่อไม่ให้แสดงซ้อนกัน
+        container.innerHTML = "";
+
         var el = document.createElement("div");
         el.className = "toast-item";
         el.textContent = msg;
         container.appendChild(el);
+
+        // ตั้งเวลาให้จางหายไปเองใน 2.6 วินาที (กรณีอยู่หน้าเดิม ไม่ได้เปลี่ยนหน้า)
         setTimeout(function () {
           el.style.opacity = "0";
           el.style.transition = "opacity 0.25s ease";
@@ -1249,13 +1255,21 @@
         }
       }
 
-      /* Navigate to Target System */
+      /* Navigate to Target System (อัปเดตแก้ปัญหาหน้ากระพริบ Bfcache) */
       function navigateToSystem(targetUrl, systemLabel) {
         if (!targetUrl) return;
-        showToast("กำลังเปิด " + systemLabel + " (" + targetUrl + ")...");
+        showToast("กำลังเปิด " + systemLabel);
+        
+        // ขยายเวลาเล็กน้อยเพื่อให้คนใช้งานมองเห็น Toast ทัน
         setTimeout(function () {
+          // 1. เคลียร์ Toast ทิ้ง "ก่อน" ที่เบราว์เซอร์จะย้ายหน้า
+          // เพื่อไม่ให้มันติดเข้าไปใน Snapshot ของ Bfcache
+          var container = document.getElementById("toastContainer");
+          if (container) container.innerHTML = "";
+
+          // 2. สั่งเปลี่ยนหน้า
           window.location.assign(targetUrl);
-        }, 120);
+        }, 300);
       }
 
       /* Event Listeners for Cards */
@@ -1375,6 +1389,20 @@
           showToast("คืนค่าเริ่มต้นเรียบร้อยแล้ว");
         });
       }
+
+      /* เคลียร์แจ้งเตือนตอนที่กำลังจะเปลี่ยนหน้า (เผื่อกรณีออกจากหน้าด้วยวิธีอื่น) */
+      window.addEventListener("pagehide", function () {
+        var container = document.getElementById("toastContainer");
+        if (container) container.innerHTML = "";
+      });
+
+      /* เผื่อเหนียวไว้ตอนโหลดกลับมาแสดง (Bfcache) */
+      window.addEventListener("pageshow", function (event) {
+        if (event.persisted) {
+          var container = document.getElementById("toastContainer");
+          if (container) container.innerHTML = "";
+        }
+      });
 
       updateUIConfig();
       updateClock();

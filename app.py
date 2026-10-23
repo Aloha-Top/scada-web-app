@@ -123,7 +123,8 @@ def refresh_scada_data_job(prefer_local=False, wait_if_busy=False):
         result = cdm.build_scada_map_and_data(prefer_local=prefer_local, write_files=write_static, embed_initial_data=True)
 
         with CACHE_LOCK:
-            new_ver = int(result["version"])
+            prev_ver = int(GLOBAL_SCADA_CACHE.get("version") or 0)
+            new_ver = max(int(result["version"]), prev_ver + 1)
             GLOBAL_SCADA_CACHE.update({
                 "initialized": True,
                 "is_updating": False,
@@ -162,28 +163,6 @@ def get_cached_scada_snapshot():
     """อ่านข้อมูลล่าสุดจาก In-Memory Cache อย่างปลอดภัย (Thread-safe)"""
     with CACHE_LOCK:
         return dict(GLOBAL_SCADA_CACHE)
-
-
-def ensure_fresh_scada_cache(blocking=False):
-    """
-    ตรวจสอบอายุของข้อมูลใน In-Memory Cache ทุกครั้งที่มี Request เข้ามา (เช่น จาก cron-job.org หรือ Browser)
-    หากข้อมูลมีอายุเกิน REFRESH_INTERVAL_SECONDS (ค่าเริ่มต้น 5 นาที) และยังไม่มีการอัปเดตอยู่
-    จะสั่งรัน refresh_scada_data_job(prefer_local=False) ใน Background Thread ทันทีโดยไม่บล็อก Request
-    แก้ปัญหา Daemon Thread ถูกพักการทำงานบน Render Free Tier หรือกรณีรันหลาย Gunicorn Workers
-    """
-    snap = get_cached_scada_snapshot()
-    now_ts = time.time()
-    age = now_ts - float(snap.get("last_updated") or 0.0)
-    if (not snap["initialized"]) or (age >= REFRESH_INTERVAL_SECONDS and not snap["is_updating"]):
-        if blocking:
-            refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
-        else:
-            threading.Thread(
-                target=refresh_scada_data_job,
-                kwargs={"prefer_local": False, "wait_if_busy": False},
-                daemon=True,
-                name="OnDemandGoogleSheetsSync",
-            ).start()
 
 
 def build_api_map_data_payload():
@@ -350,18 +329,15 @@ class _FallbackFlask:
                 qs = parse_qs(parsed.query)
 
                 if path == "/healthz":
-                    ensure_fresh_scada_cache(blocking=(qs.get("refresh", [""])[0] == "1"))
                     snap = get_cached_scada_snapshot()
                     self_req._send_json({
                         "status": "ok",
                         "initialized": snap["initialized"],
                         "version": snap["version"],
                         "last_updated": snap["last_updated"],
-                        "is_updating": snap["is_updating"],
                         "time": time.time(),
                     })
                 elif path == "/api/version":
-                    ensure_fresh_scada_cache(blocking=(qs.get("refresh", [""])[0] == "1"))
                     snap = get_cached_scada_snapshot()
                     self_req._send_json({
                         "version": snap["version"],
@@ -376,8 +352,6 @@ class _FallbackFlask:
                         refresh_scada_data_job(prefer_local=False)
                     elif qs.get("refresh", [""])[0] == "1":
                         refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
-                    else:
-                        ensure_fresh_scada_cache(blocking=False)
                     self_req._send_json(build_api_map_data_payload())
                 elif path == "/api/gemini/status":
                     self_req._send_json(cdm.sync_and_get_session_state())
@@ -489,8 +463,6 @@ def api_map_data():
             ).start()
         else:
             refresh_scada_data_job(prefer_local=False, wait_if_busy=True)
-    else:
-        ensure_fresh_scada_cache(blocking=False)
 
     payload = build_api_map_data_payload()
     resp = jsonify(payload)
@@ -616,35 +588,26 @@ def scada_app():
 
 @app.route("/api/version", methods=["GET"])
 def api_version():
-    """คืนค่าเลขเวอร์ชันและเวลาอัปเดตล่าสุดของข้อมูลใน In-Memory Cache (รองรับการสกิดจาก cron-job.org)"""
-    force_sync = (request is not None and request.args.get("refresh") == "1")
-    ensure_fresh_scada_cache(blocking=force_sync)
+    """คืนค่าเลขเวอร์ชันและเวลาอัปเดตล่าสุดของข้อมูลใน In-Memory Cache"""
     snap = get_cached_scada_snapshot()
-    resp = jsonify({
+    return jsonify({
         "version": snap["version"],
         "last_updated": snap["last_updated"],
         "is_updating": snap["is_updating"],
     })
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return resp
 
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    """Health Check Endpoint สำหรับ Render และ Cron-job"""
-    force_sync = (request is not None and request.args.get("refresh") == "1")
-    ensure_fresh_scada_cache(blocking=force_sync)
+    """Health Check Endpoint สำหรับ Render"""
     snap = get_cached_scada_snapshot()
-    resp = jsonify({
+    return jsonify({
         "status": "ok",
         "initialized": snap["initialized"],
         "version": snap["version"],
         "last_updated": snap["last_updated"],
-        "is_updating": snap["is_updating"],
         "time": time.time(),
     })
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return resp
 
 
 def save_and_forward_user_report(payload):
