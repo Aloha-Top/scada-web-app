@@ -1808,7 +1808,7 @@ def fetch_remote_dataframe(urls, validator_fn, normalizer_fn=None, sheet_name=No
                     'Pragma': 'no-cache',
                 },
             )
-            with opener.open(req, timeout=20) as resp:
+            with opener.open(req, timeout=8) as resp:
                 raw_bytes = resp.read()
             if b'setResponse(' in raw_bytes[:300] or 'tqx=out:json' in url:
                 df_raw = parse_gviz_json_bytes(raw_bytes)
@@ -2028,11 +2028,23 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
 
     up_map = {}
     up_ordered_sids = []
+    up_col_site = 'Site ID'
+    up_col_state = 'State SCADA'
+    up_col_cmd = 'รหัสสั่งการ'
+    up_col_type = 'ชนิดอุปกรณ์'
+    up_col_pea = 'การไฟฟ้า'
+    up_col_loc = 'สถานที่'
     if df_up is not None and len(df_up) > 0:
-        up_site_col = get_actual_col_name(df_up.columns, ["site id"]) or df_up.columns[0]
+        ucols = list(df_up.columns)
+        up_col_site = get_actual_col_name(ucols, ["site id"]) or (ucols[1] if len(ucols) > 1 else ucols[0])
+        up_col_state = get_actual_col_name(ucols, ["state scada"]) or get_actual_col_name(ucols, ["state"]) or (ucols[3] if len(ucols) > 3 else 'State SCADA')
+        up_col_cmd = get_actual_col_name(ucols, ["รหัสสั่งการ"]) or get_actual_col_name(ucols, ["รหัส"]) or (ucols[0] if len(ucols) > 0 else 'รหัสสั่งการ')
+        up_col_type = get_actual_col_name(ucols, ["ชนิดอุปกรณ์"]) or (ucols[2] if len(ucols) > 2 else 'ชนิดอุปกรณ์')
+        up_col_pea = get_actual_col_name(ucols, ["การไฟฟ้า"]) or (ucols[4] if len(ucols) > 4 else 'การไฟฟ้า')
+        up_col_loc = get_actual_col_name(ucols, ["สถานที่"]) or (ucols[5] if len(ucols) > 5 else 'สถานที่')
         for r in df_up.to_dict('records'):
-            sid = _s(r.get(up_site_col)).upper()
-            if _is_meaningful_cell(sid):
+            sid = _s(r.get(up_col_site)).upper()
+            if _is_meaningful_cell(sid) and sid != 'SITE ID':
                 up_map[sid] = r
                 if sid not in up_ordered_sids:
                     up_ordered_sids.append(sid)
@@ -2078,12 +2090,12 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
         if new_sid not in existing_sids:
             ur = up_map[new_sid]
             new_r = {c: '' for c in cols}
-            new_r[site_col] = _s(ur.get('Site ID')) or new_sid
-            new_r[cmd_col] = _s(ur.get('รหัสสั่งการ')).replace('-OLTC', '')
-            new_r[type_col] = _s(ur.get('ชนิดอุปกรณ์'))
-            new_r[state_col] = _s(ur.get('State SCADA'))
-            new_r[pea_col] = _s(ur.get('การไฟฟ้า'))
-            new_r[loc_col] = _s(ur.get('สถานที่'))
+            new_r[site_col] = _s(ur.get(up_col_site) or ur.get('Site ID')) or new_sid
+            new_r[cmd_col] = _s(ur.get(up_col_cmd) or ur.get('รหัสสั่งการ')).replace('-OLTC', '')
+            new_r[type_col] = _s(ur.get(up_col_type) or ur.get('ชนิดอุปกรณ์'))
+            new_r[state_col] = _s(ur.get(up_col_state) or ur.get('State SCADA'))
+            new_r[pea_col] = _s(ur.get(up_col_pea) or ur.get('การไฟฟ้า'))
+            new_r[loc_col] = _s(ur.get(up_col_loc) or ur.get('สถานที่'))
             new_r['ซ้ำ'] = 'ปกติ'
             new_r['เช็ครหัส'] = 'ตรงกัน'
             records.append(new_r)
@@ -2099,25 +2111,25 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
         # 1. อัปเดตจาก Update State (gid=0) โดยยึด Site ID เป็นเกณฑ์หลักตามสูตร VLOOKUP ในชีต
         if sid in up_map:
             ur = up_map[sid]
-            u_state = _s(ur.get('State SCADA'))
+            u_state = _s(ur.get(up_col_state) if up_col_state in ur else ur.get('State SCADA'))
             if _is_meaningful_cell(u_state):
                 row[state_col] = u_state
 
-            u_cmd = _s(ur.get('รหัสสั่งการ')).replace('-OLTC', '')
+            u_cmd = _s(ur.get(up_col_cmd) if up_col_cmd in ur else ur.get('รหัสสั่งการ')).replace('-OLTC', '')
             if _is_meaningful_cell(u_cmd):
                 row[cmd_col] = u_cmd
 
-            u_type = _s(ur.get('ชนิดอุปกรณ์'))
+            u_type = _s(ur.get(up_col_type) if up_col_type in ur else ur.get('ชนิดอุปกรณ์'))
             if _is_meaningful_cell(u_type):
                 row[type_col] = u_type
 
-            u_pea = _s(ur.get('การไฟฟ้า'))
+            u_pea = _s(ur.get(up_col_pea) if up_col_pea in ur else ur.get('การไฟฟ้า'))
             cur_pea = _s(row.get(pea_col))
             if _is_meaningful_cell(u_pea):
                 if u_pea.upper() != 'UNKNOWN' or not _is_meaningful_cell(cur_pea):
                     row[pea_col] = u_pea
 
-            u_loc = _s(ur.get('สถานที่'))
+            u_loc = _s(ur.get(up_col_loc) if up_col_loc in ur else ur.get('สถานที่'))
             cur_loc = _s(row.get(loc_col))
             if (not _is_meaningful_cell(cur_loc) or cur_loc == '-') and _is_meaningful_cell(u_loc) and u_loc != '-':
                 row[loc_col] = u_loc
@@ -2528,12 +2540,87 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             except Exception:
                 pass
 
-    conn = sqlite3.connect(_work_db_path)
-    df_update = load_update_state_df(conn, prefer_local=_offline_mode)
-    df_rtu = load_rtu_summary_df(conn, prefer_local=_offline_mode)
-    df_check = load_data_check_df(conn, prefer_local=_offline_mode)
-    df = load_sheet1_df(conn, df_update=df_update, df_check=df_check, df_rtu=df_rtu, prefer_local=_offline_mode)
-    conn.close()
+    _remote_fetched = False
+    if not _offline_mode:
+        # ดึงข้อมูลทั้ง 4 ชีตจาก Google Sheets แบบขนาน (Parallel Threads) เพื่อลดเวลารอจากหลักนาทีเหลือ 2-4 วินาที
+        from concurrent.futures import ThreadPoolExecutor
+        def _fetch_s1():
+            return fetch_remote_dataframe(SHEET1_URLS, _is_valid_sheet1_df, normalizer_fn=normalize_sheet1_dataframe, sheet_name='ชีต1')
+        def _fetch_up():
+            return fetch_remote_dataframe(UPDATE_STATE_URLS, _is_valid_update_state_df, normalizer_fn=lambda d: normalize_generic_dataframe(d, ['site id', 'state scada']), sheet_name='Update State')
+        def _fetch_rtu():
+            return fetch_remote_dataframe(RTU_SUMMARY_URLS, _is_valid_rtu_summary_df, normalizer_fn=lambda d: normalize_generic_dataframe(d, ['name', 'commu', 'item', 'ip']), sheet_name='RTU Summary')
+        def _fetch_chk():
+            return fetch_remote_dataframe(DATA_CHECK_URLS, _is_valid_data_check_df, normalizer_fn=lambda d: normalize_generic_dataframe(d, ['site id', 'equipment_id', 'ผู้เข้าแก้ไข']), sheet_name='Data_Check')
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            f_s1 = pool.submit(_fetch_s1)
+            f_up = pool.submit(_fetch_up)
+            f_rtu = pool.submit(_fetch_rtu)
+            f_chk = pool.submit(_fetch_chk)
+            rem_s1 = f_s1.result()
+            rem_up = f_up.result()
+            rem_rtu = f_rtu.result()
+            rem_chk = f_chk.result()
+
+        conn = sqlite3.connect(_work_db_path)
+        if rem_up is not None:
+            _remote_fetched = True
+            try:
+                rem_up.to_sql('update_state', conn, if_exists='replace', index=False)
+            except Exception:
+                pass
+            df_update = rem_up
+        else:
+            df_update = load_update_state_df(conn, prefer_local=True)
+
+        if rem_rtu is not None:
+            _remote_fetched = True
+            try:
+                rem_rtu.to_sql('rtu_summary', conn, if_exists='replace', index=False)
+            except Exception:
+                pass
+            df_rtu = rem_rtu
+        else:
+            df_rtu = load_rtu_summary_df(conn, prefer_local=True)
+
+        if rem_chk is not None:
+            _remote_fetched = True
+            try:
+                rem_chk.to_sql('data_check', conn, if_exists='replace', index=False)
+            except Exception:
+                pass
+            df_check = rem_chk
+        else:
+            df_check = load_data_check_df(conn, prefer_local=True)
+
+        df_base = build_gis_base_dataframe()
+        if rem_s1 is not None:
+            _remote_fetched = True
+            df_base = merge_sheet1_remote_with_base(rem_s1, df_base)
+        else:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scada_stations'")
+                if cur.fetchone():
+                    df_local = pd.read_sql("SELECT * FROM scada_stations", conn)
+                    if _is_valid_sheet1_df(df_local) and len(df_local) >= len(df_base):
+                        df_base = merge_sheet1_remote_with_base(df_local, df_base)
+            except Exception:
+                pass
+        df = enrich_sheet1_with_update_and_check(df_base, df_update, df_check, df_rtu=df_rtu)
+        try:
+            df.to_sql('scada_stations', conn, if_exists='replace', index=False)
+        except Exception:
+            pass
+        conn.close()
+    else:
+        conn = sqlite3.connect(_work_db_path)
+        df_update = load_update_state_df(conn, prefer_local=True)
+        df_rtu = load_rtu_summary_df(conn, prefer_local=True)
+        df_check = load_data_check_df(conn, prefer_local=True)
+        df = load_sheet1_df(conn, df_update=df_update, df_check=df_check, df_rtu=df_rtu, prefer_local=True)
+        conn.close()
     if _use_temp_db and os.path.exists(_work_db_path):
         try:
             shutil.copy2(_work_db_path, DB_PATH)
@@ -2968,6 +3055,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
     global _CLIENT_SIDE_HTML_SHELL_CACHE
     if (not embed_initial_data) and (_CLIENT_SIDE_HTML_SHELL_CACHE is not None) and (not write_files):
         return {
+            "remote_fetched": _remote_fetched,
             "version": int(_data_hash_str, 16),
             "last_updated": time.time(),
             "overall_summary": overall_summary_dict,
@@ -6629,10 +6717,25 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
 
             <div class="dash-container">
                 <div class="dash-toolbar-card">
-                    <div class="dash-controls-bar">
+                    <div class="dash-controls-bar" style="gap:12px;">
                         <p class="dash-ref-plain-text">สถานะอ้างอิง: <strong id="dashStateBasis">State SCADA</strong></p>
+                        <span id="scadaBgSyncStatusBadge" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:4px 10px;border-radius:999px;background:var(--bg-subtle);border:1px solid var(--border-hairline);color:var(--text-secondary);">
+                            <span id="scadaBgSyncDot" style="width:7px;height:7px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+                            <span id="scadaBgSyncText">ซิงค์เบื้องหลังอัตโนมัติพร้อมใช้งาน</span>
+                        </span>
                     </div>
                     <div class="dash-controls-bar">
+                        <div class="dash-ctrl-group" title="ตั้งเวลาซิงค์ข้อมูล Google Sheets แบบเบื้องหลังเพื่อประหยัดโควต้า API และ Render Free Tier">
+                            <label for="scadaSyncIntervalSelect">ความถี่ซิงก์:</label>
+                            <select id="scadaSyncIntervalSelect" class="dash-select" onchange="window.setScadaSyncIntervalMinutes(this.value)">
+                                <option value="5" selected>ทุก 5 นาที (แนะนำ)</option>
+                                <option value="10">ทุก 10 นาที (ประหยัดโควต้า)</option>
+                            </select>
+                        </div>
+                        <button type="button" class="dash-action-btn" id="manualBgSyncBtn" onclick="window.triggerManualBackgroundSync()" title="ดึงข้อมูลล่าสุดจาก Google Sheets ทันทีแบบเบื้องหลังโดยไม่รีเฟรชหน้าเว็บ">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                            <span id="manualBgSyncBtnText">ซิงก์ข้อมูลตอนนี้</span>
+                        </button>
                         <button type="button" class="dash-action-btn btn-report-issue" id="openUserReportModalBtn" onclick="window.openUserReportModal()">
                             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
                             Report ข้อมูลไม่ถูกต้อง
@@ -14433,88 +14536,435 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             }}
         }};
 
-        // รองรับการดึงข้อมูลสดจาก Google Sheets โดยตรงผ่าน GViz JSONP กรณีเปิดแบบไฟล์ HTML Standalone (file://)
-        window.syncLiveGoogleSheetDirectJSONP = function() {{
+        // ============================================================================
+        // === [RENDER FREE TIER & GOOGLE SHEETS BACKGROUND SYNC ENGINE] ===
+        // 1. พักข้อมูลไว้ที่ Client (localStorage + sessionStorage) เพื่อโหลดหน้าเว็บทันทีแม้ Render อยู่ในโหมด Sleep
+        // 2. ซิงก์ข้อมูลกับ Google Sheets แบบเบื้องหลัง (Asynchronous Background Sync) ทั้งผ่าน Server API
+        //    และผ่าน Browser Direct GViz JSONP (แก้ปัญหา Google บล็อก Shared IP ของ Render Free Tier)
+        // 3. ตั้งเวลาซิงก์ทุกๆ 5-10 นาที (ค่าเริ่มต้น 5 นาที) และพักการซิงก์อัตโนมัติเมื่อผู้ใช้ไม่ได้เปิดแท็บหน้าจอ (Page Visibility API)
+        // ============================================================================
+        var SCADA_LOCAL_CACHE_KEY = "scada_ne2_client_cache_v2";
+        var SCADA_SYNC_INTERVAL_KEY = "scada_ne2_sync_interval_min";
+        window.scadaSyncIntervalMinutes = (function() {{
+            try {{
+                var savedMin = parseInt(localStorage.getItem(SCADA_SYNC_INTERVAL_KEY) || "5", 10);
+                if (savedMin === 5 || savedMin === 10) return savedMin;
+            }} catch (e) {{}}
+            return 5;
+        }})();
+        window.scadaLastSyncTimestampMs = 0;
+        window.scadaSyncTimerId = null;
+        window.scadaIsSyncingNow = false;
+
+        function updateScadaSyncBadgeUI(state, textMsg) {{
+            var dotEl = document.getElementById("scadaBgSyncDot");
+            var txtEl = document.getElementById("scadaBgSyncText");
+            var btnEl = document.getElementById("manualBgSyncBtn");
+            var btnTxtEl = document.getElementById("manualBgSyncBtnText");
+            if (dotEl) {{
+                dotEl.style.background = state === "syncing" ? "#f59e0b" : (state === "error" ? "#ef4444" : "#10b981");
+            }}
+            if (txtEl && textMsg) {{
+                txtEl.textContent = textMsg;
+            }}
+            if (btnEl) {{
+                btnEl.disabled = (state === "syncing");
+            }}
+            if (btnTxtEl) {{
+                btnTxtEl.textContent = (state === "syncing") ? "กำลังซิงก์..." : "ซิงก์ข้อมูลตอนนี้";
+            }}
+        }}
+
+        function saveClientScadaCache(payload) {{
+            if (!payload || !Array.isArray(payload.dash_all_data) || payload.dash_all_data.length === 0) return;
+            var cacheEnvelope = {{
+                saved_at_ms: Date.now(),
+                version: payload.version || window.currentScadaDataVersion,
+                overall_summary: payload.overall_summary || window.serverOverallSummary,
+                dash_all_data: payload.dash_all_data,
+                search_data: payload.search_data,
+                export_data: payload.export_data,
+                report_data: payload.report_data,
+                status_hash_map: payload.status_hash_map
+            }};
+            var rawStr = JSON.stringify(cacheEnvelope);
+            try {{ localStorage.setItem(SCADA_LOCAL_CACHE_KEY, rawStr); }} catch (e) {{}}
+            try {{ sessionStorage.setItem("scada_raw_cache_v1", rawStr); }} catch (e) {{}}
+        }}
+
+        function loadClientScadaCache() {{
+            try {{
+                var raw = localStorage.getItem(SCADA_LOCAL_CACHE_KEY) || sessionStorage.getItem("scada_raw_cache_v1");
+                if (!raw) return null;
+                var parsed = JSON.parse(raw);
+                if (parsed && Array.isArray(parsed.dash_all_data) && parsed.dash_all_data.length > 0) {{
+                    return parsed;
+                }}
+            }} catch (e) {{}}
+            return null;
+        }}
+
+        function mapStatusConfigClientJS(statusText) {{
+            var u = String(statusText || "").trim().toUpperCase();
+            if (u.indexOf("TELEMETRY") === 0) return {{ raw_parent: "Telemetry Failure", color: "#ffc107", icon: "wrench" }};
+            if (u.indexOf("CONNECTING") === 0) {{
+                var c = (u.indexOf("ระบบสื่อสาร") !== -1 || (u.indexOf("ผอส.") !== -1 && u.indexOf("ผบอ.") === -1)) ? "#9b59b6" : "#f3943b";
+                var ic = u.indexOf("เคยแก้ไข") !== -1 ? "history" : ((u.indexOf("ผบอ.") !== -1 && u.indexOf("ผอส.") !== -1) ? "user" : ((u.indexOf("ผบอ.") !== -1 || u.indexOf("ผอส.") !== -1) ? "check" : "wrench"));
+                return {{ raw_parent: "Connecting", color: c, icon: ic }};
+            }}
+            if (u.indexOf("OFFLINE") === 0) {{
+                var ic2 = u.indexOf("เคยแก้ไข") !== -1 ? "history" : ((u.indexOf("ผบอ.") !== -1 && u.indexOf("ผอส.") !== -1) ? "user" : ((u.indexOf("ผบอ.") !== -1 || u.indexOf("ผอส.") !== -1) ? "check" : "times"));
+                return {{ raw_parent: "Offline", color: "#d33d2a", icon: ic2 }};
+            }}
+            if (u.indexOf("ONLINE") === 0) {{
+                return {{ raw_parent: "Online", color: "#008000", icon: u.indexOf("เคยแก้ไข") !== -1 ? "history" : "check" }};
+            }}
+            if (u.indexOf("INITIALIZING") === 0) {{
+                var ic3 = u.indexOf("เคยแก้ไข") !== -1 ? "history" : ((u.indexOf("ผบอ.") !== -1 || u.indexOf("ผอส.") !== -1) ? "check" : "wrench");
+                return {{ raw_parent: "Initializing", color: "#82c91e", icon: ic3 }};
+            }}
+            return {{ raw_parent: "สถานะอื่นๆ", color: "#575757", icon: "info-circle" }};
+        }}
+
+        function computeAfterCheckStatusClientJS(dVal, jVal, kVal, nVal) {{
+            var d = String(dVal || "").trim();
+            var j = String(jVal || "").trim();
+            var k = String(kVal || "").trim();
+            var n = String(nVal || "").trim();
+            if (j === "ไม่มีค่า") j = "";
+            if (k === "ไม่มีค่า") k = "";
+            if (n === "ไม่มีค่า" || n === "0" || n === "false") n = "";
+            if (!d || d === "ไม่มีค่า") return "";
+            if (d === "Online") return "Online";
+            var jIsOnline = (j === "✅ ระบบสื่อสาร ONLINE");
+            var kIsNormal = (k === "" || k === "✅อุปกรณ์ FRTU ปกติ");
+            var jNeed = (j !== "" && !jIsOnline);
+            var kNeed = (k !== "" && k !== "✅อุปกรณ์ FRTU ปกติ");
+            if (n && d !== "Online") return d + " ผบอ. เคยแก้ไขแล้วกลับมา Offline";
+            if (jNeed && kNeed) return d + " รอ ผบอ. และ ผอส. เข้าแก้ไข";
+            if (jNeed) return d + " รอ ผอส. เข้าแก้ไข";
+            if (kNeed) return d + " รอ ผบอ. เข้าแก้ไข";
+            if (jIsOnline && kIsNormal) return d + " ระบบสื่อสารเคยแก้ไขแล้ว กลับมา Offline";
+            return d;
+        }}
+
+        // ซิงก์ข้อมูลสดจาก Google Sheets (Update State gid=0) โดยตรงจาก Browser แบบ Asynchronous JSONP
+        // ไม่ติดปัญหา CORS และไม่ติดปัญหา Google บล็อก Shared IP ของ Render Free Tier
+        window.syncLiveGoogleSheetDirectJSONP = function(onDoneCallback) {{
             var sheetId = "{SPREADSHEET_ID}";
-            var cbName = "_scadaGvizCb_" + Date.now();
+            var cbName = "_scadaGvizCb_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+            var scriptEl = null;
+            var timeoutId = setTimeout(function() {{
+                if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+                try {{ delete window[cbName]; }} catch (e) {{}}
+                if (typeof onDoneCallback === "function") onDoneCallback(false);
+            }}, 12000);
+
             window[cbName] = function(resp) {{
+                clearTimeout(timeoutId);
+                if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
                 try {{
-                    if (!resp || !resp.table || !Array.isArray(resp.table.rows)) return;
+                    if (!resp || !resp.table || !Array.isArray(resp.table.rows)) {{
+                        if (typeof onDoneCallback === "function") onDoneCallback(false);
+                        return;
+                    }}
                     var rows = resp.table.rows;
-                    if (rows.length < 100) return;
+                    if (rows.length < 100) {{
+                        if (typeof onDoneCallback === "function") onDoneCallback(false);
+                        return;
+                    }}
+                    var cols = (resp.table.cols || []).map(function(c) {{ return String((c && c.label) || "").trim().toLowerCase(); }});
+                    var idxCmd = 0, idxSid = 1, idxEq = 2, idxSt = 3, idxPea = 4, idxLoc = 5;
+                    cols.forEach(function(lbl, idx) {{
+                        if (lbl.indexOf("site id") !== -1) idxSid = idx;
+                        else if (lbl.indexOf("state") !== -1) idxSt = idx;
+                        else if (lbl.indexOf("รหัส") !== -1) idxCmd = idx;
+                        else if (lbl.indexOf("ชนิด") !== -1) idxEq = idx;
+                        else if (lbl.indexOf("การไฟฟ้า") !== -1) idxPea = idx;
+                        else if (lbl.indexOf("สถานที่") !== -1) idxLoc = idx;
+                    }});
+
                     var upBySid = Object.create(null);
                     rows.forEach(function(r) {{
                         var c = r.c || [];
-                        var cmd = c[0] && (c[0].f || c[0].v) ? String(c[0].f || c[0].v).trim() : "";
-                        var sid = c[1] && (c[1].f || c[1].v) ? String(c[1].f || c[1].v).trim().toUpperCase() : "";
-                        var eq = c[2] && (c[2].f || c[2].v) ? String(c[2].f || c[2].v).trim() : "";
-                        var st = c[3] && (c[3].f || c[3].v) ? String(c[3].f || c[3].v).trim() : "";
-                        var pea = c[4] && (c[4].f || c[4].v) ? String(c[4].f || c[4].v).trim() : "";
-                        var loc = c[5] && (c[5].f || c[5].v) ? String(c[5].f || c[5].v).trim() : "";
-                        if (sid && sid !== "SITE ID") {{
-                            upBySid[sid] = {{ cmd: cmd.replace(/-OLTC$/i, ""), eq: eq, st: st, pea: pea, loc: loc }};
+                        function cellStr(i) {{
+                            if (!c[i]) return "";
+                            var v = c[i].f !== undefined && c[i].f !== null ? c[i].f : c[i].v;
+                            return v !== undefined && v !== null ? String(v).trim() : "";
+                        }}
+                        var sid = cellStr(idxSid).toUpperCase();
+                        var st = cellStr(idxSt);
+                        var cmd = cellStr(idxCmd);
+                        var eq = cellStr(idxEq);
+                        var pea = cellStr(idxPea);
+                        var loc = cellStr(idxLoc);
+                        if (sid && sid !== "SITE ID" && sid !== "#N/A") {{
+                            upBySid[sid] = {{
+                                cmd: cmd.replace(/-OLTC$/i, ""),
+                                eq: eq,
+                                st: st,
+                                pea: pea,
+                                loc: loc
+                            }};
                         }}
                     }});
-                    var changed = false;
-                    dashAllRecords.forEach(function(rec) {{
+
+                    var changedCount = 0;
+                    var afterBySid = Object.create(null);
+
+                    dashAllRecords.forEach(function(rec, rIdx) {{
                         var sid = String(rec["Site ID"] || "").trim().toUpperCase();
                         var u = upBySid[sid];
                         if (!u) return;
-                        if (u.st && rec["State SCADA"] !== u.st) {{
+
+                        if (u.st && u.st !== "#N/A" && rec["State SCADA"] !== u.st) {{
                             rec["State SCADA"] = u.st;
-                            changed = true;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 5) {{
+                                dashAllCompact[rIdx][5] = u.st;
+                            }}
+                            changedCount++;
                         }}
-                        if (u.pea && u.pea !== "Unknown" && rec["การไฟฟ้า"] !== u.pea) {{
+                        if (u.cmd && u.cmd !== "#N/A" && rec["รหัสสั่งการ"] !== u.cmd) {{
+                            rec["รหัสสั่งการ"] = u.cmd;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 3) {{
+                                dashAllCompact[rIdx][3] = u.cmd;
+                            }}
+                            changedCount++;
+                        }}
+                        if (u.eq && u.eq !== "#N/A" && rec["ชนิดอุปกรณ์"] !== u.eq) {{
+                            rec["ชนิดอุปกรณ์"] = u.eq;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 7) {{
+                                dashAllCompact[rIdx][7] = u.eq;
+                            }}
+                            changedCount++;
+                        }}
+                        if (u.pea && u.pea !== "Unknown" && u.pea !== "#N/A" && rec["การไฟฟ้า"] !== u.pea) {{
                             rec["การไฟฟ้า"] = u.pea;
-                            changed = true;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 19) {{
+                                dashAllCompact[rIdx][19] = u.pea;
+                            }}
+                            changedCount++;
                         }}
-                        if (u.loc && rec["สถานที่"] !== u.loc) {{
+                        if (u.loc && u.loc !== "-" && u.loc !== "#N/A" && (!rec["สถานที่"] || rec["สถานที่"] === "ไม่มีค่า" || rec["สถานที่"] === "-")) {{
                             rec["สถานที่"] = u.loc;
-                            changed = true;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 4) {{
+                                dashAllCompact[rIdx][4] = u.loc;
+                            }}
+                            changedCount++;
                         }}
+
+                        // คำนวณ State SCADA (หลังตรวจสอบ) ใหม่ให้สอดคล้องกับสถานะล่าสุด
+                        var newAfter = computeAfterCheckStatusClientJS(
+                            rec["State SCADA"],
+                            rec["รอ ผอส. เข้าแก้ไข"],
+                            rec["รอ ผบอ. เข้าแก้ไข"],
+                            ""
+                        );
+                        if (newAfter && rec["State SCADA (หลังตรวจสอบ)"] !== newAfter) {{
+                            rec["State SCADA (หลังตรวจสอบ)"] = newAfter;
+                            rec["_layerName"] = newAfter;
+                            if (Array.isArray(dashAllCompact[rIdx]) && dashAllCompact[rIdx].length > 6) {{
+                                dashAllCompact[rIdx][0] = newAfter;
+                                dashAllCompact[rIdx][6] = newAfter;
+                            }}
+                            changedCount++;
+                        }}
+                        afterBySid[sid] = {{
+                            state_scada: rec["State SCADA"],
+                            after_state: rec["State SCADA (หลังตรวจสอบ)"] || rec["State SCADA"],
+                            cmd: rec["รหัสสั่งการ"],
+                            pea: rec["การไฟฟ้า"],
+                            loc: rec["สถานที่"]
+                        }};
                     }});
-                    if (changed) {{
+
+                    // อัปเดตข้อมูลหมุดแผนที่ (sData) และตาราง Popup (expData) ให้เปลี่ยนสีและสถานะตรงกันทันที
+                    if (changedCount > 0) {{
+                        if (Array.isArray(sData)) {{
+                            sData.forEach(function(item) {{
+                                var sid = String(item.id || "").trim().toUpperCase();
+                                var info = afterBySid[sid];
+                                if (!info) return;
+                                var actSt = info.after_state || info.state_scada || item.status;
+                                var cfg = mapStatusConfigClientJS(actSt);
+                                item.status = actSt;
+                                item.raw_parent = cfg.raw_parent;
+                                item.color = cfg.color;
+                                item.icon = cfg.icon;
+                                if (!statusHashMap[actSt]) {{
+                                    statusHashMap[actSt] = Math.abs(actSt.split("").reduce(function(a,b){{a=((a<<5)-a)+b.charCodeAt(0);return a&a;}},0)).toString(16).slice(0,8);
+                                }}
+                                if (expData[item.idx]) {{
+                                    expData[item.idx]["_layerName"] = actSt;
+                                    expData[item.idx]["State SCADA"] = info.state_scada || expData[item.idx]["State SCADA"];
+                                    expData[item.idx]["State SCADA (หลังตรวจสอบ)"] = actSt;
+                                }}
+                            }});
+                        }}
                         window.renderScadaDashboard();
+                        if (!document.getElementById("customInfoPanel") || document.getElementById("customInfoPanel").style.display !== "flex") {{
+                            window.rebuildLeafletMapClientSide();
+                        }} else {{
+                            window.updateLeafletMapMarkersSeamless({{ search_data: sData }});
+                        }}
+                        saveClientScadaCache({{
+                            version: Date.now(),
+                            overall_summary: window.serverOverallSummary,
+                            dash_all_data: dashAllCompact,
+                            search_data: sData,
+                            export_data: expDataCompact,
+                            report_data: reportRawData,
+                            status_hash_map: statusHashMap
+                        }});
                     }}
+                    if (typeof onDoneCallback === "function") onDoneCallback(true, changedCount);
                 }} catch (err) {{
                     console.warn("Direct Google Sheet JSONP sync warning:", err);
+                    if (typeof onDoneCallback === "function") onDoneCallback(false);
                 }} finally {{
                     try {{ delete window[cbName]; }} catch (e) {{}}
                 }}
             }};
-            var sc = document.createElement("script");
-            sc.src = "https://docs.google.com/spreadsheets/d/" + sheetId + "/gviz/tq?gid={UPDATE_STATE_GID}&headers=1&tqx=out:json;responseHandler:" + cbName + "&_cb=" + Date.now();
-            sc.async = true;
-            document.body.appendChild(sc);
+            scriptEl = document.createElement("script");
+            scriptEl.src = "https://docs.google.com/spreadsheets/d/" + sheetId + "/gviz/tq?gid={UPDATE_STATE_GID}&headers=1&tqx=out:json;responseHandler:" + cbName + "&_cb=" + Date.now();
+            scriptEl.async = true;
+            scriptEl.onerror = function() {{
+                clearTimeout(timeoutId);
+                if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+                try {{ delete window[cbName]; }} catch (e) {{}}
+                if (typeof onDoneCallback === "function") onDoneCallback(false);
+            }};
+            document.body.appendChild(scriptEl);
         }};
 
-        // หากเปิดหน้าเว็บแบบ Client-Side Shell หรือมีข้อมูลฝังมาแล้ว ให้ตรวจสอบข้อมูลล่าสุดจาก `/api/map_data` เสมอ
-        if (!dashAllCompact || dashAllCompact.length === 0) {{
-            try {{
-                var cachedRawStr = sessionStorage.getItem('scada_raw_cache_v1');
-                if (cachedRawStr) {{
-                    var cachedPayload = JSON.parse(cachedRawStr);
-                    if (cachedPayload && Array.isArray(cachedPayload.dash_all_data) && cachedPayload.dash_all_data.length > 0) {{
-                        window.applySeamlessMapData(cachedPayload);
-                    }}
+        // ฟังก์ชันหลักสำหรับซิงก์ข้อมูลเบื้องหลังแบบ Hybrid (Server Cache + Browser Direct Google Sheets Sync)
+        window.performHybridBackgroundSync = function(forceUpdate) {{
+            if (window.scadaIsSyncingNow) return;
+            window.scadaIsSyncingNow = true;
+            updateScadaSyncBadgeUI("syncing", "กำลังซิงก์ข้อมูลล่าสุดแบบเบื้องหลัง...");
+
+            var finishSyncUI = function(ok, sourceLabel) {{
+                window.scadaIsSyncingNow = false;
+                window.scadaLastSyncTimestampMs = Date.now();
+                var nowStr = new Date().toLocaleTimeString("th-TH", {{ hour: "2-digit", minute: "2-digit", second: "2-digit" }});
+                if (ok) {{
+                    updateScadaSyncBadgeUI("ok", "อัปเดตล่าสุด " + nowStr + " น. (ทุก " + window.scadaSyncIntervalMinutes + " นาที)");
+                }} else {{
+                    updateScadaSyncBadgeUI("ok", "ใช้ข้อมูลแคชล่าสุด • ซิงก์ถัดไปทุก " + window.scadaSyncIntervalMinutes + " นาที");
                 }}
-            }} catch (e) {{}}
-            window.fetchSeamlessMapData(true);
-        }} else {{
+            }};
+
+            // 1) ดึงสถานะล่าสุดจาก Google Sheets (gid=0) โดยตรงผ่าน Browser ก่อนเสมอ เพื่อให้สถานะเปลี่ยนทันทีแม้ Render กำลังตื่นจากโหมด Sleep
+            window.syncLiveGoogleSheetDirectJSONP(function(directOk) {{
+                if (window.location.protocol === "file:") {{
+                    finishSyncUI(directOk, "Google Sheets Direct");
+                    return;
+                }}
+                // 2) ซิงก์ข้อมูลฉบับเต็มจาก `/api/map_data` ของ Render Server แบบ Asynchronous
+                var apiUrl = "/api/map_data?t=" + Date.now() + (forceUpdate ? "&refresh=1" : "");
+                fetch(apiUrl, {{ cache: "no-store" }})
+                    .then(function(res) {{
+                        if (!res.ok) throw new Error("HTTP " + res.status);
+                        return res.json();
+                    }})
+                    .then(function(data) {{
+                        if (data && Array.isArray(data.dash_all_data) && data.dash_all_data.length > 0) {{
+                            var needsHydration = (!sData || sData.length === 0 || !dashAllCompact || dashAllCompact.length === 0);
+                            if (forceUpdate || needsHydration || data.version !== window.currentScadaDataVersion) {{
+                                window.applySeamlessMapData(data);
+                            }}
+                            // ทับด้วยสถานะสดจาก Google Sheets Direct อีกครั้งในกรณีที่ Backend ของ Render ติด Rate Limit
+                            window.syncLiveGoogleSheetDirectJSONP(function() {{
+                                saveClientScadaCache(data);
+                                finishSyncUI(true, "Hybrid Sync");
+                            }});
+                        }} else {{
+                            finishSyncUI(directOk, "Direct Fallback");
+                        }}
+                    }})
+                    .catch(function(err) {{
+                        console.warn("Render API background sync warning (using client cache & direct sync):", err);
+                        finishSyncUI(directOk, "Client Cache");
+                    }});
+            }});
+        }};
+
+        window.fetchSeamlessMapData = function(forceUpdate) {{
+            window.performHybridBackgroundSync(Boolean(forceUpdate));
+        }};
+
+        window.triggerManualBackgroundSync = function() {{
+            window.performHybridBackgroundSync(true);
+        }};
+
+        window.setScadaSyncIntervalMinutes = function(minutesVal) {{
+            var m = parseInt(minutesVal, 10);
+            if (isNaN(m) || m < 5) m = 5;
+            if (m > 10) m = 10;
+            window.scadaSyncIntervalMinutes = m;
+            try {{ localStorage.setItem(SCADA_SYNC_INTERVAL_KEY, String(m)); }} catch (e) {{}}
+            var selEl = document.getElementById("scadaSyncIntervalSelect");
+            if (selEl) selEl.value = String(m);
+            window.restartScadaBackgroundSyncTimer();
+            var nowStr = new Date().toLocaleTimeString("th-TH", {{ hour: "2-digit", minute: "2-digit" }});
+            updateScadaSyncBadgeUI("ok", "ตั้งเวลาซิงก์ทุก " + m + " นาทีแล้ว (" + nowStr + " น.)");
+        }};
+
+        window.restartScadaBackgroundSyncTimer = function() {{
+            if (window.scadaSyncTimerId) {{
+                clearInterval(window.scadaSyncTimerId);
+                window.scadaSyncTimerId = null;
+            }}
+            var intervalMs = window.scadaSyncIntervalMinutes * 60 * 1000;
+            window.scadaSyncTimerId = setInterval(function() {{
+                // ถนอมโควต้า Render Free Tier: ซิงก์เฉพาะเมื่อผู้ใช้เปิดแท็บหน้าเว็บอยู่เท่านั้น
+                if (!document.hidden) {{
+                    window.performHybridBackgroundSync(false);
+                }}
+            }}, intervalMs);
+        }};
+
+        // เมื่อผู้ใช้สลับกลับมาเปิดแท็บหน้าเว็บ หากข้อมูลเก่าเกินรอบเวลา (5-10 นาที) ให้ซิงก์เบื้องหลังทันที
+        document.addEventListener("visibilitychange", function() {{
+            if (!document.hidden) {{
+                var elapsedMs = Date.now() - (window.scadaLastSyncTimestampMs || 0);
+                if (elapsedMs >= window.scadaSyncIntervalMinutes * 60 * 1000) {{
+                    window.performHybridBackgroundSync(false);
+                }}
+            }}
+        }});
+
+        // เริ่มต้นทำงาน: โหลดข้อมูลจาก Client Cache (localStorage/sessionStorage) ทันทีโดยไม่ต้องรอ Render Cold Start
+        (function initScadaClientCacheAndSync() {{
+            var selEl = document.getElementById("scadaSyncIntervalSelect");
+            if (selEl) selEl.value = String(window.scadaSyncIntervalMinutes);
+
+            var cachedData = loadClientScadaCache();
+            if ((!dashAllCompact || dashAllCompact.length === 0) && cachedData) {{
+                window.applySeamlessMapData(cachedData);
+            }} else if (dashAllCompact && dashAllCompact.length > 0) {{
+                // หากมีข้อมูลเริ่มต้น แต่ใน localStorage มีข้อมูลที่ใหม่กว่า ให้นำข้อมูลจาก localStorage มาแสดงก่อนทันที
+                if (cachedData && cachedData.saved_at_ms && cachedData.version && cachedData.version !== window.currentScadaDataVersion) {{
+                    window.applySeamlessMapData(cachedData);
+                }} else {{
+                    saveClientScadaCache({{
+                        version: window.currentScadaDataVersion,
+                        overall_summary: window.serverOverallSummary,
+                        dash_all_data: dashAllCompact,
+                        search_data: sData,
+                        export_data: expDataCompact,
+                        report_data: reportRawData,
+                        status_hash_map: statusHashMap
+                    }});
+                }}
+            }}
+
             setTimeout(function() {{
                 window.rebuildLeafletMapClientSide();
-                if (window.location.protocol !== 'file:') {{
-                    window.fetchSeamlessMapData(false);
-                }} else {{
-                    window.syncLiveGoogleSheetDirectJSONP();
-                }}
-            }}, 50);
-        }}
-
-        // ตั้งเวลาดึงข้อมูลอัปเดตอัตโนมัติผ่าน Fetch API ทุกๆ 60 วินาที (Seamless Background Polling)
-        setInterval(function() {{
-            window.fetchSeamlessMapData(false);
-        }}, 60000);
+                window.performHybridBackgroundSync(false);
+                window.restartScadaBackgroundSyncTimer();
+            }}, 60);
+        }})();
         </script>
     """
 
@@ -14579,6 +15029,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
         _CLIENT_SIDE_HTML_SHELL_CACHE = rendered_html
 
     return {
+        "remote_fetched": _remote_fetched,
         "version": int(_data_hash_str, 16),
         "last_updated": time.time(),
         "overall_summary": overall_summary_dict,
