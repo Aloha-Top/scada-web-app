@@ -2038,7 +2038,7 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
         ucols = list(df_up.columns)
         up_col_site = get_actual_col_name(ucols, ["site id"]) or (ucols[1] if len(ucols) > 1 else ucols[0])
         up_col_state = get_actual_col_name(ucols, ["state scada"]) or get_actual_col_name(ucols, ["state"]) or (ucols[3] if len(ucols) > 3 else 'State SCADA')
-        up_col_cmd = get_actual_col_name(ucols, ["รหัสสั่งการ"]) or get_actual_col_name(ucols, ["รหัส"]) or (ucols[0] if len(ucols) > 0 else 'รหัสสั่งการ')
+        up_col_cmd = get_actual_col_name(ucols, ["รหัสสั่งการ"]) or get_actual_col_name(ucols, ["รหัส"], exclude=["เช็ค"]) or (ucols[0] if len(ucols) > 0 else 'รหัสสั่งการ')
         up_col_type = get_actual_col_name(ucols, ["ชนิดอุปกรณ์"]) or (ucols[2] if len(ucols) > 2 else 'ชนิดอุปกรณ์')
         up_col_pea = get_actual_col_name(ucols, ["การไฟฟ้า"]) or (ucols[4] if len(ucols) > 4 else 'การไฟฟ้า')
         up_col_loc = get_actual_col_name(ucols, ["สถานที่"]) or (ucols[5] if len(ucols) > 5 else 'สถานที่')
@@ -2113,10 +2113,12 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
             ur = up_map[sid]
             u_state = _s(ur.get(up_col_state) if up_col_state in ur else ur.get('State SCADA'))
             if _is_meaningful_cell(u_state):
+                if u_state.upper().startswith('INITIALIZING'):
+                    u_state = 'Initializing'
                 row[state_col] = u_state
 
             u_cmd = _s(ur.get(up_col_cmd) if up_col_cmd in ur else ur.get('รหัสสั่งการ')).replace('-OLTC', '')
-            if _is_meaningful_cell(u_cmd):
+            if _is_meaningful_cell(u_cmd) and u_cmd not in ('ตรงกัน', 'ไม่ตรง', 'ปกติ', 'ซ้ำ'):
                 row[cmd_col] = u_cmd
 
             u_type = _s(ur.get(up_col_type) if up_col_type in ur else ur.get('ชนิดอุปกรณ์'))
@@ -2228,10 +2230,15 @@ def enrich_sheet1_with_update_and_check(df_s1, df_up, df_chk, df_rtu=None):
         j_need = (j_val != '' and not j_is_online)
         k_need = (k_val != '' and k_val != '✅อุปกรณ์ FRTU ปกติ')
 
+        if d_val.upper().startswith('INITIALIZING'):
+            d_val = 'Initializing'
+            row[state_col] = 'Initializing'
         if not d_val:
             e_val = ''
         elif d_val == 'Online':
             e_val = 'Online'
+        elif d_val == 'Initializing':
+            e_val = 'Initializing'
         elif n_val and d_val != 'Online':
             e_val = f'{d_val} ผบอ. เคยแก้ไขแล้วกลับมา Offline'
         elif j_need and k_need:
@@ -2832,6 +2839,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
 
         base_status = str(row.get(state_scada_col)).strip() if state_scada_col and pd.notna(row.get(state_scada_col)) else 'Unknown'
         check_status = str(row.get(state_after_col)).strip() if state_after_col and pd.notna(row.get(state_after_col)) else ''
+        if base_status.upper().startswith('INITIALIZING'):
+            base_status = 'Initializing'
+        if check_status.upper().startswith('INITIALIZING'):
+            check_status = 'Initializing'
 
         active_status = check_status if check_status and check_status.lower() not in ['nan', 'ไม่มีค่า', 'none'] else base_status
         raw_parent, color, icon_name = get_status_config(active_status)
@@ -3018,6 +3029,10 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             continue
         _base_st = str(_r.get(state_scada_col)).strip() if state_scada_col and pd.notna(_r.get(state_scada_col)) else 'Unknown'
         _chk_st = str(_r.get(state_after_col)).strip() if state_after_col and pd.notna(_r.get(state_after_col)) else ''
+        if _base_st.upper().startswith('INITIALIZING'):
+            _base_st = 'Initializing'
+        if _chk_st.upper().startswith('INITIALIZING'):
+            _chk_st = 'Initializing'
         _act_st = _chk_st if _chk_st and _chk_st.lower() not in ['nan', 'ไม่มีค่า', 'none'] else _base_st
         _arr = [_act_st, _sid, _safe_id_by_site.get(_sid, '')]
         for _d_name, _a_col in resolved_display_cols:
@@ -7851,7 +7866,16 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             var commuVal = (row["อุปกรณ์สื่อสาร (Commu.)"] && row["อุปกรณ์สื่อสาร (Commu.)"] !== 'ไม่มีค่า') ? row["อุปกรณ์สื่อสาร (Commu.)"] : '-';
             var itemVal = (row["ประเภทย่อยสื่อสาร (Item)"] && row["ประเภทย่อยสื่อสาร (Item)"] !== 'ไม่มีค่า') ? row["ประเภทย่อยสื่อสาร (Item)"] : '-';
             var wrlVal = (row["เชื่อมกับ WRL Master"] && row["เชื่อมกับ WRL Master"] !== 'ไม่มีค่า') ? row["เชื่อมกับ WRL Master"] : '-';
-            var scadaStateVal = (row["State SCADA"] && row["State SCADA"] !== 'ไม่มีค่า') ? row["State SCADA"] : m.raw_parent;
+            var rawScadaVal = (row["State SCADA"] && row["State SCADA"] !== 'ไม่มีค่า') ? String(row["State SCADA"]).trim() : String(m.raw_parent || '').trim();
+            var scadaStateVal = /^initializing/i.test(rawScadaVal) ? 'Initializing' : rawScadaVal;
+            var afterStatusClean = /^initializing/i.test(String(m.status || '').trim()) ? 'Initializing' : String(m.status || '').trim();
+            var showSubStatus = (
+                afterStatusClean &&
+                afterStatusClean !== scadaStateVal &&
+                scadaStateVal !== 'Initializing' &&
+                scadaStateVal !== 'Online' &&
+                afterStatusClean.indexOf(scadaStateVal) === 0
+            );
 
             var techCardHtml =
                 '<div class="popup-tech-card">' +
@@ -7871,7 +7895,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             return '<div class="custom-popup-card" data-safe-id="' + m.safe_id + '">' +
                 '<div class="popup-header" style="background-color:' + m.color + ';">' +
                     '<div class="popup-icon"><i class="fa fa-' + m.icon + '"></i></div>' +
-                    '<div class="popup-title"><h3>' + m.id + '</h3><span>State SCADA: ' + scadaStateVal + (m.status !== scadaStateVal ? ' (' + m.status + ')' : '') + '</span></div>' +
+                    '<div class="popup-title"><h3>' + m.id + '</h3><span>State SCADA: ' + scadaStateVal + (showSubStatus ? ' (' + afterStatusClean + ')' : '') + '</span></div>' +
                 '</div>' +
                 '<div class="popup-actions">' +
                     '<a href="' + gUrl + '" target="_blank" class="btn-map btn-google">' + GOOGLE_MAP_SVG + ' Google Maps</a>' +
@@ -14125,20 +14149,93 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
         window.currentScadaDataVersion = {initial_version};
         window.serverOverallSummary = {overall_summary_json};
 
+        window.clientMarkerBySafeId = Object.create(null);
+        window.clientMarkerClusterBySafeId = Object.create(null);
+
+        window.createStationDivIcon = function(item, isSelectedGlow) {{
+            var st = item.status || "Unknown";
+            var rp = item.raw_parent || classifyRawParentState(st);
+            if (!statusHashMap[st]) {{
+                statusHashMap[st] = Math.abs(st.split("").reduce(function(a, b) {{ a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }}, 0)).toString(16).slice(0, 8);
+            }}
+            if (!statusHashMap[rp]) {{
+                statusHashMap[rp] = Math.abs(rp.split("").reduce(function(a, b) {{ a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }}, 0)).toString(16).slice(0, 8);
+            }}
+            var safeSt = "s_" + (statusHashMap[st] || "0");
+            var safePr = "p_" + (statusHashMap[rp] || "0");
+            var glowCls = isSelectedGlow ? " selected-pin-glow" : "";
+            var pinHtml =
+                '<div class="map-pin-inner ' + safeSt + ' ' + safePr + ' pin-site-' + item.safe_id + glowCls + '">' +
+                    '<div class="pin-shape" style="background-color:' + item.color + ';"></div>' +
+                    '<i class="fa fa-' + item.icon + ' map-pin-icon"></i>' +
+                '</div>';
+            return L.divIcon({{
+                html: pinHtml,
+                iconSize: [30, 42],
+                iconAnchor: [15, 42],
+                popupAnchor: [0, -42],
+                className: "empty"
+            }});
+        }};
+
         window.updateLeafletMapMarkersSeamless = function(payload) {{
             try {{
-                // อัปเดตสีและสถานะของหมุด (DOM Pin / Cluster) และข้อมูล Popup ในหน่วยความจำโดยไม่เสียตำแหน่งซูมหรือหน้าต่างที่เปิดอยู่
+                // อัปเดตไอคอนหมุดจริงของ Leaflet (marker.setIcon) + ย้าย Cluster Group + อัปเดต DOM ทันทีโดยไม่ต้องกด F5
                 if (!payload || !Array.isArray(payload.search_data)) return;
+                var map = window.map_scada_client;
+                var affectedClusters = new Set();
+
                 payload.search_data.forEach(function(item) {{
+                    var isSelected = (window.currentSelectedSafeId === item.safe_id);
+                    var mk = window.clientMarkerBySafeId ? window.clientMarkerBySafeId[item.safe_id] : null;
+                    if (mk && typeof mk.setIcon === 'function') {{
+                        var newIconObj = window.createStationDivIcon(item, isSelected);
+                        mk.setIcon(newIconObj);
+
+                        // หากสถานะของหมุดเปลี่ยนไป ให้ย้ายหมุดไปยัง MarkerClusterGroup ของสถานะใหม่ด้วย
+                        var oldSt = window.clientMarkerClusterBySafeId[item.safe_id];
+                        var newSt = item.status || "Unknown";
+                        if (oldSt && oldSt !== newSt && window.clientMcGroups) {{
+                            var oldMc = window.clientMcGroups[oldSt];
+                            var newMc = window.clientMcGroups[newSt];
+                            if (oldMc && typeof oldMc.removeLayer === 'function') {{
+                                oldMc.removeLayer(mk);
+                                affectedClusters.add(oldMc);
+                            }}
+                            if (newMc && typeof newMc.addLayer === 'function') {{
+                                newMc.addLayer(mk);
+                                affectedClusters.add(newMc);
+                            }}
+                            window.clientMarkerClusterBySafeId[item.safe_id] = newSt;
+                        }}
+                    }}
+
+                    // อัปเดต DOM element ที่แสดงผลอยู่ในหน้าจอทันที (กรณีหมุดอยู่นอก Cluster)
+                    var st = item.status || "Unknown";
+                    var rp = item.raw_parent || classifyRawParentState(st);
+                    var safeSt = "s_" + (statusHashMap[st] || "0");
+                    var safePr = "p_" + (statusHashMap[rp] || "0");
                     var pinEls = document.querySelectorAll('.pin-site-' + item.safe_id);
                     pinEls.forEach(function(pinEl) {{
+                        pinEl.className = 'map-pin-inner ' + safeSt + ' ' + safePr + ' pin-site-' + item.safe_id + (isSelected ? ' selected-pin-glow' : '');
                         var shape = pinEl.querySelector('.pin-shape');
                         if (shape && item.color) shape.style.backgroundColor = item.color;
                         var iconEl = pinEl.querySelector('.map-pin-icon');
                         if (iconEl && item.icon) iconEl.className = 'fa fa-' + item.icon + ' map-pin-icon';
                     }});
                 }});
-                // หากเปิดหน้าต่างรายละเอียดของสถานีใดค้างไว้ ให้อัปเดตเนื้อหาให้เป็นข้อมูลล่าสุดทันที
+
+                affectedClusters.forEach(function(mc) {{
+                    if (mc && typeof mc.refreshClusters === 'function') {{
+                        try {{ mc.refreshClusters(); }} catch (e) {{}}
+                    }}
+                }});
+
+                if (window.currentSelectedSafeId) {{
+                    highlightPin(window.currentSelectedSafeId);
+                }}
+
+                // หากเปิดหน้าต่างรายละเอียดของสถานีใดค้างไว้ ให้อัปเดตเนื้อหาและสีหัวการ์ดให้เป็นข้อมูลล่าสุดทันที
                 var infoPanel = document.getElementById('customInfoPanel');
                 if (infoPanel && infoPanel.style.display === 'flex' && window.currentSelectedSafeId) {{
                     var newPopupHtml = buildStationPopupHtml(window.currentSelectedSafeId);
@@ -14259,6 +14356,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                 }}
             }});
             window.clientMcGroups = Object.create(null);
+            window.clientMarkerBySafeId = Object.create(null);
+            window.clientMarkerClusterBySafeId = Object.create(null);
 
             var statusCounts = Object.create(null);
             var parentCounts = {{
@@ -14289,29 +14388,18 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             var markersByStatus = Object.create(null);
             sData.forEach(function(item) {{
                 var st = item.status || "Unknown";
-                var rp = item.raw_parent || classifyRawParentState(st);
-                var safeSt = "s_" + (statusHashMap[st] || "0");
-                var safePr = "p_" + (statusHashMap[rp] || "0");
                 if (!markersByStatus[st]) markersByStatus[st] = [];
 
-                var pinHtml =
-                    '<div class="map-pin-inner ' + safeSt + ' ' + safePr + ' pin-site-' + item.safe_id + '">' +
-                        '<div class="pin-shape" style="background-color:' + item.color + ';"></div>' +
-                        '<i class="fa fa-' + item.icon + ' map-pin-icon"></i>' +
-                    '</div>';
-                var iconObj = L.divIcon({{
-                    html: pinHtml,
-                    iconSize: [30, 42],
-                    iconAnchor: [15, 42],
-                    popupAnchor: [0, -42],
-                    className: "empty"
-                }});
+                var isSelected = (window.currentSelectedSafeId === item.safe_id);
+                var iconObj = window.createStationDivIcon(item, isSelected);
                 var popupStub = '<div class="custom-popup-card" data-safe-id="' + item.safe_id + '"></div>';
                 var tipHtml = '<div>' + escapeHtmlSafe(item.id + ' (' + (item.name || '') + ')') + '</div>';
 
                 var mk = L.marker([item.lat, item.lon], {{ icon: iconObj }})
                     .bindPopup(popupStub, {{ maxWidth: "100%", autoPan: false }})
                     .bindTooltip(tipHtml, {{ sticky: true }});
+                window.clientMarkerBySafeId[item.safe_id] = mk;
+                window.clientMarkerClusterBySafeId[item.safe_id] = st;
                 markersByStatus[st].push(mk);
             }});
 
@@ -14647,16 +14735,24 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             return {{ raw_parent: "สถานะอื่นๆ", color: "#575757", icon: "info-circle" }};
         }}
 
+        function sanitizeScadaStatusStringJS(rawVal) {{
+            var s = String(rawVal || "").trim();
+            if (!s || s === "ไม่มีค่า") return "";
+            if (/^initializing/i.test(s)) return "Initializing";
+            return s;
+        }}
+
         function computeAfterCheckStatusClientJS(dVal, jVal, kVal, nVal) {{
-            var d = String(dVal || "").trim();
+            var d = sanitizeScadaStatusStringJS(dVal);
             var j = String(jVal || "").trim();
             var k = String(kVal || "").trim();
             var n = String(nVal || "").trim();
             if (j === "ไม่มีค่า") j = "";
             if (k === "ไม่มีค่า") k = "";
             if (n === "ไม่มีค่า" || n === "0" || n === "false") n = "";
-            if (!d || d === "ไม่มีค่า") return "";
+            if (!d) return "";
             if (d === "Online") return "Online";
+            if (d === "Initializing") return "Initializing";
             var jIsOnline = (j === "✅ ระบบสื่อสาร ONLINE");
             var kIsNormal = (k === "" || k === "✅อุปกรณ์ FRTU ปกติ");
             var jNeed = (j !== "" && !jIsOnline);
@@ -14698,8 +14794,8 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                     var idxCmd = 0, idxSid = 1, idxEq = 2, idxSt = 3, idxPea = 4, idxLoc = 5;
                     cols.forEach(function(lbl, idx) {{
                         if (lbl.indexOf("site id") !== -1) idxSid = idx;
-                        else if (lbl.indexOf("state") !== -1) idxSt = idx;
-                        else if (lbl.indexOf("รหัส") !== -1) idxCmd = idx;
+                        else if (lbl.indexOf("state") !== -1 && lbl.indexOf("หลัง") === -1) idxSt = idx;
+                        else if (lbl.indexOf("รหัสสั่งการ") !== -1 || (lbl.indexOf("รหัส") !== -1 && lbl.indexOf("เช็ค") === -1)) idxCmd = idx;
                         else if (lbl.indexOf("ชนิด") !== -1) idxEq = idx;
                         else if (lbl.indexOf("การไฟฟ้า") !== -1) idxPea = idx;
                         else if (lbl.indexOf("สถานที่") !== -1) idxLoc = idx;
@@ -14714,8 +14810,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                             return v !== undefined && v !== null ? String(v).trim() : "";
                         }}
                         var sid = cellStr(idxSid).toUpperCase();
-                        var st = cellStr(idxSt);
+                        var st = sanitizeScadaStatusStringJS(cellStr(idxSt));
                         var cmd = cellStr(idxCmd);
+                        if (cmd === "ตรงกัน" || cmd === "ไม่ตรง" || cmd === "ปกติ" || cmd === "ซ้ำ") cmd = "";
                         var eq = cellStr(idxEq);
                         var pea = cellStr(idxPea);
                         var loc = cellStr(idxLoc);
@@ -14829,12 +14926,12 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                                 }}
                             }});
                         }}
-                        window.renderScadaDashboard();
+                        // อัปเดตทั้งไอคอนหมุด Leaflet (marker.setIcon) และ Cluster Group ทันทีโดยไม่ต้องรีเฟรชหน้าจอ
+                        window.updateLeafletMapMarkersSeamless({{ search_data: sData }});
                         if (!document.getElementById("customInfoPanel") || document.getElementById("customInfoPanel").style.display !== "flex") {{
                             window.rebuildLeafletMapClientSide();
-                        }} else {{
-                            window.updateLeafletMapMarkersSeamless({{ search_data: sData }});
                         }}
+                        window.renderScadaDashboard();
                         saveClientScadaCache({{
                             version: Date.now(),
                             overall_summary: window.serverOverallSummary,
