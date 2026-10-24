@@ -10663,7 +10663,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
         }}
 
         function normalizeSearchText(value) {{
-            return String(value || '').toLocaleLowerCase('th-TH').normalize('NFC').replace(/\\s+/g, '').replace(/[._\\-\\/():,\\[\\]]/g, '');
+            return String(value || '').toLocaleLowerCase('th-TH').normalize('NFC').replace(/[\u200B-\u200D\uFEFF\s._\-\/():,\[\]"'`~@#$%^&*+=|<>?;!]+/g, '');
         }}
 
         function normalizeToneInsensitive(value) {{
@@ -10760,11 +10760,11 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                     }} else if (qTone.length >= 2 && tf.indexOf(qTone) >= 0) {{
                         s = 70 * fieldWeight;
                     }} else if (qNorm.length >= 3 && hasNearMatch(qNorm, nf)) {{
-                        s = 48 * fieldWeight;
+                        s = 32 * fieldWeight;
                     }} else if (qTone.length >= 3 && hasNearMatch(qTone, tf)) {{
-                        s = 42 * fieldWeight;
+                        s = 28 * fieldWeight;
                     }} else if (qNorm.length >= 4 && isSubsequenceMatch(qNorm, nf)) {{
-                        s = 26 * fieldWeight;
+                        s = 18 * fieldWeight;
                     }}
                     if (s > bestTokenScore) bestTokenScore = s;
                 }}
@@ -10932,8 +10932,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
 
             var scoredMatches = directMatches.length > 0 ? directMatches : fuzzyMatches;
 
-            // เรียงลำดับผลลัพธ์ที่ตรงเงื่อนไขจากน้อยไปมาก (Ascending Order: A-Z, ก-ฮ, รหัสอุปกรณ์)
+            // เรียงลำดับตามคะแนนความตรง (Relevance Score: Exact > Prefix > Substring > Fuzzy) ก่อนเสมอ แล้วจึงเรียง A-Z, ก-ฮ
             scoredMatches.sort(function(a, b) {{
+                if (b.score !== a.score) return b.score - a.score;
                 var cmpId = window.compareAscendingNatural(a.item.id, b.item.id);
                 if (cmpId !== 0) return cmpId;
                 var cmpCode = window.compareAscendingNatural(a.item.code, b.item.code);
@@ -10941,7 +10942,7 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                 return window.compareAscendingNatural(a.item.name, b.item.name);
             }});
 
-            var topMatches = scoredMatches.slice(0, 30);
+            var topMatches = scoredMatches.slice(0, 60);
             if (!topMatches.length) {{ res.style.display = 'none'; return; }}
             res.style.display = 'block';
             var frag = document.createDocumentFragment();
@@ -10977,8 +10978,22 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                     closeReportWorkerDropdown();
                     hideCustomPanel();
                     for (var key in window) {{
-                        if (key.startsWith('map_')) {{
+                        if (key.startsWith('map_') && window[key] && typeof window[key].project === 'function') {{
                             var map = window[key];
+                            if (window.clientMcGroups && m.status && window.clientMcGroups[m.status]) {{
+                                var targetMc = window.clientMcGroups[m.status];
+                                if (!map.hasLayer(targetMc)) {{
+                                    map.addLayer(targetMc);
+                                    var fwEl = document.getElementById('customFilterWrapper');
+                                    if (fwEl) {{
+                                        fwEl.querySelectorAll('input.leaflet-control-layers-selector[type="checkbox"]').forEach(function(cb) {{
+                                            if (cb.getAttribute('data-status-key') === m.status && !cb.checked) {{
+                                                cb.checked = true;
+                                            }}
+                                        }});
+                                    }}
+                                }}
+                            }}
                             var targetZoom = 18;
                             var isMobile = window.innerWidth <= 768;
                             var offsetX = isMobile ? 0 : -180;
@@ -13123,15 +13138,20 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
             if (rawQ) {{
                 var directMatched = [];
                 var fuzzyMatched = [];
+                var scoreByIdx = Object.create(null);
                 matched.forEach(function(r) {{
                     var sc = window.scoreFieldsAgainstSmartQuery([
                         r.site_id, r.cmd, r.loc, r.pea, r.norm_eq, r.prod, r.ip, r.dnp, r.comm_type, r.comm_item, r.comm_ref, r.state_full
                     ], rawQ);
+                    scoreByIdx[r.idx] = sc;
                     if (sc >= 50) directMatched.push(r);
                     else if (sc > 0) fuzzyMatched.push(r);
                 }});
                 matched = directMatched.length > 0 ? directMatched : fuzzyMatched;
                 matched.sort(function(a, b) {{
+                    var sa = scoreByIdx[a.idx] || 0;
+                    var sb = scoreByIdx[b.idx] || 0;
+                    if (sb !== sa) return sb - sa;
                     var c1 = window.compareAscendingNatural(a.site_id, b.site_id);
                     if (c1 !== 0) return c1;
                     var c2 = window.compareAscendingNatural(a.cmd, b.cmd);
@@ -13433,8 +13453,9 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
 
             var scoredList = directList.length > 0 ? directList : fuzzyList;
 
-            // เรียงลำดับผลลัพธ์ที่ตรงเงื่อนไขจากน้อยไปมาก (Ascending Order: A-Z, ก-ฮ, รหัสอุปกรณ์)
+            // เรียงลำดับตามคะแนนความตรง (Relevance Score) ก่อนเสมอ แล้วจึงเรียง A-Z, ก-ฮ
             scoredList.sort(function(a, b) {{
+                if (b.score !== a.score) return b.score - a.score;
                 var c1 = window.compareAscendingNatural(a.sid, b.sid);
                 if (c1 !== 0) return c1;
                 var c2 = window.compareAscendingNatural(a.cmd, b.cmd);
@@ -14794,10 +14815,17 @@ def build_scada_map_and_data(prefer_local=False, write_files=False, embed_initia
                                 if (!statusHashMap[actSt]) {{
                                     statusHashMap[actSt] = Math.abs(actSt.split("").reduce(function(a,b){{a=((a<<5)-a)+b.charCodeAt(0);return a&a;}},0)).toString(16).slice(0,8);
                                 }}
+                                if (info.cmd && info.cmd !== "ไม่มีค่า") item.code = info.cmd;
+                                if (info.loc && info.loc !== "ไม่มีค่า") item.name = info.loc;
+                                if (info.pea && info.pea !== "ไม่มีค่า") item.pea = info.pea;
+                                stationBySafeId[item.safe_id] = item;
                                 if (expData[item.idx]) {{
                                     expData[item.idx]["_layerName"] = actSt;
                                     expData[item.idx]["State SCADA"] = info.state_scada || expData[item.idx]["State SCADA"];
                                     expData[item.idx]["State SCADA (หลังตรวจสอบ)"] = actSt;
+                                    if (info.cmd && info.cmd !== "ไม่มีค่า") expData[item.idx]["รหัสสั่งการ"] = info.cmd;
+                                    if (info.loc && info.loc !== "ไม่มีค่า") expData[item.idx]["สถานที่"] = info.loc;
+                                    if (info.pea && info.pea !== "ไม่มีค่า") expData[item.idx]["การไฟฟ้า"] = info.pea;
                                 }}
                             }});
                         }}
